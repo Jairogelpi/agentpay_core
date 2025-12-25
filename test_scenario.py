@@ -44,7 +44,7 @@ def correr_demo():
 
     # CASO 2: El Desconocido (Debería pausarse)
     print("\n--- CASO 2: EL DESCUBRIMIENTO ---")
-    proveedor_nuevo = "herramienta-super-nueva.com"
+    proveedor_nuevo = "tienda-rara-v2.com"
     exito = simular_intento(proveedor_nuevo, 50.00)
 
     if not exito:
