@@ -1,7 +1,7 @@
 import os
 import uvicorn
 import base64
-import secrets # <--- NUEVO: Para generar claves seguras
+import secrets
 from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -9,7 +9,7 @@ from supabase import create_client
 from engine import UniversalEngine
 from models import TransactionRequest
 
-app = FastAPI(title="AgentPay Universal API", version="3.0.0 (SaaS Edition)")
+app = FastAPI(title="AgentPay Universal API", version="3.1.0 (Fixed)")
 engine = UniversalEngine()
 
 # Conexión DB
@@ -24,7 +24,7 @@ class PaymentPayload(BaseModel):
     description: str
 
 class RegisterPayload(BaseModel):
-    client_name: str # Ej: "Empresa de Pepito"
+    client_name: str
 
 # --- SEGURIDAD ---
 async def get_current_agent(x_api_key: str = Header(..., description="Tu API Key")):
@@ -34,59 +34,43 @@ async def get_current_agent(x_api_key: str = Header(..., description="Tu API Key
     if not key_data['is_active']: raise HTTPException(status_code=403, detail="API Key desactivada.")
     return key_data['agent_id']
 
-# --- ENDPOINT NUEVO: REGISTRO AUTOMÁTICO (ONBOARDING) ---
-# Este endpoint es público. Cualquiera puede llamarlo para crear una cuenta.
+# --- ENDPOINT NUEVO: REGISTRO ---
 @app.post("/v1/register")
 def register_new_client(payload: RegisterPayload):
     print(f"📝 Creando cuenta para: {payload.client_name}")
-    
-    # 1. Generar Identificadores Únicos
-    # Generamos un ID de agente limpio (ej: agent_a1b2c3d4)
     agent_id = f"agent_{secrets.token_hex(4)}"
-    
-    # Generamos la API Key segura (ej: sk_live_x8z9...)
     new_api_key = f"sk_live_{secrets.token_urlsafe(24)}"
     
     try:
-        # 2. Crear la Billetera en Supabase (Saldo inicial $0)
-        # Definimos una whitelist básica por defecto para que no empiecen vacíos
+        # Whitelist por defecto
         default_whitelist = ["openai.com", "anthropic.com"]
         
+        # 1. Crear Billetera
         supabase.table("wallets").insert({
-            "agent_id": agent_id,
-            "balance": 0.00, # Empiezan con 0, tienen que recargar (futuro)
-            "max_transaction_limit": 50.00,
-            "allowed_vendors": default_whitelist
+            "agent_id": agent_id, "balance": 0.00, 
+            "max_transaction_limit": 50.00, "allowed_vendors": default_whitelist
         }).execute()
 
-        # 3. Guardar la API Key
+        # 2. Guardar API Key
         supabase.table("api_keys").insert({
-            "key": new_api_key,
-            "agent_id": agent_id,
-            "is_active": True
+            "key": new_api_key, "agent_id": agent_id, "is_active": True
         }).execute()
 
-        # 4. Devolver las credenciales (SOLO UNA VEZ)
         return {
             "status": "created",
-            "message": "¡Cuenta creada exitosamente! Guarda tu API Key, no podrás verla de nuevo.",
+            "message": "Cuenta creada. Guarda tu API Key.",
             "data": {
                 "client_name": payload.client_name,
                 "agent_id": agent_id,
-                "api_key": new_api_key, # <--- AQUÍ ESTÁ EL TESORO
-                "initial_balance": 0.00
+                "api_key": new_api_key
             }
         }
-
     except Exception as e:
-        # Si algo falla (ej: base de datos caída), devolvemos error
-        raise HTTPException(status_code=500, detail=f"Error al registrar: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error DB: {str(e)}")
 
-
-# --- ENDPOINT DE PAGO (EXISTENTE) ---
+# --- ENDPOINT PAGO ---
 @app.post("/v1/pay")
 def process_payment(payload: PaymentPayload, agent_id: str = Depends(get_current_agent)):
-    # ... (Tu código de pago igual que antes) ...
     req = TransactionRequest(agent_id=agent_id, vendor=payload.vendor, amount=payload.amount, description=payload.description)
     try:
         result = engine.evaluate(req)
@@ -94,11 +78,9 @@ def process_payment(payload: PaymentPayload, agent_id: str = Depends(get_current
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- ENDPOINT ADMIN (EXISTENTE) ---
+# --- ENDPOINT ADMIN ---
 @app.get("/admin/approve")
 def approve_endpoint(token: str):
-    # ... (Tu código de aprobación igual que antes) ...
-    # (Pega aquí la lógica de aprobación que ya tenías)
     try:
         decoded = base64.b64decode(token).decode()
         agent_id, new_vendor = decoded.split(":")
@@ -117,4 +99,3 @@ def approve_endpoint(token: str):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-# Ultima actualizacion: SaaS Edition
