@@ -40,6 +40,40 @@ async def stripe_webhook(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@app.post("/v1/identity/webhook")
+async def brevo_inbound_webhook(request: Request):
+    """
+    Recibe correos de Brevo (Inbound Parsing) y los guarda en SQL.
+    """
+    try:
+        data = await request.json()
+        
+        # Brevo envía los datos del email en este formato
+        sender = data.get("Sender")
+        recipient = data.get("Recipient") # Ej: bot_sk_4e3a...@agentpay-it.com
+        subject = data.get("Subject")
+        body = data.get("TextBody")
+        
+        # Extraemos el agent_id del destinatario
+        # bot_sk_4e3a6eb7c3c2@agentpay-it.com -> sk_4e3a6eb7c3c2
+        agent_id_raw = recipient.split("@")[0]
+        agent_id = agent_id_raw.replace("bot_", "")
+
+        # Insertamos en la tabla 'inbound_emails' que creaste
+        engine.db.table("inbound_emails").insert({
+            "agent_id": agent_id,
+            "sender": sender,
+            "recipient": recipient,
+            "subject": subject,
+            "body_text": body
+        }).execute()
+
+        print(f"📨 Email guardado para agente: {agent_id}")
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"❌ Error en Webhook de Email: {e}")
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
 @app.get("/admin/approve", response_class=HTMLResponse)
 async def approve_endpoint(token: str):
     """El Magic Link que pulsa el humano para aprobar"""

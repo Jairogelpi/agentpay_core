@@ -20,42 +20,31 @@ class IdentityManager:
     
     def __init__(self, db_client=None):
         self.db = db_client
+        self.domain = "agentpay-it.com" # Tu nuevo dominio autenticado
 
     def create_identity(self, agent_id, needs_phone=False):
-        """
-        Crea un email temporal único para este agente.
-        Opcional: Número de teléfono para SMS.
-        """
-        # Para el MVP, generamos un usuario aleatorio
-        # 1secmail refresca dominios, pero usaremos el por defecto
-        email_user = f"agent_{agent_id}_{int(time.time())}"
-        domain = "1secmail.com" 
-        email_address = f"{email_user}@{domain}"
+        """Genera un email corporativo permanente para el agente."""
+        # Email fijo: bot_sk_4e3a... @ agentpay-it.com
+        email_address = f"bot_{agent_id[:12]}@{self.domain}"
         
         identity_data = {
-            "identity_id": email_user, # Usamos el user como ID para recuperar mensajes luego
+            "identity_id": agent_id,
             "email": email_address,
-            "domain": domain
+            "domain": self.domain
         }
 
-        if needs_phone:
-            # Simulación: En producción usaría Twilio/5sim.net
-            identity_data["phone_number"] = f"+120255501{int(time.time()) % 99:02d}"
-
-        # PERSISTENCIA (Para recuperación de sesiones)
+        # Guardamos la relación en Supabase
         if self.db:
             try:
                 self.db.table("identities").insert({
                     "agent_id": agent_id,
-                    "identity_id": email_user,
+                    "identity_id": agent_id,
                     "email": email_address,
-                    "provider": domain,
-                    "created_at": "now()",
-                    "status": "active",
-                    "session_metadata": {} # Inicializamos vacío
+                    "provider": "Brevo-Private",
+                    "status": "active"
                 }).execute()
             except Exception as e:
-                print(f"⚠️ Warning persisting identity: {e}")
+                print(f"⚠️ Error persistiendo identidad: {e}")
 
         return identity_data
 
@@ -122,40 +111,41 @@ class IdentityManager:
         except Exception as e:
             return {"error": str(e)}
 
-    def check_inbox(self, identity_id, domain="1secmail.com"):
+    def check_inbox(self, agent_id):
         """
-        Revisa el buzón y usa GPT-4 para extraer códigos.
+        Consulta TU PROPIA tabla SQL en lugar de 1secmail.
         """
-        # 1. Consultamos la API del proveedor de email
-        url = f"https://www.1secmail.com/api/v1/?action=getMessages&login={identity_id}&domain={domain}"
-        
+        if not self.db:
+            return {"status": "ERROR", "message": "DB not connected"}
+
         try:
-            resp = requests.get(url).json()
-            
-            if not resp:
-                return {"status": "WAITING", "message": "No emails yet"}
-            
-            # 2. Si hay mensajes, leemos el último
-            last_msg_id = resp[0]['id']
-            msg_url = f"https://www.1secmail.com/api/v1/?action=readMessage&login={identity_id}&domain={domain}&id={last_msg_id}"
-            msg_data = requests.get(msg_url).json()
-            
-            body = msg_data.get('textBody', '') or msg_data.get('body', '')
+            # Buscamos el último email recibido para este agente en tu tabla SQL
+            response = self.db.table("inbound_emails") \
+                .select("*") \
+                .eq("agent_id", agent_id) \
+                .order("received_at", desc=True) \
+                .limit(1) \
+                .execute()
+
+            if not response.data:
+                return {"status": "WAITING", "message": "No emails yet in your private database"}
+
+            msg_data = response.data[0]
+            body = msg_data.get('body_text', '')
             subject = msg_data.get('subject', '')
 
-            # 3. MAGIA: Usamos TU IA para extraer el código, no el texto sucio
+            # Usamos la IA para extraer el código del texto real guardado
             extracted_code = self._extract_code_with_ai(subject, body)
 
             return {
                 "status": "RECEIVED",
                 "latest_message": {
-                    "sender": msg_data.get('from'),
+                    "sender": msg_data.get('sender'),
                     "subject": subject,
-                    "otp_code": extracted_code, # <--- ESTO ES LO QUE VALE DINERO
-                    "snippet": body[:100] + "..."
+                    "otp_code": extracted_code,
+                    "received_at": msg_data.get('received_at')
                 }
             }
-            
         except Exception as e:
             return {"status": "ERROR", "detail": str(e)}
 
