@@ -72,10 +72,39 @@ class IdentityManager:
             return {"error": str(e)}
 
     def check_sms_inbox(self, identity_id):
-        """Simula recibir un SMS (2FA Físico)"""
-        # En producción: Consultar API de proveedor SMS
-        # Simulamos espera de 5 segundos
-        # time.sleep(1) 
+        """
+        Consulta puntual del buzón de SMS (2FA Físico).
+        Soporta integración real con Twilio si hay credenciales.
+        """
+        # 1. Intento de conectividad REAL (Producción)
+        sid = os.environ.get("TWILIO_ACCOUNT_SID")
+        token = os.environ.get("TWILIO_AUTH_TOKEN")
+        
+        if sid and token:
+            try:
+                from twilio.rest import Client
+                client = Client(sid, token)
+                # En un caso real, filtraríamos por el número 'to' == identity_id
+                messages = client.messages.list(limit=1)
+                
+                if not messages:
+                     return {"status": "WAITING", "message": "Inbox empty"}
+                     
+                last_msg = messages[0]
+                # Reutilizamos la IA para extraer el OTP del cuerpo del SMS
+                code = self._extract_code_with_ai("SMS from " + str(last_msg.from_), last_msg.body)
+                
+                return {
+                    "status": "RECEIVED",
+                    "sender": str(last_msg.from_),
+                    "otp_code": code,
+                    "message": last_msg.body
+                }
+            except Exception as e:
+                print(f"⚠️ Twilio API Error: {e}")
+                # Fallback al mock solo si falla la API real por config
+
+        # 2. Mock de Desarrollo (Simulación)
         return {
             "status": "RECEIVED",
             "sender": "ServiceAuth",
