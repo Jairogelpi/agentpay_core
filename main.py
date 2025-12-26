@@ -119,6 +119,47 @@ async def stream_payment(req: dict):
     """Streaming Money: Micropagos de alta frecuencia"""
     return streaming_money.stream_packet(req.get("agent_id"), req.get("vendor"), float(req.get("amount", 0)))
 
+@app.post("/v1/fraud/report")
+async def report_fraud(req: dict):
+    """Mente Colmena: Reportar un fraude a la comunidad"""
+    return engine.report_fraud(req.get("agent_id"), req.get("vendor"), req.get("reason"))
+
+@app.post("/v1/agent/settings")
+async def update_settings(req: dict):
+    """Configura Webhook y Email de contacto del agente"""
+    return engine.update_agent_settings(req.get("agent_id"), req.get("webhook_url"), req.get("owner_email"))
+
+@app.post("/v1/agent/status")
+async def agent_status(req: dict):
+    """Panel de Control: Saldo, Crédito y Configuración"""
+    return engine.get_agent_status(req.get("agent_id"))
+
+# --- PROFESSIONAL SDK ENDPOINTS ---
+
+@app.post("/v1/transactions/status")
+async def check_tx_status(req: dict):
+    return engine.check_payment_status(req.get("transaction_id"))
+
+@app.post("/v1/invoices/download")
+async def download_invoice(req: dict):
+    return engine.get_invoice_url(req.get("transaction_id"))
+
+@app.post("/v1/agent/register")
+async def register_agent(req: dict):
+    return engine.register_new_agent(req.get("client_name"))
+
+@app.post("/v1/agent/limits")
+async def update_limits(req: dict):
+    return engine.update_limits(req.get("agent_id"), req.get("max_tx"), req.get("daily_limit"))
+
+@app.post("/v1/agent/notify")
+async def agent_notify(req: dict):
+    return engine.send_alert(req.get("agent_id"), req.get("message"))
+
+@app.post("/v1/transactions/dispute")
+async def dispute_tx(req: dict):
+    return engine.dispute_transaction(req.get("agent_id"), req.get("transaction_id"), req.get("reason"))
+
 if __name__ == "__main__":
     # Para correr local: python main.py
     port = int(os.environ.get("PORT", 8000))
