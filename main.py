@@ -10,7 +10,7 @@ from identity import IdentityManager
 # Inicializamos
 app = FastAPI(title="AgentPay Production Server")
 engine = UniversalEngine()
-identity_mgr = IdentityManager()
+identity_mgr = IdentityManager(engine.db)
 
 # --- RUTAS PÚBLICAS HTTP (HUMANOS & WEBHOOKS) ---
 
@@ -159,6 +159,14 @@ async def agent_notify(req: dict):
 @app.post("/v1/transactions/dispute")
 async def dispute_tx(req: dict):
     return engine.dispute_transaction(req.get("agent_id"), req.get("transaction_id"), req.get("reason"))
+
+@app.post("/v1/transactions/approve")
+async def approve_tx(req: dict):
+    return engine.process_approval(req.get("token"))
+
+@app.post("/v1/identity/list")
+async def list_identities(req: dict):
+    return identity_mgr.get_active_identities(req.get("agent_id"))
 
 if __name__ == "__main__":
     # Para correr local: python main.py

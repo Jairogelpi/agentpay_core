@@ -66,7 +66,15 @@ class AgentPay:
         """Recarga de saldo real (Stripe)."""
         return self._post("/v1/topup/create", {"amount": amount})
 
+    def approve_pending_payment(self, token):
+        """Supervisor: Aprueba manualmente usando un Magic Token."""
+        return self._post("/v1/transactions/approve", {"token": token})
+
     # --- 2. IDENTIDAD (Protocolo Ghost) ---
+
+    def recover_identities(self):
+        """Persistencia: Recupera sesiones de identidad activas."""
+        return self._post("/v1/identity/list", {})
 
     def create_identity(self, needs_phone=False):
         """Crea Email + Proxy (+ SMS simulado)."""

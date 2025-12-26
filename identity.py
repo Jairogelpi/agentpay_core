@@ -18,6 +18,9 @@ class IdentityManager:
     Genera emails temporales y extrae códigos de verificación automáticamente.
     """
     
+    def __init__(self, db_client=None):
+        self.db = db_client
+
     def create_identity(self, agent_id):
         """
         Crea un email temporal único para este agente.
@@ -28,11 +31,35 @@ class IdentityManager:
         domain = "1secmail.com" 
         email_address = f"{email_user}@{domain}"
         
+        # PERSISTENCIA (Para recuperación de sesiones)
+        if self.db:
+            try:
+                self.db.table("identities").insert({
+                    "agent_id": agent_id,
+                    "identity_id": email_user,
+                    "email": email_address,
+                    "provider": domain,
+                    "created_at": "now()",
+                    "status": "active"
+                }).execute()
+            except Exception as e:
+                print(f"⚠️ Warning persisting identity: {e}")
+
         return {
             "identity_id": email_user, # Usamos el user como ID para recuperar mensajes luego
             "email": email_address,
             "domain": domain
         }
+
+    def get_active_identities(self, agent_id):
+        """Recupera sesiones anteriores (Identity Recovery)"""
+        if not self.db:
+            return []
+        try:
+            resp = self.db.table("identities").select("*").eq("agent_id", agent_id).execute()
+            return resp.data
+        except Exception as e:
+            return {"error": str(e)}
 
     def check_inbox(self, identity_id, domain="1secmail.com"):
         """
