@@ -21,9 +21,10 @@ class IdentityManager:
     def __init__(self, db_client=None):
         self.db = db_client
 
-    def create_identity(self, agent_id):
+    def create_identity(self, agent_id, needs_phone=False):
         """
         Crea un email temporal único para este agente.
+        Opcional: Número de teléfono para SMS.
         """
         # Para el MVP, generamos un usuario aleatorio
         # 1secmail refresca dominios, pero usaremos el por defecto
@@ -31,6 +32,16 @@ class IdentityManager:
         domain = "1secmail.com" 
         email_address = f"{email_user}@{domain}"
         
+        identity_data = {
+            "identity_id": email_user, # Usamos el user como ID para recuperar mensajes luego
+            "email": email_address,
+            "domain": domain
+        }
+
+        if needs_phone:
+            # Simulación: En producción usaría Twilio/5sim.net
+            identity_data["phone_number"] = f"+120255501{int(time.time()) % 99:02d}"
+
         # PERSISTENCIA (Para recuperación de sesiones)
         if self.db:
             try:
@@ -45,10 +56,18 @@ class IdentityManager:
             except Exception as e:
                 print(f"⚠️ Warning persisting identity: {e}")
 
+        return identity_data
+
+    def check_sms_inbox(self, identity_id):
+        """Simula recibir un SMS (2FA Físico)"""
+        # En producción: Consultar API de proveedor SMS
+        # Simulamos espera de 5 segundos
+        # time.sleep(1) 
         return {
-            "identity_id": email_user, # Usamos el user como ID para recuperar mensajes luego
-            "email": email_address,
-            "domain": domain
+            "status": "RECEIVED",
+            "sender": "ServiceAuth",
+            "otp_code": str(int(time.time()) % 899999 + 100000), 
+            "message": "Your verification code is ..."
         }
 
     def get_active_identities(self, agent_id):

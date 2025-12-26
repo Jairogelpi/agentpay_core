@@ -76,11 +76,15 @@ async def pay(req: dict):
 
 @app.post("/v1/identity/create")
 async def create_id(req: dict):
-    return identity_mgr.create_identity(req.get("agent_id"))
+    return identity_mgr.create_identity(req.get("agent_id"), req.get("needs_phone", False))
 
 @app.get("/v1/identity/{identity_id}/check")
 async def check_id(identity_id: str):
     return identity_mgr.check_inbox(identity_id)
+
+@app.get("/v1/identity/{identity_id}/sms")
+async def check_sms(identity_id: str):
+    return identity_mgr.check_sms_inbox(identity_id)
 
 @app.post("/v1/topup/create")
 async def create_topup_link(req: dict):

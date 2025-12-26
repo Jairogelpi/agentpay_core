@@ -131,3 +131,21 @@ class AgentPay:
     def report_fraud(self, vendor, reason):
         """Mente Colmena: Reportar vendedor malicioso."""
         return self._post("/v1/fraud/report", {"vendor": vendor, "reason": reason})
+
+    # --- ALIASES & EXTRAS (USER REQUESTED) ---
+
+    def set_webhook_url(self, url):
+        """Alias para registrar webhook."""
+        return self.configure(webhook_url=url)
+
+    def get_invoice(self, transaction_id):
+        """Alias para recuperar factura."""
+        return self.download_invoice(transaction_id)
+
+    def check_credit_status(self):
+        """Consulta elegibilidad de crédito."""
+        return self._post("/v1/credit/score", {})
+
+    def dispute_transaction(self, transaction_id, reason):
+        """Alias para disputar transacción."""
+        return self.report_issue(transaction_id, reason)
