@@ -97,6 +97,28 @@ async def solve_captcha(req: dict):
     """Resuelve un captcha visual"""
     return identity_mgr.solve_captcha(req.get("image_url"))
 
+# --- VISION 2.0 ENDPOINTS ---
+from legal import LegalWrapper
+from streaming import StreamingMoney
+
+legal_wrapper = LegalWrapper()
+streaming_money = StreamingMoney(engine.db)
+
+@app.post("/v1/credit/score")
+async def get_credit_score(req: dict):
+    """Consulta el Bureau de Crédito de IA"""
+    return engine.credit_bureau.check_credit_eligibility(req.get("agent_id"))
+
+@app.post("/v1/legal/sign")
+async def sign_contract(req: dict):
+    """Wrapper Legal: Firma contratos en nombre del agente"""
+    return legal_wrapper.sign_contract(req.get("agent_id"), req.get("contract_hash"))
+
+@app.post("/v1/streaming/pack")
+async def stream_payment(req: dict):
+    """Streaming Money: Micropagos de alta frecuencia"""
+    return streaming_money.stream_packet(req.get("agent_id"), req.get("vendor"), float(req.get("amount", 0)))
+
 if __name__ == "__main__":
     # Para correr local: python main.py
     port = int(os.environ.get("PORT", 8000))

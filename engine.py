@@ -10,6 +10,7 @@ from ai_guard import audit_transaction
 from security_utils import check_domain_age
 from notifications import send_approval_email
 from webhooks import send_webhook
+from credit import CreditBureau
 
 load_dotenv()
 
@@ -26,6 +27,7 @@ class UniversalEngine:
             raise ValueError("❌ FALTAN CREDENCIALES: Revisa SUPABASE_URL, SUPABASE_KEY y STRIPE_SECRET_KEY en .env")
             
         self.db: Client = create_client(url, key)
+        self.credit_bureau = CreditBureau(self.db)
         
         # Memoria volátil para Circuit Breaker (En prod usar Redis)
         self.transaction_velocity = {} 
@@ -223,10 +225,23 @@ class UniversalEngine:
         total_deducted = request.amount + fee
         
         # Chequeo de saldo real (incluyendo comisión)
-        if total_deducted > float(wallet['balance']):
-             return self._result(False, "REJECTED", f"Fondos insuficientes (Monto ${request.amount} + Fee ${fee})", request)
+        current_balance = float(wallet['balance'])
+        
+        if total_deducted > current_balance:
+            # --- INTENTO DE CRÉDITO (VISION 2.0) ---
+            credit_check = self.credit_bureau.check_credit_eligibility(request.agent_id)
+            
+            if credit_check['eligible']:
+                max_power = current_balance + credit_check['credit_limit']
+                if total_deducted <= max_power:
+                    print(f"💳 [CREDIT BUREAU] Saldo insuficiente, activando Línea de Crédito {credit_check['tier']}...")
+                    # Permitimos continuar (el saldo quedará negativo)
+                else:
+                     return self._result(False, "REJECTED", f"Fondos insuficientes (Incluso con crédito de ${credit_check['credit_limit']})", request)
+            else:
+                return self._result(False, "REJECTED", f"Fondos insuficientes (Monto ${request.amount} + Fee ${fee})", request)
 
-        # ... (Whitelist and AI checks happen here, assuming they passed) ...
+        # ... (Whitelist and AI checks happen here) ...
         # (Note: Logic flow in existing code puts funds check earlier. Ideally we move funds check here or update it. 
         # For minimal diff, I will update the existing funds check logic earlier and then do the deduction here).
         
