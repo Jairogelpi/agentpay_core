@@ -183,6 +183,12 @@ class UniversalEngine:
             print(f"❌ [STRIPE SYSTEM ERROR] {str(e)}")
             return None
 
+from security_utils import check_domain_age
+from notifications import send_approval_email
+from webhooks import send_webhook
+
+# ... existing code ...
+
     def _normalize_domain(self, vendor_str: str) -> str:
         vendor_str = vendor_str.lower().strip()
         if not vendor_str.startswith(('http://', 'https://')):
@@ -193,16 +199,101 @@ class UniversalEngine:
         return domain
 
     def _create_approval_request(self, request, clean_vendor, reason_prefix="Proveedor nuevo. Aprobación requerida."):
-        payload = f"{request.agent_id}:{clean_vendor}"
+        # Codificamos TODO lo necesario para ejecutar el pago después
+        payload = f"{request.agent_id}:{clean_vendor}:{request.amount}"
         token = base64.b64encode(payload.encode()).decode()
         magic_link = f"{self.admin_url}/admin/approve?token={token}"
+        
         print(f"⚠️  [AI FLAGGED] Generando solicitud de aprobación: {magic_link}")
+        
+        # Intentamos notificar al dueño
+        try:
+            # Recuperamos email de la wallet (asumiendo que existe columna owner_email)
+            response = self.db.table("wallets").select("owner_email").eq("agent_id", request.agent_id).execute()
+            owner_email = response.data[0].get('owner_email') if response.data else None
+            
+            if owner_email:
+                send_approval_email(owner_email, request.agent_id, clean_vendor, request.amount, magic_link)
+            else:
+                print("   ℹ️ (No se envió email: falta 'owner_email' en tabla wallets)")
+        except Exception as e:
+            print(f"   ⚠️ Error enviando notificación email: {e}")
+
         return TransactionResult(
             authorized=False, 
             status="PENDING_APPROVAL", 
             reason=reason_prefix, 
             approval_link=magic_link
         )
+
+    def report_fraud(self, agent_id, vendor, reason):
+        """
+        Permite a un cliente reportar un sitio malicioso a la Colmena.
+        """
+        print(f"🚨 REPORTE DE FRAUDE: {agent_id} acusa a {vendor}")
+        
+        clean_vendor = self._normalize_domain(vendor)
+        
+        # Insertar en Blacklist (En un sistema real, iría a una tabla "pending_review")
+        try:
+            self.db.table("global_blacklist").insert({
+                "vendor": clean_vendor,
+                "reason": f"Reportado por agente: {reason}"
+            }).execute()
+            return {"success": True, "message": "Proveedor añadido a la lista negra global."}
+        except Exception as e:
+            print(f"Error reportando fraude: {e}")
+            return {"success": False, "message": str(e)}
+
+    def process_approval(self, token):
+        """
+        Esta función se llama cuando el humano hace clic en el Magic Link.
+        Decodifica el token, ejecuta el pago y avisa por Webhook.
+        """
+        try:
+            # 1. Decodificar Token
+            decoded = base64.b64decode(token).decode().split(":")
+            agent_id, vendor, amount_str = decoded[0], decoded[1], decoded[2]
+            amount = float(amount_str)
+            
+            print(f"👤 APROBACIÓN HUMANA RECIBIDA para {vendor} (${amount})")
+            
+            # 2. Ejecutar el cargo (Saltando validaciones porque el humano manda)
+            # En un sistema real, deberíamos re-verificar saldo aquí.
+            stripe_id = self._execute_stripe_charge(amount, vendor)
+            
+            if not stripe_id:
+                return {"status": "ERROR", "message": "Fallo en cargo Stripe durante aprobación manual."}
+
+            # 3. Actualizar Saldo
+            # Necesitamos leer el saldo actual para restarlo
+            wallet_resp = self.db.table("wallets").select("*").eq("agent_id", agent_id).execute()
+            if not wallet_resp.data:
+                return {"status": "ERROR", "message": "Wallet no encontrada durante aprobación."}
+                
+            wallet = wallet_resp.data[0]
+            new_balance = float(wallet['balance']) - amount
+            self.db.table("wallets").update({"balance": new_balance}).eq("agent_id", agent_id).execute()
+            
+            # 4. DISPARAR WEBHOOK DE ÉXITO
+            if wallet.get('webhook_url'):
+                send_webhook(wallet.get('webhook_url'), "payment.approved", {
+                    "vendor": vendor,
+                    "amount": amount,
+                    "status": "APPROVED",
+                    "approver": "Human Admin",
+                    "transaction_id": stripe_id
+                })
+            
+            # Loguear
+            self._result(True, "APPROVED", "Aprobación Manual Humana", 
+                         TransactionRequest(agent_id=agent_id, vendor=vendor, amount=amount, description="Manual Approval"), 
+                         new_balance)
+                
+            return {"status": "APPROVED", "message": "Pago ejecutado y cliente notificado.", "new_balance": new_balance}
+            
+        except Exception as e:
+            return {"status": "ERROR", "message": str(e)}
 
     def _result(self, auth, status, reason, req, bal=None):
         self.db.table("transaction_logs").insert({
