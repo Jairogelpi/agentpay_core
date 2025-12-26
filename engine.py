@@ -8,7 +8,21 @@ from models import TransactionRequest, TransactionResult
 from ai_guard import audit_transaction
 from security_utils import check_domain_age
 
-# ... imports ...
+load_dotenv()
+
+# Configuración inicial de Stripe
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+class UniversalEngine:
+    def __init__(self):
+        url = os.environ.get("SUPABASE_URL")
+        key = os.environ.get("SUPABASE_KEY")
+        self.admin_url = os.environ.get("ADMIN_API_URL", "http://localhost:8000")
+        
+        if not url or not key or not stripe.api_key:
+            raise ValueError("❌ FALTAN CREDENCIALES: Revisa SUPABASE_URL, SUPABASE_KEY y STRIPE_SECRET_KEY en .env")
+            
+        self.db: Client = create_client(url, key)
 
     def evaluate(self, request: TransactionRequest) -> TransactionResult:
         print(f"\n🧠 [ENGINE] Procesando: {request.vendor} (${request.amount})")
