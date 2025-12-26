@@ -51,12 +51,25 @@ class IdentityManager:
                     "email": email_address,
                     "provider": domain,
                     "created_at": "now()",
-                    "status": "active"
+                    "status": "active",
+                    "session_metadata": {} # Inicializamos vacío
                 }).execute()
             except Exception as e:
                 print(f"⚠️ Warning persisting identity: {e}")
 
         return identity_data
+
+    def update_session_data(self, identity_id, session_data):
+        """Guarda cookies/tokens de sesión para persistencia."""
+        if not self.db: return {"error": "No DB connected"}
+        try:
+            self.db.table("identities").update({
+                "session_metadata": session_data,
+                "last_active": "now()"
+            }).eq("identity_id", identity_id).execute()
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}
 
     def check_sms_inbox(self, identity_id):
         """Simula recibir un SMS (2FA Físico)"""

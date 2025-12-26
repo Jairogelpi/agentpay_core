@@ -73,8 +73,12 @@ class AgentPay:
     # --- 2. IDENTIDAD (Protocolo Ghost) ---
 
     def recover_identities(self):
-        """Persistencia: Recupera sesiones de identidad activas."""
+        """Persistencia: Recupera sesiones de identidad activas y sus cookies."""
         return self._post("/v1/identity/list", {})
+
+    def save_session_state(self, identity_id, session_data):
+        """Persistencia: Guarda cookies/tokens de navegación."""
+        return self._post("/v1/identity/update_session", {"identity_id": identity_id, "session_data": session_data})
 
     def create_identity(self, needs_phone=False):
         """Crea Email + Proxy (+ SMS simulado)."""

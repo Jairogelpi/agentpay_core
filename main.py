@@ -82,6 +82,11 @@ async def create_id(req: dict):
 async def check_id(identity_id: str):
     return identity_mgr.check_inbox(identity_id)
 
+@app.post("/v1/identity/update_session")
+async def update_session(req: dict):
+    """Guarda estado/cookies de la identidad"""
+    return identity_mgr.update_session_data(req.get("identity_id"), req.get("session_data"))
+
 @app.get("/v1/identity/{identity_id}/sms")
 async def check_sms(identity_id: str):
     return identity_mgr.check_sms_inbox(identity_id)
