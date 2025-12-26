@@ -1,4 +1,4 @@
-```python
+
 import os
 import stripe
 import base64
