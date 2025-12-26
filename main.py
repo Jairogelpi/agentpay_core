@@ -1,101 +1,103 @@
-import os
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
-import base64
-import secrets
-from fastapi import FastAPI, HTTPException, Header, Depends
-from pydantic import BaseModel
-from typing import Optional
-from supabase import create_client
+import os
+import json
 from engine import UniversalEngine
 from models import TransactionRequest
+from identity import IdentityManager
 
-app = FastAPI(title="AgentPay Universal API", version="3.1.0 (Fixed)")
+# Inicializamos
+app = FastAPI(title="AgentPay Production Server")
 engine = UniversalEngine()
+identity_mgr = IdentityManager()
 
-# Conexión DB
-db_url = os.environ.get("SUPABASE_URL")
-db_key = os.environ.get("SUPABASE_KEY")
-supabase = create_client(db_url, db_key)
+# --- RUTAS PÚBLICAS HTTP (HUMANOS & WEBHOOKS) ---
 
-# --- MODELOS ---
-class PaymentPayload(BaseModel):
-    vendor: str
-    amount: float
-    description: str
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    return """
+    <html>
+        <head><title>AgentPay Core</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h1>🛡️ AgentPay Active</h1>
+            <p>Financial Security Infrastructure for AI Agents.</p>
+            <p>System Status: 🟢 ONLINE</p>
+        </body>
+    </html>
+    """
 
-class RegisterPayload(BaseModel):
-    client_name: str
-
-# --- SEGURIDAD ---
-async def get_current_agent(x_api_key: str = Header(..., description="Tu API Key")):
-    response = supabase.table("api_keys").select("agent_id, is_active").eq("key", x_api_key).execute()
-    if not response.data: raise HTTPException(status_code=403, detail="API Key inválida.")
-    key_data = response.data[0]
-    if not key_data['is_active']: raise HTTPException(status_code=403, detail="API Key desactivada.")
-    return key_data['agent_id']
-
-# --- ENDPOINT NUEVO: REGISTRO ---
-@app.post("/v1/register")
-def register_new_client(payload: RegisterPayload):
-    print(f"📝 Creando cuenta para: {payload.client_name}")
-    agent_id = f"agent_{secrets.token_hex(4)}"
-    new_api_key = f"sk_live_{secrets.token_urlsafe(24)}"
+@app.post("/webhook")
+async def stripe_webhook(request: Request):
+    """Endpoint para recibir notificaciones de Stripe (Top-Ups)"""
+    payload = await request.body()
+    sig_header = request.headers.get('stripe-signature')
     
     try:
-        # Whitelist por defecto
-        default_whitelist = ["openai.com", "anthropic.com"]
-        
-        # 1. Crear Billetera
-        supabase.table("wallets").insert({
-            "agent_id": agent_id, "balance": 0.00, 
-            "max_transaction_limit": 50.00, "allowed_vendors": default_whitelist
-        }).execute()
-
-        # 2. Guardar API Key
-        supabase.table("api_keys").insert({
-            "key": new_api_key, "agent_id": agent_id, "is_active": True
-        }).execute()
-
-        return {
-            "status": "created",
-            "message": "Cuenta creada. Guarda tu API Key.",
-            "data": {
-                "client_name": payload.client_name,
-                "agent_id": agent_id,
-                "api_key": new_api_key
-            }
-        }
+        # Pasamos el raw body al engine
+        result = engine.process_stripe_webhook(payload, sig_header)
+        return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error DB: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
 
-# --- ENDPOINT PAGO ---
+@app.get("/admin/approve", response_class=HTMLResponse)
+async def approve_endpoint(token: str):
+    """El Magic Link que pulsa el humano para aprobar"""
+    result = engine.process_approval(token)
+    
+    color = "green" if result.get("status") == "APPROVED" else "red"
+    return f"""
+    <html>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: {color}">{result.get("status")}</h1>
+            <p>{result.get("message")}</p>
+            <p>Reference: {result.get("transaction_id", "N/A")}</p>
+        </body>
+    </html>
+    """
+
+# --- RUTAS API (PARA LOS AGENTES / MCP) ---
+# En un despliegue real FastAPI, exponemos las tools como endpoints REST
+# para que LangChain/crews puedan llamarlos vía HTTP Request.
+
 @app.post("/v1/pay")
-def process_payment(payload: PaymentPayload, agent_id: str = Depends(get_current_agent)):
-    req = TransactionRequest(agent_id=agent_id, vendor=payload.vendor, amount=payload.amount, description=payload.description)
-    try:
-        result = engine.evaluate(req)
-        return {"success": result.authorized, "status": result.status, "message": result.reason, "data": {"approval_link": result.approval_link}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def pay(req: dict):
+    """Endpoint principal para que los agentes pidan dinero"""
+    # { "agent_id": "...", "vendor": "...", "amount": 10.0, "description": "..." }
+    real_req = TransactionRequest(**req)
+    res = engine.evaluate(real_req)
+    return {
+        "success": res.authorized,
+        "status": res.status,
+        "message": res.reason,
+        "balance": res.new_remaining_balance,
+        "approval_link": res.approval_link
+    }
 
-# --- ENDPOINT ADMIN ---
-@app.get("/admin/approve")
-def approve_endpoint(token: str):
-    try:
-        decoded = base64.b64decode(token).decode()
-        agent_id, new_vendor = decoded.split(":")
-        res = supabase.table("wallets").select("allowed_vendors").eq("agent_id", agent_id).execute()
-        if not res.data: return {"error": "Wallet no encontrada"}
-        current = res.data[0]['allowed_vendors'] or []
-        msg = "Ya estaba aprobado."
-        if new_vendor not in current:
-            current.append(new_vendor)
-            supabase.table("wallets").update({"allowed_vendors": current}).eq("agent_id", agent_id).execute()
-            msg = f"✅ '{new_vendor}' ha sido APROBADO."
-        return {"status": "success", "message": msg}
-    except Exception as e:
-        return {"error": str(e)}
+@app.post("/v1/identity/create")
+async def create_id(req: dict):
+    return identity_mgr.create_identity(req.get("agent_id"))
+
+@app.get("/v1/identity/{identity_id}/check")
+async def check_id(identity_id: str):
+    return identity_mgr.check_inbox(identity_id)
+
+@app.post("/v1/topup/create")
+async def create_topup_link(req: dict):
+    url = engine.create_topup_link(req.get("agent_id"), req.get("amount"))
+    return {"url": url}
+
+@app.post("/v1/identity/proxy")
+async def get_proxy(req: dict):
+    """Obtiene una IP residencial para evitar bloqueos"""
+    return identity_mgr.get_residential_proxy(req.get("region", "US"))
+
+@app.post("/v1/identity/captcha")
+async def solve_captcha(req: dict):
+    """Resuelve un captcha visual"""
+    return identity_mgr.solve_captcha(req.get("image_url"))
 
 if __name__ == "__main__":
+    # Para correr local: python main.py
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
