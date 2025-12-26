@@ -82,23 +82,40 @@ class AgentPay:
         return self._post("/v1/identity/create", {"needs_phone": needs_phone})
 
     def check_otp(self, identity_id):
-        """Consulta puntual del buzón."""
-        # Check OTP via GET usually, but here mapped to wrapper logic if needed. 
-        # But server uses GET /v1/identity/{id}/check. 
-        # Let's implement robust GET wrapper or just use requests directly here for simplicity.
+        """Consulta puntual del buzón de Email."""
         try:
             res = requests.get(f"{self.base_url}/v1/identity/{identity_id}/check", headers=self.headers, timeout=10)
             return res.json()
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             return {"status": "ERROR", "message": str(e)}
 
-    def wait_for_otp(self, identity_id, timeout=60, interval=5):
-        """Smart Polling: Espera activamente al código."""
+    def check_sms(self, identity_id):
+        """Consulta puntual del buzón de SMS (2FA Físico)."""
+        try:
+            res = requests.get(f"{self.base_url}/v1/identity/{identity_id}/sms", headers=self.headers, timeout=10)
+            return res.json()
+        except requests.exceptions.RequestException as e:
+            return {"status": "ERROR", "message": str(e)}
+
+    def wait_for_otp(self, identity_id, timeout=60, interval=5, channel="email"):
+        """
+        Smart Polling: Espera activamente al código (Email o SMS).
+        channel: "email" | "sms"
+        """
         start = time.time()
         while time.time() - start < timeout:
-            res = self.check_otp(identity_id)
+            if channel == "sms":
+                res = self.check_sms(identity_id)
+            else:
+                res = self.check_otp(identity_id)
+                
             if res.get("status") == "RECEIVED":
-                return res.get("latest_message", {}).get("otp_code")
+                # Soporte para ambas estructuras de respuesta (SMS vs Email)
+                if "otp_code" in res:
+                    return res["otp_code"] # Formato SMS
+                if "latest_message" in res and "otp_code" in res["latest_message"]:
+                    return res["latest_message"]["otp_code"] # Formato Email
+            
             time.sleep(interval)
         return None # Timeout
 
