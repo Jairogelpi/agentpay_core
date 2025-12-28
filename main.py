@@ -48,30 +48,22 @@ async def brevo_inbound_webhook(request: Request):
     try:
         data = await request.json()
         
-        # Brevo envía los datos del email en este formato
-        sender = data.get("Sender")
+        # Extraemos datos del destinatario para identificar al agente
         recipient = data.get("Recipient") # Ej: bot_sk_4e3a...@agentpay-it.com
-        subject = data.get("Subject")
-        body = data.get("TextBody")
-        
-        # Extraemos el agent_id del destinatario
-        # bot_sk_4e3a6eb7c3c2@agentpay-it.com -> sk_4e3a6eb7c3c2
         agent_id_raw = recipient.split("@")[0]
         agent_id = agent_id_raw.replace("bot_", "")
 
-        # Insertamos en la tabla 'inbound_emails' que creaste
+        # Insertamos en la tabla 'inbound_emails' que creaste en Supabase
         engine.db.table("inbound_emails").insert({
             "agent_id": agent_id,
-            "sender": sender,
+            "sender": data.get("Sender"),
             "recipient": recipient,
-            "subject": subject,
-            "body_text": body
+            "subject": data.get("Subject"),
+            "body_text": data.get("TextBody")
         }).execute()
 
-        print(f"📨 Email guardado para agente: {agent_id}")
         return {"status": "ok"}
     except Exception as e:
-        print(f"❌ Error en Webhook de Email: {e}")
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 @app.get("/admin/approve", response_class=HTMLResponse)

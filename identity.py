@@ -24,8 +24,8 @@ class IdentityManager:
 
     def create_identity(self, agent_id, needs_phone=False):
         """Genera un email corporativo permanente para el agente."""
-        # Email fijo: bot_sk_4e3a... @ agentpay-it.com
-        email_address = f"bot_{agent_id[:12]}@{self.domain}"
+        # Email fijo: bot_sk_... @ agentpay-it.com
+        email_address = f"bot_{agent_id}@{self.domain}"
         
         identity_data = {
             "identity_id": agent_id,

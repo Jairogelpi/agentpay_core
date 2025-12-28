@@ -11,7 +11,7 @@
 - **Credit**: `agent.check_credit_status()` for Gold/Platinum tier lines.
 
 ### 2. 👻 Ghost Identity Protocol
-- **Email & Proxies**: Auto-generated 1secmail and Residential Proxies.
+- **Email & Proxies**: Private Brevo Inbound Parsing and Residential Proxies.
 - **Real SMS**: `agent.check_sms(id)` and `agent.wait_for_otp(channel="sms")` using Twilio.
 - **Session Persistence**: `agent.save_session_state()` and `agent.recover_identities()` to maintain login cookies across reboots.
 
