@@ -44,14 +44,13 @@ async def stripe_webhook(request: Request):
 async def brevo_inbound_webhook(request: Request):
     """
     Recibe correos de Brevo y los guarda en SQL. Adaptado al payload Real de Brevo.
+    Resuelve el agent_id completo consultando la tabla identities.
     """
     try:
         data = await request.json()
         
-        # El payload de Inbound Parsing viene en un array de "items"
         items = data.get("items", [])
         if not items:
-            # Si no hay items, puede ser un ping de Brevo
             print("📩 Webhook hit: No items in payload (Test/Ping)")
             return {"status": "ok", "message": "no items"}
 
@@ -70,30 +69,41 @@ async def brevo_inbound_webhook(request: Request):
             if not recipient:
                 continue
 
-            # Extracción agresiva del agent_id del destinatario
-            user_part = recipient.split("@")[0]
-            agent_id = user_part.replace("agent-", "").replace("bot_", "").replace("sk_", "")
-            
-            # Limpiamos el agent_id para asegurar que sea el sk_ correcto
-            if not agent_id.startswith("sk_"):
-                agent_id = f"sk_{agent_id}"
+            # 1. Intentar buscar el agent_id REAL (completo) en la tabla identities
+            real_agent_id = None
+            try:
+                # Buscamos por email exacto
+                id_lookup = engine.db.table("identities").select("agent_id").eq("email", recipient).execute()
+                if id_lookup.data:
+                    real_agent_id = id_lookup.data[0].get("agent_id")
+                    print(f"🔍 Resolved full agent_id: {real_agent_id}")
+            except Exception as lookup_err:
+                print(f"⚠️ Error lookup agent_id: {lookup_err}")
+
+            # 2. Fallback a extracción manual si la DB no tiene el registro o falla
+            if not real_agent_id:
+                user_part = recipient.split("@")[0]
+                extracted = user_part.replace("agent-", "").replace("bot_", "").replace("sk_", "")
+                real_agent_id = f"sk_{extracted}" # Esto será el ID truncado (8 chars)
+                print(f"⚠️ Using truncated fallback agent_id: {real_agent_id}")
 
             try:
                 engine.db.table("inbound_emails").insert({
-                    "agent_id": agent_id,
+                    "agent_id": real_agent_id,
                     "sender": sender,
                     "recipient": recipient,
                     "subject": subject,
                     "body_text": body
                 }).execute()
+                print(f"✅ Ingested email for {real_agent_id}")
             except Exception as db_err:
                 print(f"⚠️ Error guardando email: {db_err}")
-                # Si falla por Foreign Key (agente no existe en wallets), ignoramos
         
         return {"status": "ok"}
     except Exception as e:
         print(f"❌ Webhook Global Error: {e}")
         return {"status": "error", "message": str(e)}
+
 
 @app.get("/admin/approve", response_class=HTMLResponse)
 async def approve_endpoint(token: str):
