@@ -20,7 +20,7 @@ class IdentityManager:
     
     def __init__(self, db_client=None):
         self.db = db_client
-        self.domain = "agentpay-it.com" # Tu nuevo dominio autenticado
+        self.domain = "agentpay.it.com" # Tu nuevo dominio autenticado
 
     def create_identity(self, agent_id, needs_phone=False):
         """Genera un email corporativo limpio y profesional."""
