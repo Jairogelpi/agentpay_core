@@ -43,38 +43,57 @@ async def stripe_webhook(request: Request):
 @app.post("/v1/identity/webhook")
 async def brevo_inbound_webhook(request: Request):
     """
-    Recibe correos de Brevo y los guarda en SQL. Robust extractor.
+    Recibe correos de Brevo y los guarda en SQL. Adaptado al payload Real de Brevo.
     """
     try:
         data = await request.json()
-        recipient = data.get("Recipient", "")
-        sender = data.get("Sender", "")
-        subject = data.get("Subject", "")
         
-        print(f"📩 Webhook hit: From={sender}, To={recipient}, Sub={subject}")
-        
-        # Extracción agresiva del agent_id del destinatario
-        # Formatos: agent-sk_123...@... , bot_sk_123...@... , sk_123...@...
-        user_part = recipient.split("@")[0]
-        agent_id = user_part.replace("agent-", "").replace("bot_", "")
-        
-        # Si por alguna razón el agent_id está vacío o no empieza con sk_, intentar buscarlo en la DB
-        # pero para el flujo Ghost V2 confiamos en el destinatario.
-        
-        engine.db.table("inbound_emails").insert({
-            "agent_id": agent_id,
-            "sender": sender,
-            "recipient": recipient,
-            "subject": subject,
-            "body_text": data.get("TextBody", "")
-        }).execute()
+        # El payload de Inbound Parsing viene en un array de "items"
+        items = data.get("items", [])
+        if not items:
+            # Si no hay items, puede ser un ping de Brevo
+            print("📩 Webhook hit: No items in payload (Test/Ping)")
+            return {"status": "ok", "message": "no items"}
 
-        print(f"✅ Ingested email for agent: {agent_id}")
-        return {"status": "ok", "agent_id": agent_id}
+        for item in items:
+            sender_obj = item.get("From", {})
+            sender = sender_obj.get("Address", "")
+            
+            to_list = item.get("To", [])
+            recipient = to_list[0].get("Address", "") if to_list else ""
+            
+            subject = item.get("Subject", "")
+            body = item.get("RawTextBody") or item.get("ExtractedMarkdownMessage", "")
+
+            print(f"📩 Webhook item: From={sender}, To={recipient}, Sub={subject}")
+            
+            if not recipient:
+                continue
+
+            # Extracción agresiva del agent_id del destinatario
+            user_part = recipient.split("@")[0]
+            agent_id = user_part.replace("agent-", "").replace("bot_", "").replace("sk_", "")
+            
+            # Limpiamos el agent_id para asegurar que sea el sk_ correcto
+            if not agent_id.startswith("sk_"):
+                agent_id = f"sk_{agent_id}"
+
+            try:
+                engine.db.table("inbound_emails").insert({
+                    "agent_id": agent_id,
+                    "sender": sender,
+                    "recipient": recipient,
+                    "subject": subject,
+                    "body_text": body
+                }).execute()
+            except Exception as db_err:
+                print(f"⚠️ Error guardando email: {db_err}")
+                # Si falla por Foreign Key (agente no existe en wallets), ignoramos
         
+        return {"status": "ok"}
     except Exception as e:
-        print(f"❌ Webhook Error: {str(e)}")
-        return JSONResponse(status_code=400, content={"error": str(e)})
+        print(f"❌ Webhook Global Error: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.get("/admin/approve", response_class=HTMLResponse)
 async def approve_endpoint(token: str):
