@@ -553,8 +553,7 @@ class UniversalEngine:
     def _result(self, auth, status, reason, req, bal=None, invoice_url=None, fee=0.0):
         payload = {
             "agent_id": req.agent_id, "vendor": req.vendor, "amount": req.amount,
-            "status": status, "reason": reason,
-            "fee": fee
+            "status": status, "reason": reason
         }
         if invoice_url:
             payload["invoice_url"] = invoice_url

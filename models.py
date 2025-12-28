@@ -10,7 +10,7 @@ class TransactionRequest(BaseModel):
 class TransactionResult(BaseModel):
     authorized: bool
     # Aquí está la clave del 100% de cobertura: PENDING_APPROVAL
-    status: Literal["APPROVED", "REJECTED", "PENDING_APPROVAL"]
+    status: Literal["APPROVED", "REJECTED", "PENDING_APPROVAL", "CIRCUIT_OPEN"]
     transaction_id: Optional[str] = None
     new_remaining_balance: Optional[float] = None
     reason: Optional[str] = None
