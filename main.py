@@ -47,22 +47,24 @@ async def brevo_inbound_webhook(request: Request):
     """
     try:
         data = await request.json()
+        recipient = data.get("Recipient") # Ej: agent-750c746f@agentpay-it.com
         
-        # Extraemos datos del destinatario para identificar al agente
-        recipient = data.get("Recipient") # Ej: bot_sk_4e3a...@agentpay-it.com
-        agent_id_raw = recipient.split("@")[0]
-        agent_id = agent_id_raw.replace("bot_", "")
+        # Buscamos en la tabla de identidades para saber a qué agent_id pertenece este email
+        id_map = engine.db.table("identities").select("agent_id").eq("email", recipient).execute()
+        
+        if id_map.data:
+            agent_id = id_map.data[0]['agent_id']
+            engine.db.table("inbound_emails").insert({
+                "agent_id": agent_id,
+                "sender": data.get("Sender"),
+                "recipient": recipient,
+                "subject": data.get("Subject"),
+                "body_text": data.get("TextBody")
+            }).execute()
 
-        # Insertamos en la tabla 'inbound_emails' que creaste en Supabase
-        engine.db.table("inbound_emails").insert({
-            "agent_id": agent_id,
-            "sender": data.get("Sender"),
-            "recipient": recipient,
-            "subject": data.get("Subject"),
-            "body_text": data.get("TextBody")
-        }).execute()
-
-        return {"status": "ok"}
+            return {"status": "ok"}
+        else:
+            return {"status": "ignored", "reason": "Recipient not found in identities"}
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 

@@ -23,9 +23,12 @@ class IdentityManager:
         self.domain = "agentpay-it.com" # Tu nuevo dominio autenticado
 
     def create_identity(self, agent_id, needs_phone=False):
-        """Genera un email corporativo permanente para el agente."""
-        # Email fijo: bot_sk_... @ agentpay-it.com
-        email_address = f"bot_{agent_id}@{self.domain}"
+        """Genera un email corporativo limpio y profesional."""
+        # Extraemos solo 8 caracteres del ID y quitamos el prefijo sk_
+        clean_id = agent_id.replace("sk_", "").replace("_", "")[:8]
+        
+        # IMPORTANTE: Usamos un formato simple sin guiones bajos complejos
+        email_address = f"agent-{clean_id}@{self.domain}"
         
         identity_data = {
             "identity_id": agent_id,
