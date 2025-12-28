@@ -43,29 +43,37 @@ async def stripe_webhook(request: Request):
 @app.post("/v1/identity/webhook")
 async def brevo_inbound_webhook(request: Request):
     """
-    Recibe correos de Brevo (Inbound Parsing) y los guarda en SQL.
+    Recibe correos de Brevo y los guarda en SQL. Robust extractor.
     """
     try:
         data = await request.json()
-        recipient = data.get("Recipient") # Ej: agent-750c746f@agentpay-it.com
+        recipient = data.get("Recipient", "")
+        sender = data.get("Sender", "")
+        subject = data.get("Subject", "")
         
-        # Buscamos en la tabla de identidades para saber a qué agent_id pertenece este email
-        id_map = engine.db.table("identities").select("agent_id").eq("email", recipient).execute()
+        print(f"📩 Webhook hit: From={sender}, To={recipient}, Sub={subject}")
         
-        if id_map.data:
-            agent_id = id_map.data[0]['agent_id']
-            engine.db.table("inbound_emails").insert({
-                "agent_id": agent_id,
-                "sender": data.get("Sender"),
-                "recipient": recipient,
-                "subject": data.get("Subject"),
-                "body_text": data.get("TextBody")
-            }).execute()
+        # Extracción agresiva del agent_id del destinatario
+        # Formatos: agent-sk_123...@... , bot_sk_123...@... , sk_123...@...
+        user_part = recipient.split("@")[0]
+        agent_id = user_part.replace("agent-", "").replace("bot_", "")
+        
+        # Si por alguna razón el agent_id está vacío o no empieza con sk_, intentar buscarlo en la DB
+        # pero para el flujo Ghost V2 confiamos en el destinatario.
+        
+        engine.db.table("inbound_emails").insert({
+            "agent_id": agent_id,
+            "sender": sender,
+            "recipient": recipient,
+            "subject": subject,
+            "body_text": data.get("TextBody", "")
+        }).execute()
 
-            return {"status": "ok"}
-        else:
-            return {"status": "ignored", "reason": "Recipient not found in identities"}
+        print(f"✅ Ingested email for agent: {agent_id}")
+        return {"status": "ok", "agent_id": agent_id}
+        
     except Exception as e:
+        print(f"❌ Webhook Error: {str(e)}")
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 @app.get("/admin/approve", response_class=HTMLResponse)
