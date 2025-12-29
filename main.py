@@ -179,10 +179,12 @@ async def pay(req: dict):
     return {
         "success": res.authorized,
         "status": res.status,
-        "transaction_id": res.transaction_id, # <--- REAL TX ID
+        "transaction_id": res.transaction_id,
         "message": res.reason,
         "balance": res.new_remaining_balance,
-        "approval_link": res.approval_link
+        "approval_link": res.approval_link,
+        "card": res.card_details.model_dump() if res.card_details else None,
+        "forensic_url": res.forensic_bundle_url
     }
 
 @app.post("/v1/identity/create")
