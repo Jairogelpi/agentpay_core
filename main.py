@@ -255,6 +255,11 @@ async def market_procure(req: dict):
 async def dispute_tx(req: dict):
     return engine.dispute_transaction(req.get("agent_id"), req.get("transaction_id"), req.get("reason"))
 
+@app.post("/v1/trust/verify")
+async def trust_verify(req: dict):
+    """Verificación Proactiva de Servicio (Auto-Dispute)"""
+    return engine.verify_service_delivery(req.get("agent_id"), req.get("transaction_id"), req.get("service_logs"))
+
 # --- AUTONOMOUS ESCROW API ---
 @app.post("/v1/escrow/create")
 async def escrow_create(req: dict):
