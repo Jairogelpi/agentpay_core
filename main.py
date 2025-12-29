@@ -6,13 +6,58 @@ import json
 from engine import UniversalEngine
 from models import TransactionRequest
 from identity import IdentityManager
+from mcp.server.fastmcp import FastMCP
 
 # Inicializamos
 app = FastAPI(title="AgentPay Production Server")
 engine = UniversalEngine()
 identity_mgr = IdentityManager(engine.db)
 
-# --- RUTAS PÚBLICAS HTTP (HUMANOS & WEBHOOKS) ---
+# --- CONFIGURACIÓN MCP (MODEL CONTEXT PROTOCOL) ---
+# Creamos el servidor MCP con el nombre del proyecto
+mcp_server = FastMCP("AgentPay")
+
+@mcp_server.tool()
+def request_payment(vendor: str, amount: float, description: str, agent_id: str) -> str:
+    """Solicita un pago real. Devuelve veredicto de The Oracle y datos de tarjeta."""
+    req = TransactionRequest(agent_id=agent_id, vendor=vendor, amount=amount, description=description)
+    try:
+        result = engine.evaluate(req)
+        return json.dumps({
+            "success": result.authorized, "status": result.status,
+            "message": result.reason, "card": result.card_details.__dict__ if result.card_details else None,
+            "forensic_hash": result.forensic_hash,
+            "forensic_url": result.forensic_bundle_url
+        })
+    except Exception as e: return json.dumps({"success": False, "error": str(e)})
+
+@mcp_server.tool()
+def get_dashboard(agent_id: str) -> str:
+    """Consulta métricas de ROI, salud financiera y saldo del agente."""
+    try: return json.dumps(engine.get_dashboard_metrics(agent_id))
+    except Exception as e: return json.dumps({"error": str(e)})
+
+@mcp_server.tool()
+def create_topup(agent_id: str, amount: float) -> str:
+    """Genera un link de recarga de saldo real mediante Stripe Checkout."""
+    try: return json.dumps({"url": engine.create_topup_link(agent_id, amount)})
+    except Exception as e: return json.dumps({"error": str(e)})
+
+# --- INTEGRACIÓN MCP + FASTAPI (SSE) ---
+# Montamos el servidor MCP dentro de la app de FastAPI
+# Esto genera automáticamente los endpoints /sse y /messages
+from mcp.server.fastmcp import Context
+from starlette.requests import Request as StarletteRequest
+
+# Usamos la integración oficial de FastMCP para montar el transporte SSE
+@app.get("/sse")
+async def handle_sse(request: StarletteRequest):
+    async with mcp_server.run_sse_async(request.scope, request.receive, request.send) as (read, write):
+        pass
+
+@app.post("/messages")
+async def handle_messages(request: StarletteRequest):
+    return await mcp_server.handle_sse_message(request.scope, request.receive, request.send)
 
 @app.get("/", response_class=HTMLResponse)
 async def home():

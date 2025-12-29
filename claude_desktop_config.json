@@ -1,0 +1,12 @@
+{
+    "mcpServers": {
+        "agentpay": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@gonzaloafidalgo/mcp-sse-bridge",
+                "https://agentpay-core.onrender.com/sse"
+            ]
+        }
+    }
+}
