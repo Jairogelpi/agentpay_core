@@ -12,55 +12,50 @@ try:
 except:
     AI_ENABLED = False
 
-def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None):
+def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", domain_status="UNKNOWN"):
     """
     NIVEL DIOS: Analiza no solo el gasto actual, sino la desviación del patrón histórico.
-    Recibe 'history': Una lista de las últimas 5 transacciones de este agente.
+    Genera un 'Intent Hash' forense para auditoría legal.
     """
+    import hashlib
+    
     if not AI_ENABLED:
-        return {"decision": "FLAGGED", "reason": "IA Off"}
+        return {"decision": "FLAGGED", "reason": "IA Off (Forensic Data Missing)"}
 
     # Calculamos el promedio de gasto histórico para dar contexto matemático a la IA
     avg_spend = sum([float(h['amount']) for h in history]) / len(history) if history else 0
     
-    # Formateamos el historial para que la IA lo lea. Asumimos que 'created_at' es la fecha
-    # Ajustamos para leer 'reason' o 'description' del historial si existe
     history_text = "\n".join([f"- {h.get('created_at', 'N/A')}: ${h['amount']} a {h['vendor']} ({h.get('reason', 'N/A')})" for h in history])
 
-    print(f"🕵️‍♂️ AI GUARD (Behavioral): Auditando {vendor} (${amount})... Promedio Histórico: ${avg_spend:.2f}")
+    print(f"🕵️‍♂️ AI GUARD (Policy: {sensitivity}): Auditando {vendor} (${amount})...")
 
     prompt = f"""
     Eres el Auditor de Comportamiento de AgentPay.
-    Tu objetivo es detectar ANOMALÍAS en el patrón de gasto y VINCULAR la intención con la acción.
+    POLICY SENSITIVITY: {sensitivity}
+    DOMAIN STATUS: {domain_status}
     
-    PERFIL:
+    OBJETIVO: Detectar si esta transacción es una ALUCINACIÓN FINANCIERA o una acción legítima.
+    
+    CONTEXTO:
     - Agente: {agent_role} (ID: {agent_id})
-    - Gasto Promedio Histórico: ${avg_spend:.2f}
-
-    HISTORIAL RECIENTE (El comportamiento normal de este agente):
+    - Histórico: ${avg_spend:.2f} avg.
     {history_text}
     
-    TRANSACCIÓN A EVALUAR:
-    - Proveedor: "{vendor}"
-    - Monto: ${amount}
-    - Motivo: "{description}"
-    - JUSTIFICACIÓN (Intención Lógica): "{justification if justification else 'NO PROVISTA'}"
+    TRANSACCIÓN:
+    - Vendor: {vendor}
+    - Amount: ${amount}
+    - Desc: {description}
+    - Justification (User/Agent Provided): {justification}
     
-    ANÁLISIS DE ANOMALÍAS (Piensa paso a paso):
-    1. **Coherencia de Intención:** ¿La justificación explicada tiene sentido lógico para este gasto? (Si no hay justificación, penaliza ligeramente).
-    2. **Salto de Monto:** ¿El monto actual es drásticamente superior al promedio histórico o a compras similares recientes?
-    3. **Cambio de Proveedor:** ¿Es un proveedor nuevo en una categoría totalmente distinta a lo que suele comprar?
-    4. **Frecuencia:** ¿Está comprando demasiado rápido lo mismo?
-    5. **Coherencia de Rol:** (Igual que antes, ¿tiene sentido para su rol?).
-
-    SI detectas un cambio brusco de comportamiento SIN una justificación sólida, o si la justificación es absurda ("compré un yate porque tenía sed"), marca como FLAGGED o REJECTED.
+    EVALUACIÓN:
+    Analyza coherencia, desviación y riesgo. Si el Justification es vago, aumenta el riesgo.
     
     SALIDA JSON:
     {{
         "decision": "APPROVED" | "REJECTED" | "FLAGGED",
         "risk_score": 0-100,
-        "anomaly_detected": true/false,
-        "reason": "Explica la desviación del patrón o valida la justificación."
+        "reasoning": "Explicación detallada (Chain of Thought)",
+        "short_reason": "Resumen 1 linea"
     }}
     """
 
@@ -68,24 +63,35 @@ def audit_transaction(vendor, amount, description, agent_id, agent_role, history
         response = client.chat.completions.create(
             model=MODELO_IA,
             messages=[
-                {"role": "system", "content": "Eres un sistema de seguridad conductual. Detectas patrones anómalos."},
+                {"role": "system", "content": "Sistema de Seguridad Bancaria IA."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
-            temperature=0.0 
+            temperature=0.0
         )
         
         content = json.loads(response.choices[0].message.content)
+        risk = content.get('risk_score', 0)
+        reasoning = content.get('reasoning', content.get('reason', 'No reasoning'))
         
-        # Mapping para compatibilidad con engine.py si retorna reason en vez de reasoning
-        if 'reason' in content and 'reasoning' not in content:
-            content['reasoning'] = content['reason']
-
-        # CAPA DE SEGURIDAD EXTRA
-        if content['decision'] == 'APPROVED' and content.get('risk_score', 0) > 20:
-             content['decision'] = 'FLAGGED'
-             content['reasoning'] += " (Riesgo conductual > 20%)"
-
+        # --- FORENSIC AUDIT (INTENT HASH) ---
+        # Vinculamos criptográficamente: QUIÉN + QUÉ + POR QUÉ + RIESGO
+        # Esto es inmutable. Si alguien cambia la justificación a posteriori, el hash no coincidirá.
+        
+        forensic_data = f"{agent_id}|{vendor}|{amount}|{reasoning}|{risk}|{domain_status}"
+        intent_hash = hashlib.sha256(forensic_data.encode()).hexdigest()
+        
+        content['intent_hash'] = intent_hash
+        content['forensic_string'] = f"SHA256(Agent+Vendor+Amount+Reasoning+Risk)"
+        
+        # Umbrales Dinámicos según Póliza
+        thresholds = {"HIGH": 30, "MEDIUM": 50, "LOW": 80}
+        limit = thresholds.get(sensitivity, 50)
+        
+        if risk > limit:
+             content['decision'] = 'REJECTED' if sensitivity == "HIGH" else "FLAGGED"
+             content['short_reason'] += f" [Risk {risk} > {limit}]"
+             
         return content
 
     except Exception as e:

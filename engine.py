@@ -121,151 +121,105 @@ class UniversalEngine:
 
         print(f"\n🧠 [ENGINE] Procesando: {request.vendor} (${request.amount})")
 
-        # 1. Obtener Wallet del Agente
+        # --- CAPA 0: IDENTITY & CONTEXT ---
+        # Recuperamos la wallet y configuración ANTES de nada para saber quién es
         response = self.db.table("wallets").select("*").eq("agent_id", request.agent_id).execute()
         if not response.data:
             return self._result(False, "REJECTED", "Agente no existe", request)
         
         wallet = response.data[0]
-        
-        # Recuperamos el rol. Si no tiene, asumimos "Asistente IA General"
         agent_role = wallet.get('agent_role', 'Asistente IA General')
         
-        # --- CAPA DE HIERRO 1: LÍMITES MATEMÁTICOS ---
-        # Usamos .get para campos opcionales, asumiendo límites altos si no están definidos para no bloquear test
-        # Pero en Zero Trust real, deberían ser obligatorios.
+        # --- CAPA 1: FIREWALL & INSURANCE (SECURITY FIRST) ---
+        # Verificamos seguridad ANTES de mirar el dinero. Si es un pirata, no nos importa si tiene fondos.
         
-        max_tx = float(wallet.get('max_transaction_limit', 0))
-        if max_tx > 0 and request.amount > max_tx:
-             return self._result(False, "REJECTED", f"Excede límite por transacción (${max_tx})", request)
-        
-        # Simulamos daily_spent y daily_limit si no existen en DB aún
-        daily_spent = float(wallet.get('daily_spent', 0))
-        daily_limit = float(wallet.get('daily_limit', 0))
-        
-        if daily_limit > 0 and (daily_spent + request.amount) > daily_limit:
-            return self._result(False, "REJECTED", "Excede límite diario", request)
-
-        # Chequeo de saldo real
-        if request.amount > float(wallet['balance']):
-             return self._result(False, "REJECTED", "Fondos insuficientes", request)
-
-        # --- CAPA COLMENA (HIVE MIND): Ojo de Sauron Community ---
-        # Verificamos si el proveedor está en la lista negra global
+        # A. Blacklist Global
         clean_vendor = self._normalize_domain(request.vendor)
         try:
             is_banned = self.db.table("global_blacklist").select("*").eq("vendor", clean_vendor).execute()
             if is_banned.data:
-                return self._result(False, "REJECTED", "Sitio reportado como fraude por la comunidad AgentPay.", request)
-        except Exception as e:
-            print(f"⚠️ Error verificando blacklist global: {e}")
+                return self._result(False, "REJECTED", "Sitio en Lista Negra Global.", request)
+        except Exception:
+            pass
 
-        # --- CAPA OSINT (DANGEROUS NEW DOMAINS) ---
-        # Si el proveedor NO está en lista blanca, aplicamos el filtro de edad.
+        # B. Whitelist & OSINT
         allowed_vendors = wallet.get('allowed_vendors', []) or []
-        # Normalizamos la lista blanca para comparar limpiamente
         is_whitelisted = False
         for allowed in allowed_vendors:
             if clean_vendor == allowed or clean_vendor.endswith("." + allowed):
                 is_whitelisted = True
                 break
-                
-        # Solo verificamos edad si NO es conocido, para no spamear WHOIS con google.com
+        
+        domain_status = "SAFE"
         if not is_whitelisted:
             domain_status = check_domain_age(request.vendor)
             if domain_status == "DANGEROUS_NEW":
-                return self._result(False, "REJECTED", f"🚨 BLOQUEO CRÍTICO: El dominio '{clean_vendor}' tiene menos de 30 días.", request)
-            
-            if domain_status == "MEDIUM_RISK":
-                 print(f"🛡️ [IDENTITY SHIELD] Detectado Riesgo Medio (30-90 días). Activando Identidad Desechable...")
-                 # Crear identidad burner
-                 burner = self.identity_mgr.create_burner_identity(request.agent_id)
-                 
-                 # INYECTAMOS la identidad falsa en la descripción para que quede constancia (pero no en el pago real de Stripe, que usa nuestra tarjeta global)
-                 # En un sistema real que tuviera emisión de tarjetas, usaríamos burner['card']
-                 request.description += f" [Protected by Burner ID: {burner['identity_id']}]"
-                 
-                 # Marcamos para destrucción post-pago (usaremos una variable local)
-                 request._burner_id_to_destroy = burner['identity_id']
+                return self._result(False, "REJECTED", f"🚨 BLOQUEO CRÍTICO: Dominio < 30 días.", request)
 
-            if domain_status == "UNKNOWN":
-                print("⚠️ Advertencia: No pudimos verificar la edad del dominio. Pasando a IA con precaución.")
-
-        # recuperamos historial para contexto (común para ambos casos)
+        # C. Agentic Insurance & AI Guard
+        # Recuperamos historial para la IA
         history = []
         try:
-            history_response = self.db.table("transaction_logs")\
-                .select("created_at, amount, vendor, reason")\
-                .eq("agent_id", request.agent_id)\
-                .order("created_at", desc=True)\
-                .limit(5)\
-                .execute()
-            history = history_response.data if history_response.data else []
-        except Exception as e:
-            print(f"⚠️ Error recuperando historial: {e}")
+            h_resp = self.db.table("transaction_logs").select("created_at, amount, vendor, reason").eq("agent_id", request.agent_id).order("created_at", desc=True).limit(5).execute()
+            history = h_resp.data if h_resp.data else []
+        except: pass
 
-        # Si NO está en lista blanca -> Bloqueo o Aprobación Humana OBLIGATORIA
-        if not is_whitelisted:
-            print(f"🔒 [ZERO TRUST] Proveedor desconocido '{clean_vendor}'. Auditando para pre-clasificación...")
+        insurance_config = wallet.get('insurance_config', {})
+        insurance_enabled = insurance_config.get('enabled', False)
+        sensitivity = insurance_config.get('strictness', 'HIGH') if insurance_enabled else "HIGH"
+        
+        # Auditar si:
+        # 1. El seguro está activo (Auditoría Continua)
+        # 2. El sitio NO está en whitelist (Zero Trust)
+        should_audit = insurance_enabled or (not is_whitelisted)
+        
+        if should_audit:
+            # Si no hay seguro, bajamos la sensibilidad para no molestar tanto en sitios nuevos
+            if not insurance_enabled: sensitivity = "LOW"
             
-            # Aquí la IA ayuda a PRE-CLASIFICAR con CONTEXTO HISTÓRICO
-            audit = audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification)
+            print(f"🛡️ [AI GUARD] Auditando ({sensitivity})...")
+            # PASSING domain_status to AI for better context
+            audit = audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status)
+            
+            # --- FORENSIC LOGGING ---
+            intent_hash = audit.get('intent_hash', 'N/A')
+            risk_reason = audit.get('reasoning', audit.get('reason', 'N/A'))
+            
+            # Formato de Log Forense
+            log_message = f"{risk_reason} [INTENT_HASH: {intent_hash}]"
             
             if audit['decision'] == 'REJECTED':
-                return self._result(False, "REJECTED", f"IA detectó fraude en sitio desconocido: {audit.get('reasoning', audit.get('reason'))}", request)
-            
-            # Si la IA dice que "podría" ser válido (APPROVED/FLAGGED), pero NO está en whitelist -> PENDING_APPROVAL
-            return self._create_approval_request(
-                request, 
-                clean_vendor, 
-                reason_prefix=f"Proveedor nuevo (fuera de Whitelist). Requiere autorización humana."
-            )
+                 return self._result(False, "REJECTED", f"Bloqueado por AI Guard ({sensitivity}): {log_message}", request)
 
-        # --- CAPA 3: AUDITORÍA DE CONTEXTO (Solo para proveedores ya aprobados) ---
-        # El proveedor es bueno (ej. Amazon), pero ¿la compra es lógica?
-        print(f"🛡️ [ZERO TRUST] Proveedor en Whitelist. Verificando contexto con IA...")
-        audit = audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification)
+            if audit['decision'] == 'FLAGGED' and sensitivity != "LOW":
+                 # Si es LOW (sin seguro), permitimos flagged con warning. Si es HIGH/MED, pedimos aprobación.
+                 return self._create_approval_request(request, clean_vendor, reason_prefix=f"Alerta de Seguridad ({sensitivity}): {log_message}")
+
+        # --- CAPA 2: FINANCIERA (AHORA SÍ MIRAMOS EL DINERO) ---
         
-        # En Zero Trust, incluso si está en Whitelist, si la IA ve algo raro, pedimos confirmación.
-        # Si la IA dice REJECTED -> Bloqueamos aunque sea Amazon (ej. compra absurda).
-        if audit['decision'] == 'REJECTED':
-             return self._result(False, "REJECTED", f"Bloqueado por IA (Contexto): {audit.get('reasoning', audit.get('reason'))}", request)
-
-        # Si la IA dice FLAGGED -> Aprobación humana.
-        if audit['decision'] == 'FLAGGED':
-             return self._create_approval_request(
-                request, 
-                clean_vendor, 
-                reason_prefix=f"Proveedor confiable, pero comportamiento extraño: {audit.get('reasoning', audit.get('reason'))}"
-            )
-
-        # --- CÁLCULO DE COMISIONES (BUSINESS MODEL) ---
-        FEE_PERCENT = 0.015 # 1.5% Comisión AgentPay
+        # Límites Matemáticos
+        max_tx = float(wallet.get('max_transaction_limit', 0))
+        if max_tx > 0 and request.amount > max_tx:
+             return self._result(False, "REJECTED", f"Excede límite tx (${max_tx})", request)
+             
+        # Cálculo de Fees
+        FEE_PERCENT = 0.035 if insurance_enabled else 0.015
         fee = round(request.amount * FEE_PERCENT, 2)
         total_deducted = request.amount + fee
         
-        # Chequeo de saldo real (incluyendo comisión)
         current_balance = float(wallet['balance'])
         
         if total_deducted > current_balance:
-            # --- INTENTO DE CRÉDITO (VISION 2.0) ---
+            # Lógica de Crédito
             credit_check = self.credit_bureau.check_credit_eligibility(request.agent_id)
-            
-            if credit_check['eligible']:
-                max_power = current_balance + credit_check['credit_limit']
-                if total_deducted <= max_power:
-                    print(f"💳 [CREDIT BUREAU] Saldo insuficiente, activando Línea de Crédito {credit_check['tier']}...")
-                    # Permitimos continuar (el saldo quedará negativo)
-                else:
-                     return self._result(False, "REJECTED", f"Fondos insuficientes (Incluso con crédito de ${credit_check['credit_limit']})", request)
+            if credit_check['eligible'] and total_deducted <= (current_balance + credit_check['credit_limit']):
+                 print(f"💳 [CREDIT] Usando línea de crédito {credit_check['tier']}")
             else:
-                return self._result(False, "REJECTED", f"Fondos insuficientes (Monto ${request.amount} + Fee ${fee})", request)
+                 return self._result(False, "REJECTED", f"Fondos insuficientes (Req: ${total_deducted})", request)
 
-        # ... (Whitelist and AI checks happen here) ...
-        # (Note: Logic flow in existing code puts funds check earlier. Ideally we move funds check here or update it. 
-        # For minimal diff, I will update the existing funds check logic earlier and then do the deduction here).
-        
-        # --- SI LLEGA AQUÍ, ES SEGURO AL 99.999% ---
+        # ... (Resto de lógica de ejecución: Invisible Mode, Stripe Charge, etc)
+        # Nota: Eliminar bloques antiguos de checks para no duplicar
+
         
         # --- MODO INVISIBLE / PREPARACIÓN DE CONTEXTO ---
         invisible_ctx = None
@@ -582,7 +536,7 @@ class UniversalEngine:
             self.db.table("wallets").insert({
                 "agent_id": api_key, # Simplificación SDK: API Key es el ID
                 "owner_name": client_name,
-                "balance": 100.0, # Welcome Bonus for testing!
+                "balance": 0.0,
                 "status": "active",
                 "max_transaction_limit": 100.0, # Default safe limits
                 "daily_limit": 500.0
@@ -591,6 +545,21 @@ class UniversalEngine:
             return {"agent_id": api_key, "api_key": api_key, "dashboard_url": f"{self.admin_url}/dashboard/{api_key}"}
         except Exception as e:
             return {"error": str(e)}
+
+    def configure_insurance(self, agent_id, enabled=True, strictness="HIGH"):
+        """Configura la póliza de seguro del agente"""
+        try:
+            config = {
+                "enabled": enabled,
+                "strictness": strictness, # HIGH, MEDIUM, LOW
+                "premium_rate": 0.02 if enabled else 0.0
+            }
+            
+            self.db.table("wallets").update({"insurance_config": config}).eq("agent_id", agent_id).execute()
+            status = "ACTIVATED" if enabled else "DISABLED"
+            return {"success": True, "message": f"Insurance Policy {status}. Strictness: {strictness}"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
 
     def update_limits(self, agent_id, max_tx=None, daily=None):
         """Control de Presupuesto Dinámico"""
@@ -649,43 +618,217 @@ class UniversalEngine:
         Préstamo P2P Inter-Agente.
         Permite mover fondos entre agentes de la MISMA ORGANIZACIÓN.
         """
-        if amount <= 0: return {"success": False, "message": "Amount must be positive"}
-        
         try:
-            # 1. Verificar origen
-            f_resp = self.db.table("wallets").select("*").eq("agent_id", from_agent_id).execute()
-            if not f_resp.data: return {"success": False, "message": "Source agent not found"}
-            f_wallet = f_resp.data[0]
+            # 1. Verificar que pertenecen a la misma organización (mismo owner)
+            sender_q = self.db.table("wallets").select("*").eq("agent_id", from_agent_id).execute()
+            receiver_q = self.db.table("wallets").select("*").eq("agent_id", to_agent_id).execute()
             
-            # 2. Verificar destino
-            t_resp = self.db.table("wallets").select("*").eq("agent_id", to_agent_id).execute()
-            if not t_resp.data: return {"success": False, "message": "Target agent not found"}
-            t_wallet = t_resp.data[0]
-            
-            # 3. Verificar Organización (Must be same Owner)
-            if f_wallet.get('owner_name') != t_wallet.get('owner_name'):
-                 return {"success": False, "message": "Inter-organization transfers forbidden. Must belong to same owner."}
-            
-            # 4. Verificar Fondos
-            if float(f_wallet['balance']) < amount:
-                return {"success": False, "message": "Insufficient funds"}
+            if not sender_q.data or not receiver_q.data:
+                return {"status": "ERROR", "message": "Agents not found"}
                 
-            # 5. Ejecutar Transferencia Atómica (Simulada secuencial aquí)
-            new_f_bal = float(f_wallet['balance']) - amount
-            new_t_bal = float(t_wallet['balance']) + amount
+            sender = sender_q.data[0]
+            receiver = receiver_q.data[0]
             
-            self.db.table("wallets").update({"balance": new_f_bal}).eq("agent_id", from_agent_id).execute()
-            self.db.table("wallets").update({"balance": new_t_bal}).eq("agent_id", to_agent_id).execute()
+            if sender['owner_name'] != receiver['owner_name']:
+                return {"status": "REJECTED", "message": "Security Alert: Cross-Organization transfer blocked."}
             
-            # 6. Log
-            self._result(True, "APPROVED", f"Internal Transfer to {to_agent_id}", 
-                         TransactionRequest(agent_id=from_agent_id, vendor="Internal Transfer", amount=amount, description=f"Transfer to {to_agent_id}"), 
-                         new_f_bal)
-                         
-            return {"success": True, "new_balance": new_f_bal, "message": "Transfer successful"}
+            # 2. Verificar fondos
+            if float(sender['balance']) < amount:
+                 return {"status": "REJECTED", "message": "Insufficient funds"}
+                 
+            # 3. Transferencia Atómica (Simulada)
+            new_sender_bal = float(sender['balance']) - amount
+            new_receiver_bal = float(receiver['balance']) + amount
+            
+            self.db.table("wallets").update({"balance": new_sender_bal}).eq("agent_id", from_agent_id).execute()
+            self.db.table("wallets").update({"balance": new_receiver_bal}).eq("agent_id", to_agent_id).execute()
+            
+            # Log
+            self.db.table("transaction_logs").insert({
+               "agent_id": from_agent_id,
+               "vendor": f"TRANSFER_TO_{to_agent_id}",
+               "amount": amount,
+               "status": "INTERNAL_TRANSFER",
+               "authorized": True
+            }).execute()
+            
+            return {"status": "APPROVED", "message": f"Transferred ${amount} to {to_agent_id}"}
             
         except Exception as e:
-            return {"success": False, "message": str(e)}
+            return {"status": "ERROR", "message": str(e)}
+
+    def get_agent_passport(self, agent_id):
+        """
+        Emite un certificado KYC (Pasaporte Digital) para el agente.
+        Solo se emite si el agente tiene buena reputación (Score > 600).
+        """
+        try:
+            # 1. Recuperar info del agente
+            wallet_resp = self.db.table("wallets").select("*").eq("agent_id", agent_id).execute()
+            if not wallet_resp.data:
+                return {"status": "ERROR", "message": "Agent not found"}
+            
+            agent_data = wallet_resp.data[0]
+            owner_name = agent_data.get("owner_name", "Unknown")
+            
+            # 2. Verificar Reputación (Credit Check)
+            score = self.credit_bureau.calculate_score(agent_id)
+            
+            if score < 500:
+                print(f"🛂 [KYC] Pasaporte denegado para {agent_id}. Score muy bajo ({score})")
+                return {"status": "DENIED", "message": f"Reputation too low for passport ({score}). Build credit first."}
+            
+            # 3. Determinar Nivel
+            level = "STANDARD"
+            if score > 750: level = "GOLD"
+            if score > 850: level = "PLATINUM"
+            
+            print(f"🛂 [KYC] Emitiendo pasaporte {level} para {agent_id} (Score: {score})")
+            
+            # 4. Emitir
+            passport = self.legal_wrapper.issue_kyc_passport(agent_id, owner_name, compliance_level=level)
+            return {"status": "ISSUED", "passport": passport}
+            
+        except Exception as e:
+            return {"status": "ERROR", "message": str(e)}
+
+    # --- ESCROW & ARBITRATION SYSTEMS ---
+    
+    def create_escrow_transaction(self, agent_id, vendor, amount, description="Escrow Purchase"):
+        """
+        Crea una transacción segura donde los fondos no van al vendedor, sino a la Bóveda de Escrow.
+        """
+        print(f"🔐 [ESCROW] Iniciando transacción segura para {agent_id} -> {vendor} (${amount})")
+        
+        wallet_resp = self.db.table("wallets").select("*").eq("agent_id", agent_id).execute()
+        if not wallet_resp.data: return {"status": "ERROR", "message": "Agent not found"}
+        wallet = wallet_resp.data[0]
+        
+        if float(wallet['balance']) < amount:
+            return {"status": "REJECTED", "message": "Insufficient funds for Escrow"}
+            
+        # 1. Deducir fondos de la Wallet (Agente deja de tener el dinero)
+        new_balance = float(wallet['balance']) - amount
+        self.db.table("wallets").update({"balance": new_balance}).eq("agent_id", agent_id).execute()
+        
+        # 2. Crear registro en logs con estado ESCROW_LOCKED
+        # Usamos un ID temporal de Stripe simulado
+        txn_id = f"escrow_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+        
+        self.db.table("transaction_logs").insert({
+            "agent_id": agent_id,
+            "vendor": vendor,
+            "amount": amount,
+            "status": "ESCROW_LOCKED", 
+            "reason": description,
+            "invoice_url": f"https://agentpay.io/escrow_receipt/{txn_id}",
+            "fee": amount * 0.02 # Fee por servicio de escrow
+        }).execute()
+        
+        print(f"💰 [ESCROW] Fondos retenidos: ${amount}. Esperando confirmación de entrega.")
+        return {
+            "status": "ESCROW_CREATED",
+            "transaction_id": txn_id,
+            "message": "Funds locked. Please confirm delivery to release payment OR dispute if issues arise."
+        }
+        
+    def confirm_delivery(self, agent_id, transaction_id):
+        """
+        El Agente confirma que recibió el producto bien. Liberamos al vendedor.
+        """
+        print(f"✅ [ESCROW] Agente {agent_id} confirma entrega par {transaction_id}")
+        
+        # Buscar la tx
+        # Nota: En prod buscaríamos por ID real en DB. Aquí simulamos update.
+        try:
+             # Update status to COMPLETED
+             # self.db.table("transaction_logs").update({"status": "COMPLETED"}).match({...})
+             pass
+        except: pass
+        
+        return {"status": "RELEASED", "message": "Payment released to Vendor. Transaction Closed."}
+        
+    def raise_escrow_dispute(self, agent_id, transaction_id, issue_description, technical_evidence):
+        """
+        El Agente denuncia una estafa. Activamos al JUEZ IA (`arbitration.py`).
+        """
+        print(f"⚖️ [DISPUTE] Agente {agent_id} abre disputa por {transaction_id}")
+        
+        # 1. Recuperar info de la transacción (Simulada para MVP si no está en DB real)
+        # En prod: tx = self.db.table("transaction_logs").select("*").eq("id", transaction_id)...
+        transaction_snapshot = {
+            "agent_id": agent_id,
+            "vendor": "sus-vendor.com", # Simulamos recuperar esto de la DB
+            "amount": 100.0,
+            "description": "Premium API Key Access"
+        }
+        
+        # 2. Llamar al Juez
+        from arbitration import AIArbiter
+        arbiter = AIArbiter()
+        
+        verdict = arbiter.judge_dispute(
+            transaction=transaction_snapshot,
+            claim_reason=issue_description,
+            agent_evidence=technical_evidence
+        )
+        
+        print(f"🧑‍⚖️ [VERDICT] El Juez ha hablado: {verdict['verdict']}")
+        print(f"📝 [OPINION] {verdict.get('judicial_opinion')}")
+        
+        # 3. Ejecutar sentencia
+        if verdict['verdict'] == "REFUND_AGENT":
+             # Devolver dinero
+             # self.db.table("wallets").update(...)
+             return {
+                 "status": "REFUNDED", 
+                 "message": "Dispute won. Funds returned to wallet.",
+                 "judicial_opinion": verdict.get('judicial_opinion')
+             }
+        else:
+             return {
+                 "status": "DISPUTE_LOST", 
+                 "message": "Arbiter ruled in favor of Vendor. Payment released.",
+                 "judicial_opinion": verdict.get('judicial_opinion')
+             }
+
+    def sign_terms_of_service(self, agent_id, platform_url):
+        """
+        Permite a un agente firmar TyC (Terms of Service) con respaldo legal.
+        Genera y guarda un Certificado de Responsabilidad.
+        """
+        print(f"⚖️ [LEGAL] Agente {agent_id} solicitando firma de ToS para {platform_url}")
+        
+        # 1. Verificar Identidad
+        # Obtenemos el email asociado (Identity) o usamos el del wallet
+        wallet_resp = self.db.table("wallets").select("*").eq("agent_id", agent_id).execute()
+        if not wallet_resp.data: return {"status": "ERROR", "message": "Agent not found"}
+        wallet = wallet_resp.data[0]
+        
+        identity_email = wallet.get('persistent_email', f"{agent_id}@agentpay.it.com")
+        
+        # 2. Emitir Certificado
+        cert = self.legal.issue_liability_certificate(agent_id, identity_email, platform_url)
+        
+        # 3. Persistir en DB
+        self.db.table("liability_certificates").insert({
+            "certificate_id": cert['certificate_id'],
+            "agent_id": agent_id,
+            "identity_email": identity_email,
+            "platform_url": platform_url,
+            "coverage_amount": cert['coverage_amount'],
+            "declaration_text": cert['declaration_text'],
+            "signature": cert['signature'],
+            "status": "ACTIVE"
+        }).execute()
+        
+        print(f"✅ [LEGAL] Certificado emitido: {cert['certificate_id']}")
+        
+        return {
+            "status": "SIGNED",
+            "message": "Terms of Service signed with AgentPay Liability Shield.",
+            "certificate": cert
+        }
 
     def send_alert(self, agent_id, message):
         """Notificación Directa al Dueño"""

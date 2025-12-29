@@ -188,6 +188,11 @@ async def sign_contract(req: dict):
     """Wrapper Legal: Firma contratos en nombre del agente"""
     return legal_wrapper.sign_contract(req.get("agent_id"), req.get("contract_hash"))
 
+@app.post("/v1/legal/passport")
+async def get_passport(req: dict):
+    """KYC: Emite Pasaporte Digital para User-Agent"""
+    return engine.get_agent_passport(req.get("agent_id"))
+
 @app.post("/v1/streaming/pack")
 async def stream_payment(req: dict):
     """Streaming Money: Micropagos de alta frecuencia"""
@@ -230,9 +235,49 @@ async def update_limits(req: dict):
 async def agent_notify(req: dict):
     return engine.send_alert(req.get("agent_id"), req.get("message"))
 
+@app.post("/v1/insurance/configure")
+async def config_insurance(req: dict):
+    """Activa/Desactiva el Seguro Antialucinaciones"""
+    return engine.configure_insurance(req.get("agent_id"), req.get("enabled"), req.get("strictness", "HIGH"))
+
+@app.post("/v1/market/procure")
+async def market_procure(req: dict):
+    """Agencia de Compras: Ejecución estricta B2B con OSINT check"""
+    return engine.process_procurement(
+        req.get("agent_id"), 
+        req.get("vendor"), 
+        float(req.get("amount", 0)), 
+        req.get("items", []),
+        req.get("description", "B2B Order")
+    )
+
 @app.post("/v1/transactions/dispute")
 async def dispute_tx(req: dict):
     return engine.dispute_transaction(req.get("agent_id"), req.get("transaction_id"), req.get("reason"))
+
+# --- AUTONOMOUS ESCROW API ---
+@app.post("/v1/escrow/create")
+async def escrow_create(req: dict):
+    return engine.create_escrow_transaction(req.get("agent_id"), req.get("vendor"), float(req.get("amount")), req.get("description"))
+
+@app.post("/v1/escrow/confirm")
+async def escrow_confirm(req: dict):
+    return engine.confirm_delivery(req.get("agent_id"), req.get("transaction_id"))
+
+@app.post("/v1/escrow/dispute")
+async def escrow_dispute(req: dict):
+    """El Juez IA entra en acción"""
+    return engine.raise_escrow_dispute(
+        req.get("agent_id"), 
+        req.get("transaction_id"), 
+        req.get("issue_description"), 
+        req.get("technical_evidence")
+    )
+
+@app.post("/v1/legal/sign_tos")
+async def legal_sign_tos(req: dict):
+    """Firma de TyC con Certificado de Responsabilidad"""
+    return engine.sign_terms_of_service(req.get("agent_id"), req.get("platform_url"))
 
 @app.post("/v1/transactions/approve")
 async def approve_tx(req: dict):

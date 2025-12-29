@@ -25,199 +25,70 @@ class IdentityManager:
 
     def create_identity(self, agent_id, needs_phone=False):
         """Genera un email corporativo limpio y profesional."""
-        # Extraemos solo 8 caracteres del ID y quitamos el prefijo sk_
-        clean_id = agent_id.replace("sk_", "").replace("_", "")[:8]
-        
-        # IMPORTANTE: Usamos un formato simple sin guiones bajos complejos
+        # Alias for backward compatibility
+        return self.create_certified_identity(agent_id)
+
+    def create_certified_identity(self, agent_id, provider="AgentPay Secure Mail"):
+        """
+        Genera una IDENTIDAD CERTIFICADA (No desechable).
+        - Email persistente @agentpay.it.com
+        - Vinculación legal (Passport)
+        - Capacidad de recibir OTPs
+        """
+        # Limpiamos el ID para usarlo en el email
+        clean_id = agent_id.replace("sk_", "").replace("_", "")[:12]
         email_address = f"agent-{clean_id}@{self.domain}"
         
         identity_data = {
-            "identity_id": agent_id,
+            "identity_id": f"cert_{clean_id}",
+            "agent_id": agent_id,
             "email": email_address,
-            "domain": self.domain
+            "domain": self.domain,
+            "type": "CERTIFIED",
+            "provider": provider
         }
 
         # Guardamos la relación en Supabase
         if self.db:
             try:
-                self.db.table("identities").insert({
+                # Upsert para no duplicar si ya existe
+                self.db.table("identities").upsert({
                     "agent_id": agent_id,
-                    "identity_id": agent_id,
+                    "identity_id": identity_data['identity_id'],
                     "email": email_address,
-                    "provider": "Brevo-Private",
-                    "status": "active"
+                    "provider": provider,
+                    "status": "active_certified"
                 }).execute()
             except Exception as e:
-                print(f"⚠️ Error persistiendo identidad: {e}")
+                print(f"⚠️ Error persistiendo identidad certificada: {e}")
 
         return identity_data
 
-    def create_burner_identity(self, agent_id):
+    def parse_inbound_email(self, email_content):
         """
-        Genera una Identidad Desechable (Burner) para operaciones de riesgo.
-        Incluye email temporal y tarjeta virtual de un solo uso.
+        Procesa el contenido crudo de un email (Subject + Body) y extrae OTPs/Links.
+        Usa IA para entender formatos complejos (ej. "Tu código es 1234" vs "567 es tu código").
         """
-        # Generar ID temporal único
-        burner_id = f"burn_{uuid.uuid4().hex[:8]}"
-        email_address = f"{burner_id}@{self.domain}"
-        
-        # Generar Tarjeta Virtual Mock (En prod usaría API de servicios como Privacy.com o Stripe Issuing)
-        virtual_card = {
-            "pan": f"4{random.randint(100000000000000, 999999999999999)}", # Fake Visa
-            "cvv": f"{random.randint(100, 999)}",
-            "exp": "12/28",
-            "holder": "AgentPay Shield Specular"
-        }
-        
-        identity_data = {
-            "identity_id": burner_id,
-            "parent_agent_id": agent_id,
-            "email": email_address,
-            "card": virtual_card,
-            "is_burner": True
-        }
+        # Si recibimos un diccionario (simulado o de webhook)
+        if isinstance(email_content, dict):
+            subject = email_content.get('subject', '')
+            body = email_content.get('body', '') or email_content.get('text', '')
+        else:
+            # String crudo
+            subject = "Raw Inbound"
+            body = str(email_content)
 
-        # Persistir en DB con flag de burner
-        if self.db:
-            try:
-                self.db.table("identities").insert({
-                    "agent_id": agent_id, # Link al original
-                    "identity_id": burner_id,
-                    "email": email_address,
-                    "provider": "Burner-Shield",
-                    "status": "active_burner",
-                    "metadata": virtual_card
-                }).execute()
-            except Exception as e:
-                print(f"⚠️ Error creando burner identity: {e}")
-
-        return identity_data
-
-    def destroy_identity(self, identity_id):
-        """
-        Quema la identidad para que no pueda ser rastreada ni reutilizada.
-        """
-        print(f"🔥 INCINERANDO Identidad: {identity_id}")
-        if self.db:
-            try:
-                self.db.table("identities").update({
-                    "status": "destroyed", 
-                    "email": f"destroyed_{int(time.time())}@void",
-                    "metadata": {"status": "incinerated"}
-                }).eq("identity_id", identity_id).execute()
-                return True
-            except Exception as e:
-                print(f"⚠️ Error destruyendo identidad: {e}")
-                return False
-        return True
-
-    def update_session_data(self, identity_id, session_data):
-        """Guarda cookies/tokens de sesión para persistencia."""
-        if not self.db: return {"error": "No DB connected"}
-        try:
-            self.db.table("identities").update({
-                "session_metadata": session_data,
-                "last_active": "now()"
-            }).eq("identity_id", identity_id).execute()
-            return {"success": True}
-        except Exception as e:
-            return {"error": str(e)}
-
-    def check_sms_inbox(self, identity_id):
-        """
-        Consulta puntual del buzón de SMS (2FA Físico).
-        Soporta integración real con Twilio si hay credenciales.
-        """
-        # 1. Intento de conectividad REAL (Producción)
-        sid = os.environ.get("TWILIO_ACCOUNT_SID")
-        token = os.environ.get("TWILIO_AUTH_TOKEN")
-        
-        if sid and token:
-            try:
-                from twilio.rest import Client
-                client = Client(sid, token)
-                # En un caso real, filtraríamos por el número 'to' == identity_id
-                messages = client.messages.list(limit=1)
-                
-                if not messages:
-                     return {"status": "WAITING", "message": "Inbox empty"}
-                     
-                last_msg = messages[0]
-                # Reutilizamos la IA para extraer el OTP del cuerpo del SMS
-                code = self._extract_code_with_ai("SMS from " + str(last_msg.from_), last_msg.body)
-                
-                return {
-                    "status": "RECEIVED",
-                    "sender": str(last_msg.from_),
-                    "otp_code": code,
-                    "message": last_msg.body
-                }
-            except Exception as e:
-                print(f"⚠️ Twilio API Error: {e}")
-                # Fallback al mock solo si falla la API real por config
-
-        # 2. Mock de Desarrollo (Simulación)
-        return {
-            "status": "RECEIVED",
-            "sender": "ServiceAuth",
-            "otp_code": str(int(time.time()) % 899999 + 100000), 
-            "message": "Your verification code is ..."
-        }
-
-    def get_active_identities(self, agent_id):
-        """Recupera sesiones anteriores (Identity Recovery)"""
-        if not self.db:
-            return []
-        try:
-            resp = self.db.table("identities").select("*").eq("agent_id", agent_id).execute()
-            return resp.data
-        except Exception as e:
-            return {"error": str(e)}
-
-    def check_inbox(self, agent_id):
-        """
-        Consulta TU PROPIA tabla SQL en lugar de 1secmail.
-        """
-        if not self.db:
-            return {"status": "ERROR", "message": "DB not connected"}
-
-        try:
-            # Buscamos el último email recibido para este agente en tu tabla SQL
-            response = self.db.table("inbound_emails") \
-                .select("*") \
-                .eq("agent_id", agent_id) \
-                .order("received_at", desc=True) \
-                .limit(1) \
-                .execute()
-
-            if not response.data:
-                return {"status": "WAITING", "message": "No emails yet in your private database"}
-
-            msg_data = response.data[0]
-            body = msg_data.get('body_text', '')
-            subject = msg_data.get('subject', '')
-
-            # Usamos la IA para extraer el código del texto real guardado
-            extracted_code = self._extract_code_with_ai(subject, body)
-
-            return {
-                "status": "RECEIVED",
-                "latest_message": {
-                    "sender": msg_data.get('sender'),
-                    "subject": subject,
-                    "otp_code": extracted_code,
-                    "received_at": msg_data.get('received_at')
-                }
-            }
-        except Exception as e:
-            return {"status": "ERROR", "detail": str(e)}
+        return self._extract_code_with_ai(subject, body)
 
     def _extract_code_with_ai(self, subject, body):
         """
         Usa GPT-4o Mini para leer el email y sacar solo el código.
         """
         if not client:
-            return "AI_UNAVAILABLE"
+            # Fallback regex simple si no hay IA
+            import re
+            match = re.search(r'\b\d{6}\b', body)
+            return match.group(0) if match else "NO_IA_NO_CODE"
             
         try:
             prompt = f"""

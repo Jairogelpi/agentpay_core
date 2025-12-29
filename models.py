@@ -8,9 +8,6 @@ class TransactionRequest(BaseModel):
     description: str
     justification: Optional[str] = None # Proof of Intent (Chain of Thought)
 
-    class Config:
-        extra = "allow"
-
 class TransactionResult(BaseModel):
     authorized: bool
     # Aquí está la clave del 100% de cobertura: PENDING_APPROVAL
