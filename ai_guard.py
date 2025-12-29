@@ -1,16 +1,31 @@
-import os
-import json
-from openai import OpenAI
-
-# Configuración: Usar GPT-4o es OBLIGATORIO para este nivel de inteligencia.
-# gpt-4o-mini es bueno, pero gpt-4o es un genio forense.
-MODELO_IA = "gpt-4o" 
+# Configuración: Router de Modelos
+# GOD_TIER: GPT-5 (o lo mejor disponible) para transacciones críticas (>$1000) o disputas.
+# HIGH_TIER: GPT-4o para el día a día corporativo.
+# LOW_TIER: GPT-3.5-turbo para micropagos eficiencia.
+MODELS = {
+    "GOD_TIER": "gpt-4o", # TODO: Actualizar a 'gpt-5' en cuanto OpenAI libere la API
+    "HIGH_TIER": "gpt-4o",
+    "LOW_TIER": "gpt-3.5-turbo"
+}
 
 try:
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     AI_ENABLED = True
 except:
     AI_ENABLED = False
+    
+def select_model(budget_status="NORMAL", complexity="HIGH", amount=0):
+    """
+    Router de Modelos (Cost-Aware Gateway).
+    Elige el modelo más eficiente según el contexto financiero, riesgo y MONTO.
+    """
+    if amount > 1000:
+        return MODELS["GOD_TIER"]  # "Si lo necesita" -> High Stakes
+        
+    if budget_status == "LOW_FUNDS" or (amount < 10 and complexity == "LOW"):
+        return MODELS["LOW_TIER"]
+        
+    return MODELS["HIGH_TIER"]
 
 def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", domain_status="UNKNOWN"):
     """
@@ -60,8 +75,18 @@ def audit_transaction(vendor, amount, description, agent_id, agent_role, history
     """
 
     try:
+        # Router Logic
+        # Asumimos 'NORMAL' budget por ahora.
+        # < $10 -> LOW_TIER
+        # $10 - $1000 -> HIGH_TIER
+        # > $1000 -> GOD_TIER (GPT-5 Ready)
+        
+        current_model = select_model(complexity="HIGH", amount=amount)
+        
+        print(f"🤖 [AI ROUTER] Usando {current_model} para auditar ${amount}...")
+
         response = client.chat.completions.create(
-            model=MODELO_IA,
+            model=current_model,
             messages=[
                 {"role": "system", "content": "Sistema de Seguridad Bancaria IA."},
                 {"role": "user", "content": prompt}

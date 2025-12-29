@@ -279,6 +279,23 @@ async def legal_sign_tos(req: dict):
     """Firma de TyC con Certificado de Responsabilidad"""
     return engine.sign_terms_of_service(req.get("agent_id"), req.get("platform_url"))
 
+# --- M2M MARKET API ---
+@app.post("/v1/market/quote")
+async def market_quote(req: dict):
+    """Solicitar cotización a otro agente (M2M)"""
+    return engine.process_quote_request(req.get("provider_id"), req.get("service_type"), req.get("params", {}))
+
+@app.post("/v1/market/directory")
+async def market_directory(req: dict):
+    """Buscar agentes por Rol y Reputación"""
+    return engine.get_service_directory(req.get("role", "ALL"))
+
+# --- ROI ANALYTICS API ---
+@app.post("/v1/analytics/report_value")
+async def report_value(req: dict):
+    """Reportar valor generado por una transacción (ROI)"""
+    return engine.report_value(req.get("agent_id"), req.get("transaction_id"), float(req.get("perceived_value", 0.0)))
+
 @app.post("/v1/transactions/approve")
 async def approve_tx(req: dict):
     return engine.process_approval(req.get("token"))

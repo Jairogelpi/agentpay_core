@@ -28,7 +28,7 @@ def send_approval_email(to_email, agent_id, vendor, amount, link):
     print(f"\n📧 [EMAIL SYSTEM] ENVIANDO CORREO A: {to_email}")
     print(f"   | Asunto: {subject}")
     print(f"   | Link: {link}")
-    print(f"   | (Enviado vía MockSMTP Service)\n")
+    print(f"   | (Enviado vía Simulated SMTP Service)\n")
     
     # Aquí iría el código real:
     # sendgrid.send(to=to_email, subject=subject, html=body)

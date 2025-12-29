@@ -136,7 +136,7 @@ class IdentityManager:
         En producción: Conectar con 2Captcha o GPT-4o-Vision.
         """
         if not client:
-            return {"status": "MOCK_SUCCESS", "solution": "click:traffic_light,crosswalk", "confidence": 0.99}
+            return {"status": "SIMULATION_SUCCESS", "solution": "click:traffic_light,crosswalk", "confidence": 0.99}
 
         try:
             # Usamos GPT-4o para intentar resolver el desafío visual

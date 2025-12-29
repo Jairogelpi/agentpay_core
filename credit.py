@@ -119,3 +119,21 @@ class CreditBureau:
                 "reason": f"Score insuficiente ({score}). Sigue operando con prepago.",
                 "message": f"FICO Score: {score}{boost_reason}"
             }
+
+    def get_public_reputation(self, agent_id):
+        """
+        Retorna la Reputación Pública de un agente para el Service Directory.
+        """
+        score = self.calculate_score(agent_id)
+        tier = "UNRANKED"
+        if score >= 750: tier = "PLATINUM"
+        elif score >= 650: tier = "GOLD"
+        elif score >= 500: tier = "SILVER"
+        else: tier = "BRONZE"
+        
+        return {
+            "agent_id": agent_id,
+            "reputation_score": score,
+            "tier": tier,
+            "verified": True
+        }

@@ -137,10 +137,11 @@ class LegalWrapper:
             "format": "AgentPay-Passport-V1"
         }
 
-    def issue_liability_certificate(self, agent_id, identity_email, platform_url, coverage_amount=10000.00):
+    def issue_liability_certificate(self, agent_id, identity_email, platform_url, coverage_amount=10000.00, forensic_hash="N/A"):
         """
         Emite un Certificado de Responsabilidad Civil.
         Actúa como un "Aval" corporativo para que el agente pueda firmar ToS.
+        Incluye Hash Forense para Trazabilidad Jurídica (Reasoning Link).
         """
         cert_id = f"LIAB-{uuid.uuid4().hex[:8].upper()}"
         timestamp = datetime.now().isoformat()
@@ -154,6 +155,7 @@ class LegalWrapper:
             f"Beneficiary Agent: {agent_id}\n"
             f"Identity Alias: {identity_email}\n"
             f"Platform Scope: {platform_url}\n"
+            f"Forensic Link (Intent Hash): {forensic_hash}\n"
             f"Coverage Limit: ${coverage_amount:,.2f} USD\n"
             f"Timestamp: {timestamp}\n\n"
             f"DECLARATION: AgentPay LLC hereby assumes subsidiary legal liability for the actions "
@@ -169,7 +171,8 @@ class LegalWrapper:
             "declaration_text": declaration,
             "signature": signature,
             "coverage_amount": coverage_amount,
-            "issued_at": timestamp
+            "issued_at": timestamp,
+            "forensic_hash": forensic_hash
         }
 
     def verify_passport(self, passport_data):

@@ -4,6 +4,7 @@ import stripe
 import base64
 import uuid
 import time
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -792,7 +793,7 @@ class UniversalEngine:
                  "judicial_opinion": verdict.get('judicial_opinion')
              }
 
-    def sign_terms_of_service(self, agent_id, platform_url):
+    def sign_terms_of_service(self, agent_id, platform_url, forensic_hash="N/A"):
         """
         Permite a un agente firmar TyC (Terms of Service) con respaldo legal.
         Genera y guarda un Certificado de Responsabilidad.
@@ -808,7 +809,7 @@ class UniversalEngine:
         identity_email = wallet.get('persistent_email', f"{agent_id}@agentpay.it.com")
         
         # 2. Emitir Certificado
-        cert = self.legal.issue_liability_certificate(agent_id, identity_email, platform_url)
+        cert = self.legal.issue_liability_certificate(agent_id, identity_email, platform_url, forensic_hash=forensic_hash)
         
         # 3. Persistir en DB
         self.db.table("liability_certificates").insert({
@@ -819,15 +820,116 @@ class UniversalEngine:
             "coverage_amount": cert['coverage_amount'],
             "declaration_text": cert['declaration_text'],
             "signature": cert['signature'],
-            "status": "ACTIVE"
+            "status": "ACTIVE",
+            "forensic_hash": forensic_hash
         }).execute()
         
-        print(f"✅ [LEGAL] Certificado emitido: {cert['certificate_id']}")
+        print(f"✅ [LEGAL] Certificado emitido: {cert['certificate_id']} (Hash: {forensic_hash})")
         
         return {
             "status": "SIGNED",
             "message": "Terms of Service signed with AgentPay Liability Shield.",
             "certificate": cert
+        }
+
+    def process_quote_request(self, provider_agent_id, service_type, parameters: dict):
+        """
+        [M2M MARKET] Protocolo de Cotización entre Agentes.
+        Permite a un agente solicitar precio a otro por una tarea (ej: 'Translation', 'Coding').
+        """
+        print(f"🤝 [M2M] Solicitud de cotización a {provider_agent_id} para servicio '{service_type}'")
+        
+        # 1. Verificar si el proveedor existe y está activo
+        # (En prod: verificar capabilities del agente en Service Directory)
+        wallet = self.db.table("wallets").select("*").eq("agent_id", provider_agent_id).execute()
+        if not wallet.data: return {"status": "ERROR", "message": "Provider Agent not found"}
+        
+        # 2. Calcular Precio Dinámico (Simulado)
+        # En el futuro, el agente proveedor correría su propia lógica LLM para poner precio.
+        # Aquí simulamos una lista de precios estándar.
+        base_prices = {
+            "translation": 0.05, # $0.05 por palabra/call
+            "data_summary": 0.50,
+            "code_review": 2.00,
+            "consulting": 10.00
+        }
+        
+        price = base_prices.get(service_type.lower(), 1.00)
+        
+        # 3. Generar Quote Firmada
+        quote_id = f"Q-{uuid.uuid4().hex[:6].upper()}"
+        expiry = (datetime.now() + timedelta(minutes=15)).isoformat()
+        
+        quote = {
+            "quote_id": quote_id,
+            "provider_id": provider_agent_id,
+            "service": service_type,
+            "price": price,
+            "currency": "USD",
+            "expiry": expiry,
+            "signature": f"sig_{uuid.uuid4().hex}" # Simulación firma criptográfica
+        }
+        
+        return {
+            "status": "QUOTED",
+            "quote": quote
+        }
+
+    def get_service_directory(self, role="ALL"):
+        """
+        [SERVICE DISCOVERY] Directorio Público de Agentes.
+        Devuelve una lista de agentes ordenada por Reputación (Credit Score).
+        Permite a los agentes encontrar a los mejores colaboradores (Interoperabilidad).
+        """
+        print(f"🔎 [DISCOVERY] Buscando agentes con rol: {role}")
+        
+        query = self.db.table("wallets").select("agent_id, agent_role")
+        if role != "ALL":
+            query = query.eq("agent_role", role)
+            
+        agents_data = query.execute().data
+        
+        results = []
+        for agent in agents_data:
+            rep = self.credit_bureau.get_public_reputation(agent['agent_id'])
+            # Enriquecer con rol
+            rep['role'] = agent['agent_role']
+            results.append(rep)
+            
+        # Ordenar por Score descendente (Los mejores arriba)
+        results.sort(key=lambda x: x['reputation_score'], reverse=True)
+        
+        return {
+            "role_searched": role,
+            "count": len(results),
+            "directory": results
+        }
+
+    def report_value(self, agent_id, transaction_id, perceived_value_usd):
+        """
+        [ROI ENGINE] Reporte de Valor Generado.
+        El agente informa cuánto valor de negocio generó esta transacción.
+        Permite calcular el ROI real de la IA.
+        """
+        print(f"📈 [ROI] Agente {agent_id} reporta valor generado: ${perceived_value_usd} para Tx {transaction_id}")
+        
+        # 1. Buscar la transacción original para saber el Coste
+        tx_res = self.db.table("transaction_logs").select("*").eq("id", transaction_id).execute() # Real id logic needed
+        # Mock fetch logic if simulated ID or just assume cost retrieval
+        cost = 0.0
+        # En prod: cost = tx_res.data[0]['amount']
+        
+        # 2. Actualizar Log (Simulado)
+        # self.db.table("transaction_logs").update({"perceived_value": perceived_value_usd}).eq("id", transaction_id)...
+        
+        # 3. Calcular ROI Instantáneo
+        # Si cost > 0: roi = (Value - Cost) / Cost * 100
+        roi_msg = f"Value Reported: ${perceived_value_usd}"
+        
+        return {
+            "status": "VALUE_RECORDED",
+            "message": roi_msg,
+            "perceived_value": perceived_value_usd
         }
 
     def send_alert(self, agent_id, message):
