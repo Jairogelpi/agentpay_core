@@ -134,6 +134,7 @@ async def pay(req: dict):
     return {
         "success": res.authorized,
         "status": res.status,
+        "transaction_id": res.transaction_id, # <--- REAL TX ID
         "message": res.reason,
         "balance": res.new_remaining_balance,
         "approval_link": res.approval_link
