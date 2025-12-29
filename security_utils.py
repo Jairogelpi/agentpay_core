@@ -39,7 +39,10 @@ def check_domain_age(vendor):
         if not creation_date:
             return "UNKNOWN" # El dominio oculta su fecha
 
-        # Cálculo de días de vida
+        # Cálculo de días de vida (Normalizamos a naive para evitar errores de offset)
+        if creation_date.tzinfo is not None:
+            creation_date = creation_date.replace(tzinfo=None)
+        
         now = datetime.now()
         age_days = (now - creation_date).days
         
