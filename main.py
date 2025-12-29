@@ -170,6 +170,26 @@ async def approve_endpoint(token: str):
 # En un despliegue real FastAPI, exponemos las tools como endpoints REST
 # para que LangChain/crews puedan llamarlos vía HTTP Request.
 
+@app.get("/v1/debug/stripe")
+async def debug_stripe():
+    """Diagnóstico de la conexión con Stripe y sus capacidades."""
+    import stripe
+    try:
+        account = stripe.Account.retrieve()
+        # No mostramos la llave completa por seguridad, solo el prefijo
+        key_preview = os.getenv("STRIPE_SECRET_KEY", "")[:10] + "..."
+        
+        return {
+            "account_id": account.id,
+            "business_name": account.settings.dashboard.display_name,
+            "capabilities": account.capabilities,
+            "is_test_mode": not account.livemode,
+            "key_preview": key_preview,
+            "issuing_enabled": account.capabilities.get("issuing") == "active"
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.post("/v1/pay")
 async def pay(req: dict):
     """Endpoint principal para que los agentes pidan dinero"""
