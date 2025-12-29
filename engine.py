@@ -582,7 +582,7 @@ class UniversalEngine:
             self.db.table("wallets").insert({
                 "agent_id": api_key, # Simplificación SDK: API Key es el ID
                 "owner_name": client_name,
-                "balance": 0.0,
+                "balance": 100.0, # Welcome Bonus for testing!
                 "status": "active",
                 "max_transaction_limit": 100.0, # Default safe limits
                 "daily_limit": 500.0
