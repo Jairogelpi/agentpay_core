@@ -118,9 +118,13 @@ class IdentityManager:
         Provee una IP residencial limpia para evitar bloqueos por geolocalización.
         En producción: Conectar con Bright Data / Oxylabs API.
         """
-        # Simulamos una IP rotativa real
+        auth = os.environ.get("BRIGHTDATA_AUTH")
+        if not auth:
+            return {"status": "ERROR", "message": "Configuration Error: BRIGHTDATA_AUTH missing. Cannot provision real residential proxy."}
+            
+        # Conexión Real a Bright Data / Smartproxy
         session_id = f"sess_{int(time.time())}"
-        proxy_url = f"http://customer-agentpay-cc-{region}:{session_id}@pr.agentpay.io:7777"
+        proxy_url = f"http://{auth}-country-{region.lower()}:{session_id}@brd.superproxy.io:22225"
         
         return {
             "status": "ACTIVE",
@@ -136,7 +140,7 @@ class IdentityManager:
         En producción: Conectar con 2Captcha o GPT-4o-Vision.
         """
         if not client:
-            return {"status": "SIMULATION_SUCCESS", "solution": "click:traffic_light,crosswalk", "confidence": 0.99}
+             return {"status": "ERROR", "message": "Configuration Error: OPENAI_API_KEY missing. AI Vision unavailable."}
 
         try:
             # Usamos GPT-4o para intentar resolver el desafío visual
