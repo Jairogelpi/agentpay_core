@@ -74,14 +74,36 @@ class AutoLawyer:
 
     def file_stripe_dispute(self, transaction_id, dossier):
         """
-        Simula la presentación formal de la evidencia ante la API de Stripe.
+        Ejecuta una acción financiera real: Solicita REEMBOLSO (Refund) a Stripe.
+        Al no poder 'crear' una disputa como banco, el Agente fuerza el reembolso
+        presentando la evidencia (dossier) en el motivo.
         """
-        # En producción: stripe.Dispute.update(dispute_id, evidence=...)
-        dispute_ref = f"DSP-{datetime.datetime.now().strftime('%Y%m%d')}-{transaction_id[:4]}"
+        import stripe
+        stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
         
-        return {
-            "status": "FILED",
-            "reference": dispute_ref,
-            "filed_at": datetime.datetime.now().isoformat(),
-            "note": "Evidence dossier submitted successfully via API."
-        }
+        try:
+            print(f"⚖️ [LAWYER] Ejecutando acción de recuperación para Tx {transaction_id}...")
+            
+            # 1. Intentamos Reembolso Directo (Acción más agresiva permitida por API)
+            # Pasamos el dossier como 'reason' o metadata
+            refund = stripe.Refund.create(
+                payment_intent=transaction_id,
+                reason="requested_by_customer",
+                metadata={"legal_dossier_summary": dossier[:500]} # Stripe limita metadata
+            )
+            
+            return {
+                "status": "FILED_AND_EXECUTED",
+                "action": "REFUND",
+                "reference": refund.id, # Real Stripe ID (re_...)
+                "filed_at": datetime.datetime.now().isoformat(),
+                "note": "Refund processed successfully based on evidence."
+            }
+            
+        except stripe.error.StripeError as e:
+            # Si falla el reembolso (ej: ya disputado), registramos el error real
+            return {
+                "status": "FAILED",
+                "error": str(e),
+                "note": "Could not execute automatic refund. Manual intervention required."
+            }

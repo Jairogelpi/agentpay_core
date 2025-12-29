@@ -880,17 +880,20 @@ class UniversalEngine:
         wallet = self.db.table("wallets").select("*").eq("agent_id", provider_agent_id).execute()
         if not wallet.data: return {"status": "ERROR", "message": "Provider Agent not found"}
         
-        # 2. Calcular Precio Dinámico (Simulado)
-        # En el futuro, el agente proveedor correría su propia lógica LLM para poner precio.
-        # Aquí simulamos una lista de precios estándar.
-        base_prices = {
-            "translation": 0.05, # $0.05 por palabra/call
-            "data_summary": 0.50,
-            "code_review": 2.00,
-            "consulting": 10.00
-        }
+        # 2. Calcular Precio Dinámico (Real)
+        # Consultamos el catálogo de servicios del agente proveedor (metadata en wallet)
+        # Esto elimina precios hardcodeados y permite mercados libres.
+        services_catalog = wallet.data[0].get('services_catalog', {})
         
-        price = base_prices.get(service_type.lower(), 1.00)
+        if not services_catalog:
+             # Si no tiene catálogo, no puede cotizar.
+             return {"status": "REJECTED", "message": "Provider Agent has no configured services in catalog."}
+             
+        normalized_service = service_type.lower()
+        if normalized_service not in services_catalog:
+             return {"status": "REJECTED", "message": f"Service '{service_type}' not offered by this agent."}
+             
+        price = float(services_catalog[normalized_service])
         
         # 3. Generar Quote Firmada
         quote_id = f"Q-{uuid.uuid4().hex[:6].upper()}"
