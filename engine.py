@@ -713,10 +713,11 @@ class UniversalEngine:
         self.db.table("wallets").update({"balance": new_balance}).eq("agent_id", agent_id).execute()
         
         # 2. Crear registro en logs con estado ESCROW_LOCKED
-        # Usamos un ID temporal de Stripe simulado
-        txn_id = f"escrow_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+        # Usamos UUID v4 standard para compatibilidad con Postgres UUID type
+        txn_id = str(uuid.uuid4())
         
         self.db.table("transaction_logs").insert({
+            "id": txn_id, # EXPLICIT UUID
             "agent_id": agent_id,
             "vendor": vendor,
             "amount": amount,
@@ -1018,7 +1019,11 @@ class UniversalEngine:
         return {"success": True, "channel": "email"}
 
     def _result(self, auth, status, reason, req, bal=None, invoice_url=None, fee=0.0):
+        # Generar ID Universal consistente
+        txn_id = str(uuid.uuid4())
+        
         payload = {
+            "id": txn_id, # Explicit UUID
             "agent_id": req.agent_id, "vendor": req.vendor, "amount": req.amount,
             "status": status, "reason": reason
         }
@@ -1026,4 +1031,12 @@ class UniversalEngine:
             payload["invoice_url"] = invoice_url
             
         self.db.table("transaction_logs").insert(payload).execute()
-        return TransactionResult(authorized=auth, status=status, reason=reason, new_remaining_balance=bal)
+        
+        # Return enriched result
+        return TransactionResult(
+            authorized=auth, 
+            status=status, 
+            reason=reason, 
+            new_remaining_balance=bal, 
+            transaction_id=txn_id # Pass real ID back
+        )
