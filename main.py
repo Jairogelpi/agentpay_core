@@ -172,23 +172,22 @@ async def approve_endpoint(token: str):
 
 @app.get("/v1/debug/stripe")
 async def debug_stripe():
-    """Diagnóstico de la conexión con Stripe y sus capacidades."""
+    """Diagnóstico detallado de Stripe."""
     import stripe
     try:
-        account = stripe.Account.retrieve()
-        # No mostramos la llave completa por seguridad, solo el prefijo
-        key_preview = os.getenv("STRIPE_SECRET_KEY", "")[:10] + "..."
+        key = os.getenv("STRIPE_SECRET_KEY", "")
+        mode = "TEST" if key.startswith("sk_test") else "LIVE" if key.startswith("sk_live") else "UNKNOWN"
+        
+        balance = stripe.Balance.retrieve()
         
         return {
-            "account_id": account.id,
-            "business_name": account.settings.dashboard.display_name,
-            "capabilities": account.capabilities,
-            "is_test_mode": not account.livemode,
-            "key_preview": key_preview,
-            "issuing_enabled": account.capabilities.get("issuing") == "active"
+            "mode": mode,
+            "key_preview": key[:12] + "...",
+            "balance": balance,
+            "issuing_status": "Checking..."
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e), "note": "Si ves 'livemode', la llave podría ser de un tipo restringido."}
 
 @app.post("/v1/pay")
 async def pay(req: dict):
