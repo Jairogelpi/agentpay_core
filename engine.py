@@ -564,18 +564,20 @@ class UniversalEngine:
         }
 
     def register_new_agent(self, client_name):
-        """Registra un nuevo agente y crea su wallet inicial."""
+        """Registra un nuevo agente y crea su wallet inicial alineada con el esquema real."""
         agent_id = f"sk_{uuid.uuid4().hex[:12]}"
         try:
             self.db.table("wallets").insert({
                 "agent_id": agent_id,
-                "client_name": client_name,
+                "owner_name": client_name, # Corregido: owner_name en vez de client_name
                 "balance": 0.0,
-                "credit_score": 750,
                 "max_transaction_limit": 50.0,
-                "daily_limit": 200.0,
+                "daily_limit": 1000.0,
+                "daily_spent": 0.0,
                 "allowed_vendors": [],
-                "currency": "USD"
+                "currency": "USD",
+                "status": "active",
+                "agent_role": "Autonomous Purchaser"
             }).execute()
             
             return {
