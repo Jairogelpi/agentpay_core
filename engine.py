@@ -232,9 +232,13 @@ class UniversalEngine:
         new_balance = float(wallet['balance']) - total_deducted
         self.db.table("wallets").update({"balance": new_balance}).eq("agent_id", request.agent_id).execute()
         
-        # --- GENERACIÓN DE FACTURA ---
-        from invoicing import generate_invoice_pdf
-        invoice_path = generate_invoice_pdf(card['id'], request.agent_id, clean_vendor, request.amount, request.description)
+        # --- GENERACIÓN DE FACTURA (Resistente a fallos) ---
+        try:
+            from invoicing import generate_invoice_pdf
+            invoice_path = generate_invoice_pdf(card['id'], request.agent_id, clean_vendor, request.amount, request.description)
+        except Exception as e:
+            print(f"⚠️ Error generando factura: {e}")
+            invoice_path = None
         
         # --- LIBRO MAYOR FORENSE (Forensic Ledger) ---
         # Empaquetamos la evidencia firmada
