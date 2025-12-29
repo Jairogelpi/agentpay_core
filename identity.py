@@ -159,6 +159,37 @@ class IdentityManager:
         except Exception as e:
             return {"status": "ERROR", "message": str(e)}
 
+        except Exception as e:
+            return {"status": "ERROR", "message": str(e)}
+
+    # --- SESSION PERSISTENCE (COOKIES & TOKENS) ---
+    def save_session(self, agent_id, cookies_blob):
+        """
+        Guarda el estado de navegación (Cookies, LocalStorage) para continuidad.
+        """
+        try:
+            if self.db:
+                self.db.table("identities").update({"session_blob": cookies_blob}).eq("agent_id", agent_id).execute()
+            print(f"💾 [IDENTITY] Sesión guardada para {agent_id}")
+            return True
+        except Exception as e:
+            print(f"⚠️ Error saving session: {e}")
+            return False
+
+    def recover_session(self, agent_id):
+        """
+        Recupera la sesión previa para evitar logines repetidos (Rate Limits).
+        """
+        try:
+            if self.db:
+                resp = self.db.table("identities").select("session_blob").eq("agent_id", agent_id).execute()
+                if resp.data and resp.data[0].get('session_blob'):
+                    print(f"♻️ [IDENTITY] Sesión recuperada para {agent_id}")
+                    return resp.data[0]['session_blob']
+            return None
+        except Exception as e:
+            return None
+
     def generate_digital_fingerprint(self):
         """
         Genera una huella digital de navegador humano para evitar detección de bots.

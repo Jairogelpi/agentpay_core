@@ -793,8 +793,7 @@ class UniversalEngine:
                  "judicial_opinion": verdict.get('judicial_opinion')
              }
 
-             }
- 
+
     def verify_service_delivery(self, agent_id, transaction_id, service_logs):
         """
         [PROACTIVE TRUST] Verificación Automática de Servicio.
@@ -845,7 +844,7 @@ class UniversalEngine:
         identity_email = wallet.get('persistent_email', f"{agent_id}@agentpay.it.com")
         
         # 2. Emitir Certificado
-        cert = self.legal.issue_liability_certificate(agent_id, identity_email, platform_url, forensic_hash=forensic_hash)
+        cert = self.legal_wrapper.issue_liability_certificate(agent_id, identity_email, platform_url, forensic_hash=forensic_hash)
         
         # 3. Persistir en DB
         self.db.table("liability_certificates").insert({
@@ -951,8 +950,8 @@ class UniversalEngine:
         if status.get("status") != "ACTIVE": return status
         
         # 2. Métricas de ROI (Value vs Spend)
-        # Simulamos agregación. En prod: select sum(amount), sum(perceived_value) ...
-        # Aquí usamos datos mock realistas basados en el 'status'
+        # En producción: select sum(amount), sum(perceived_value) ...
+        # Aquí usamos datos estimados basados en el 'status' para MVP
         
         balance = float(status['finance']['balance'])
         credit_score = status['credit']['score']
