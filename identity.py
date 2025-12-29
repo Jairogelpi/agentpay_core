@@ -1,6 +1,7 @@
-import requests
 import time
 import os
+import uuid
+import random
 from openai import OpenAI
 
 # Usamos la configuración de cliente que ya tengamos, o creamos uno nuevo
@@ -50,6 +51,65 @@ class IdentityManager:
                 print(f"⚠️ Error persistiendo identidad: {e}")
 
         return identity_data
+
+    def create_burner_identity(self, agent_id):
+        """
+        Genera una Identidad Desechable (Burner) para operaciones de riesgo.
+        Incluye email temporal y tarjeta virtual de un solo uso.
+        """
+        # Generar ID temporal único
+        burner_id = f"burn_{uuid.uuid4().hex[:8]}"
+        email_address = f"{burner_id}@{self.domain}"
+        
+        # Generar Tarjeta Virtual Mock (En prod usaría API de servicios como Privacy.com o Stripe Issuing)
+        virtual_card = {
+            "pan": f"4{random.randint(100000000000000, 999999999999999)}", # Fake Visa
+            "cvv": f"{random.randint(100, 999)}",
+            "exp": "12/28",
+            "holder": "AgentPay Shield Specular"
+        }
+        
+        identity_data = {
+            "identity_id": burner_id,
+            "parent_agent_id": agent_id,
+            "email": email_address,
+            "card": virtual_card,
+            "is_burner": True
+        }
+
+        # Persistir en DB con flag de burner
+        if self.db:
+            try:
+                self.db.table("identities").insert({
+                    "agent_id": agent_id, # Link al original
+                    "identity_id": burner_id,
+                    "email": email_address,
+                    "provider": "Burner-Shield",
+                    "status": "active_burner",
+                    "metadata": virtual_card
+                }).execute()
+            except Exception as e:
+                print(f"⚠️ Error creando burner identity: {e}")
+
+        return identity_data
+
+    def destroy_identity(self, identity_id):
+        """
+        Quema la identidad para que no pueda ser rastreada ni reutilizada.
+        """
+        print(f"🔥 INCINERANDO Identidad: {identity_id}")
+        if self.db:
+            try:
+                self.db.table("identities").update({
+                    "status": "destroyed", 
+                    "email": f"destroyed_{int(time.time())}@void",
+                    "metadata": {"status": "incinerated"}
+                }).eq("identity_id", identity_id).execute()
+                return True
+            except Exception as e:
+                print(f"⚠️ Error destruyendo identidad: {e}")
+                return False
+        return True
 
     def update_session_data(self, identity_id, session_data):
         """Guarda cookies/tokens de sesión para persistencia."""
@@ -227,3 +287,23 @@ class IdentityManager:
             
         except Exception as e:
             return {"status": "ERROR", "message": str(e)}
+
+    def generate_digital_fingerprint(self):
+        """
+        Genera una huella digital de navegador humano para evitar detección de bots.
+        """
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"
+        ]
+        
+        resolutions = ["1920x1080", "2560x1440", "1366x768"]
+        langs = ["en-US", "es-ES", "fr-FR", "de-DE"]
+        
+        return {
+            "User-Agent": random.choice(user_agents),
+            "Accept-Language": f"{random.choice(langs)};q=0.9",
+            "Screen-Resolution": random.choice(resolutions),
+            "Timezone-Offset": "-480" # Simulated PST
+        }

@@ -48,6 +48,9 @@ def check_domain_age(vendor):
         if age_days < 30:
             return "DANGEROUS_NEW"
         
+        if age_days < 90:
+            return "MEDIUM_RISK"
+        
         return "SAFE"
 
     except Exception as e:

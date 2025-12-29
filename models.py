@@ -6,6 +6,7 @@ class TransactionRequest(BaseModel):
     vendor: str
     amount: float
     description: str
+    justification: Optional[str] = None # Proof of Intent (Chain of Thought)
 
 class TransactionResult(BaseModel):
     authorized: bool

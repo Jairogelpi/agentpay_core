@@ -43,4 +43,33 @@ class LegalWrapper:
             "validity": "LEGALLY_BINDING_WRAPPER"
         }
 
+    def sign_intent(self, agent_id, vendor, amount, justification):
+        """
+        Firma Forense: Vincula una transacción con la INTENCIÓN que la originó.
+        Esto crea un 'Proof of Intent' verificable.
+        """
+        timestamp = datetime.datetime.now().isoformat()
+        
+        # Payload que vincula el pensamiento con la acción financiera
+        intent_payload = f"{agent_id}|{vendor}|{amount}|{justification}|{timestamp}"
+        
+        # Firma digital de la intención
+        intent_hash = hashlib.sha256(intent_payload.encode()).hexdigest()
+        
+        proof_text = f"""
+        [PROOF OF INTENT]
+        This transaction was executed based on the following autonomous reasoning:
+        "{justification}"
+        
+        -- SIGNED --
+        Agent: {agent_id}
+        Timestamp: {timestamp}
+        Intent Hash: {intent_hash[:16]}
+        """
+        
+        return {
+            "proof_text": proof_text.strip(),
+            "intent_hash": intent_hash
+        }
+
 import datetime

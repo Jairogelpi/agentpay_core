@@ -13,6 +13,9 @@ from security_utils import check_domain_age
 from notifications import send_approval_email
 from webhooks import send_webhook
 from credit import CreditBureau
+from legal import LegalWrapper
+from identity import IdentityManager
+from lawyer import AutoLawyer
 
 load_dotenv()
 
@@ -30,6 +33,9 @@ class UniversalEngine:
             
         self.db: Client = create_client(url, key)
         self.credit_bureau = CreditBureau(self.db)
+        self.legal_wrapper = LegalWrapper()
+        self.identity_mgr = IdentityManager(self.db)
+        self.lawyer = AutoLawyer()
         
         # Memoria volátil para Circuit Breaker (En prod usar Redis)
         self.transaction_velocity = {} 
@@ -170,6 +176,18 @@ class UniversalEngine:
             if domain_status == "DANGEROUS_NEW":
                 return self._result(False, "REJECTED", f"🚨 BLOQUEO CRÍTICO: El dominio '{clean_vendor}' tiene menos de 30 días.", request)
             
+            if domain_status == "MEDIUM_RISK":
+                 print(f"🛡️ [IDENTITY SHIELD] Detectado Riesgo Medio (30-90 días). Activando Identidad Desechable...")
+                 # Crear identidad burner
+                 burner = self.identity_mgr.create_burner_identity(request.agent_id)
+                 
+                 # INYECTAMOS la identidad falsa en la descripción para que quede constancia (pero no en el pago real de Stripe, que usa nuestra tarjeta global)
+                 # En un sistema real que tuviera emisión de tarjetas, usaríamos burner['card']
+                 request.description += f" [Protected by Burner ID: {burner['identity_id']}]"
+                 
+                 # Marcamos para destrucción post-pago (usaremos una variable local)
+                 request._burner_id_to_destroy = burner['identity_id']
+
             if domain_status == "UNKNOWN":
                 print("⚠️ Advertencia: No pudimos verificar la edad del dominio. Pasando a IA con precaución.")
 
@@ -191,7 +209,7 @@ class UniversalEngine:
             print(f"🔒 [ZERO TRUST] Proveedor desconocido '{clean_vendor}'. Auditando para pre-clasificación...")
             
             # Aquí la IA ayuda a PRE-CLASIFICAR con CONTEXTO HISTÓRICO
-            audit = audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history)
+            audit = audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification)
             
             if audit['decision'] == 'REJECTED':
                 return self._result(False, "REJECTED", f"IA detectó fraude en sitio desconocido: {audit.get('reasoning', audit.get('reason'))}", request)
@@ -206,7 +224,7 @@ class UniversalEngine:
         # --- CAPA 3: AUDITORÍA DE CONTEXTO (Solo para proveedores ya aprobados) ---
         # El proveedor es bueno (ej. Amazon), pero ¿la compra es lógica?
         print(f"🛡️ [ZERO TRUST] Proveedor en Whitelist. Verificando contexto con IA...")
-        audit = audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history)
+        audit = audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification)
         
         # En Zero Trust, incluso si está en Whitelist, si la IA ve algo raro, pedimos confirmación.
         # Si la IA dice REJECTED -> Bloqueamos aunque sea Amazon (ej. compra absurda).
@@ -248,57 +266,106 @@ class UniversalEngine:
         # For minimal diff, I will update the existing funds check logic earlier and then do the deduction here).
         
         # --- SI LLEGA AQUÍ, ES SEGURO AL 99.999% ---
+        
+        # --- MODO INVISIBLE / PREPARACIÓN DE CONTEXTO ---
+        invisible_ctx = None
+        if hasattr(request, '_burner_id_to_destroy') or domain_status == "MEDIUM_RISK":
+             print(f"👻 [INVISIBLE MODE] Generando huella digital humana...")
+             invisible_ctx = self.identity_mgr.generate_digital_fingerprint()
+
         # PASO C: Ejecutar el Pago
         print(f"💳 [STRIPE] Iniciando cargo real de ${request.amount}...")
         
-        stripe_tx_id = self._execute_stripe_charge(request.amount, clean_vendor)
+        stripe_tx_id = self._execute_stripe_charge(request.amount, clean_vendor, invisible_context=invisible_ctx)
+        
+             # En un caso real, aquí obtendríamos también las credenciales del proxy residencial
+             # invisible_ctx['proxy'] = self.identity_mgr.get_residential_proxy()['proxy_url']
+
+        # PASO C: Ejecutar el Pago
+        print(f"💳 [STRIPE] Iniciando cargo real de ${request.amount}...")
+        
+        stripe_tx_id = self._execute_stripe_charge(request.amount, clean_vendor, invisible_context=invisible_ctx)
         
         if not stripe_tx_id:
             return self._result(False, "REJECTED", "Error en pasarela de pago (Tarjeta rechazada)", request)
             
         # Deducción de Saldo + Comisión
         new_balance = float(wallet['balance']) - total_deducted
-        
         self.db.table("wallets").update({"balance": new_balance}).eq("agent_id", request.agent_id).execute()
         
         # --- GENERACIÓN DE FACTURA ---
         from invoicing import generate_invoice_pdf
         invoice_path = generate_invoice_pdf(stripe_tx_id, request.agent_id, clean_vendor, request.amount, request.description)
         
-        success_msg = f"Pago Realizado. (Subtotal: ${request.amount} + Fee: ${fee})"
-        return self._result(True, "APPROVED", success_msg, request, new_balance, invoice_url=invoice_path, fee=fee)
+        # --- LIMPIEZA DE IDENTIDAD DESECHABLE ---
+        log_suffix = ""
+        if hasattr(request, '_burner_id_to_destroy'):
+             print(f"🧹 [CLEANUP] Destruyendo identidad utilizada...")
+             self.identity_mgr.destroy_identity(request._burner_id_to_destroy)
+             log_suffix += " (Identity Incinerated)"
+        
+        # --- FIRMA FORENSE (PROOF OF INTENT) ---
+        proof_data = None
+        if request.justification:
+             print(f"⚖️ [LEGAL] Generando Proof of Intent firmado...")
+             proof = self.legal_wrapper.sign_intent(request.agent_id, clean_vendor, request.amount, request.justification)
+             proof_data = proof['proof_text']
 
-    def _execute_stripe_charge(self, amount, vendor_desc):
+        success_msg = f"Pago Realizado. (Subtotal: ${request.amount} + Fee: ${fee})" + log_suffix
+        
+        # Guardamos la prueba en el log
+        log_reason = success_msg
+        if proof_data:
+            log_reason += f"\n\n{proof_data}"
+
+        return self._result(True, "APPROVED", log_reason, request, new_balance, invoice_url=invoice_path, fee=fee)
+
+    def _execute_stripe_charge(self, amount, vendor_desc, invisible_context=None):
         """
         Intenta realizar un cargo real en Stripe.
         Retorna el ID de transacción si es exitoso, o None si falla.
         """
         try:
+            # Configurar Proxy si estamos en modo invisible
+            original_proxy = stripe.proxy
+            if invisible_context and invisible_context.get('proxy'):
+                stripe.proxy = invisible_context['proxy']
+                print(f"   🛡️ Túnel Invisible Activado: Enrutando vía {stripe.proxy.split('@')[1] if '@' in stripe.proxy else 'Proxy'}")
+
             # Stripe trabaja en centavos (ints), no decimales. $10.50 -> 1050
             amount_cents = int(amount * 100)
             
             # Simulamos el uso de una tarjeta VISA de prueba (pm_card_visa)
-            # En producción, aquí usarías el customer_id asociado al agente.
+            metadata = {}
+            if invisible_context:
+                metadata['user_agent'] = invisible_context.get('User-Agent')
+                metadata['screen_res'] = invisible_context.get('Screen-Resolution')
+            
             intent = stripe.PaymentIntent.create(
                 amount=amount_cents,
                 currency="usd",
                 payment_method="pm_card_visa", # Tarjeta mágica de test que siempre pasa
                 confirm=True, # Cobra inmediatamente
                 description=f"AgentPay Charge: {vendor_desc}",
+                metadata=metadata,
                 automatic_payment_methods={
                     'enabled': True,
                     'allow_redirects': 'never' # Forzamos error si requiere 3D Secure (IAs no pueden hacer 3DS)
                 }
             )
             
+            # Restaurar proxy para no afectar otras llamas globales (si fuera multihilo real, usaríamos ContextVar)
+            stripe.proxy = None
+            
             print(f"✅ [STRIPE SUCCESS] Cargo confirmado: {intent.id}")
             return intent.id
 
         except stripe.error.CardError as e:
-            # La tarjeta fue rechazada (fondos insuficientes, bloqueada, etc.)
+            stripe.proxy = None # Safety reset
             print(f"❌ [STRIPE ERROR] Tarjeta rechazada: {e.user_message}")
             return None
         except Exception as e:
+            stripe.proxy = None # Safety reset
             print(f"❌ [STRIPE SYSTEM ERROR] {str(e)}")
             return None
 
@@ -538,11 +605,87 @@ class UniversalEngine:
         except Exception as e:
             return {"success": False, "message": str(e)}
 
-    def dispute_transaction(self, agent_id, transaction_id, reason):
-        """Arbitraje de Disputas con IA"""
-        print(f"⚖️ DISPUTA INICIADA: Tx {transaction_id} por {reason}")
-        # En producción: Iniciar proceso en Stripe
-        return {"success": True, "status": "OPEN", "ticket_id": f"CASE-{uuid.uuid4().hex[:6].upper()}"}
+    def dispute_transaction(self, agent_id, transaction_id, reason, proof_logs=""):
+        """
+        Arbitraje de Disputas con IA.
+        Si la IA determina que es ganable, inicia la disputa en Stripe automáticamente.
+        """
+        print(f"⚖️ DISPUTA INICIADA: Tx {transaction_id} por '{reason}'")
+        
+        # 1. Análisis del Caso (Lawyer)
+        # Recuperamos info básica de la transacción simulada para contexto
+        # En prod: tx = self.db.table("transaction_logs").select("*").eq("id", transaction_id)...
+        vendor = "Unknown Vendor" # Placeholder
+        amount = 0.0 # Placeholder
+        
+        case_analysis = self.lawyer.analyze_case(agent_id, vendor, amount, reason, proof_logs)
+        
+        if case_analysis.get('viability') == 'WINNABLE':
+            # 2. Iniciar Disputa Real
+            print(f"   ✅ CASO GANABLE. Confidence: {case_analysis.get('confidence_score')}%")
+            print(f"   📝 Enviando Dossier a Stripe...")
+            
+            dispute_result = self.lawyer.file_stripe_dispute(transaction_id, case_analysis.get('dossier_text'))
+            
+            return {
+                "success": True,
+                "status": "FILED",
+                "ticket_id": dispute_result['reference'],
+                "lawyer_note": "Dispute filed automatically based on strong evidence.",
+                "dossier": case_analysis.get('dossier_text')
+            }
+        else:
+            # 3. Caso Débil
+            print(f"   ⚠️ CASO DÉBIL. No se iniciará disputa automática.")
+            return {
+                "success": False,
+                "status": "IGNORED",
+                "reason": "AI Lawyer determined evidence is insufficient.",
+                "analysis": case_analysis
+            }
+
+    def transfer_balance(self, from_agent_id, to_agent_id, amount):
+        """
+        Préstamo P2P Inter-Agente.
+        Permite mover fondos entre agentes de la MISMA ORGANIZACIÓN.
+        """
+        if amount <= 0: return {"success": False, "message": "Amount must be positive"}
+        
+        try:
+            # 1. Verificar origen
+            f_resp = self.db.table("wallets").select("*").eq("agent_id", from_agent_id).execute()
+            if not f_resp.data: return {"success": False, "message": "Source agent not found"}
+            f_wallet = f_resp.data[0]
+            
+            # 2. Verificar destino
+            t_resp = self.db.table("wallets").select("*").eq("agent_id", to_agent_id).execute()
+            if not t_resp.data: return {"success": False, "message": "Target agent not found"}
+            t_wallet = t_resp.data[0]
+            
+            # 3. Verificar Organización (Must be same Owner)
+            if f_wallet.get('owner_name') != t_wallet.get('owner_name'):
+                 return {"success": False, "message": "Inter-organization transfers forbidden. Must belong to same owner."}
+            
+            # 4. Verificar Fondos
+            if float(f_wallet['balance']) < amount:
+                return {"success": False, "message": "Insufficient funds"}
+                
+            # 5. Ejecutar Transferencia Atómica (Simulada secuencial aquí)
+            new_f_bal = float(f_wallet['balance']) - amount
+            new_t_bal = float(t_wallet['balance']) + amount
+            
+            self.db.table("wallets").update({"balance": new_f_bal}).eq("agent_id", from_agent_id).execute()
+            self.db.table("wallets").update({"balance": new_t_bal}).eq("agent_id", to_agent_id).execute()
+            
+            # 6. Log
+            self._result(True, "APPROVED", f"Internal Transfer to {to_agent_id}", 
+                         TransactionRequest(agent_id=from_agent_id, vendor="Internal Transfer", amount=amount, description=f"Transfer to {to_agent_id}"), 
+                         new_f_bal)
+                         
+            return {"success": True, "new_balance": new_f_bal, "message": "Transfer successful"}
+            
+        except Exception as e:
+            return {"success": False, "message": str(e)}
 
     def send_alert(self, agent_id, message):
         """Notificación Directa al Dueño"""

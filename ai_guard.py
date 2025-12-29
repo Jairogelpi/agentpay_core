@@ -12,7 +12,7 @@ try:
 except:
     AI_ENABLED = False
 
-def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[]):
+def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None):
     """
     NIVEL DIOS: Analiza no solo el gasto actual, sino la desviación del patrón histórico.
     Recibe 'history': Una lista de las últimas 5 transacciones de este agente.
@@ -31,7 +31,7 @@ def audit_transaction(vendor, amount, description, agent_id, agent_role, history
 
     prompt = f"""
     Eres el Auditor de Comportamiento de AgentPay.
-    Tu objetivo es detectar ANOMALÍAS en el patrón de gasto.
+    Tu objetivo es detectar ANOMALÍAS en el patrón de gasto y VINCULAR la intención con la acción.
     
     PERFIL:
     - Agente: {agent_role} (ID: {agent_id})
@@ -40,25 +40,27 @@ def audit_transaction(vendor, amount, description, agent_id, agent_role, history
     HISTORIAL RECIENTE (El comportamiento normal de este agente):
     {history_text}
     
-    TRANSACCIÓN A EVALUAR (¿Encaja en el patrón?):
+    TRANSACCIÓN A EVALUAR:
     - Proveedor: "{vendor}"
     - Monto: ${amount}
     - Motivo: "{description}"
+    - JUSTIFICACIÓN (Intención Lógica): "{justification if justification else 'NO PROVISTA'}"
     
     ANÁLISIS DE ANOMALÍAS (Piensa paso a paso):
-    1. **Salto de Monto:** ¿El monto actual es drásticamente superior al promedio histórico o a compras similares recientes?
-    2. **Cambio de Proveedor:** ¿Es un proveedor nuevo en una categoría totalmente distinta a lo que suele comprar?
-    3. **Frecuencia:** ¿Está comprando demasiado rápido lo mismo?
-    4. **Coherencia de Rol:** (Igual que antes, ¿tiene sentido para su rol?).
+    1. **Coherencia de Intención:** ¿La justificación explicada tiene sentido lógico para este gasto? (Si no hay justificación, penaliza ligeramente).
+    2. **Salto de Monto:** ¿El monto actual es drásticamente superior al promedio histórico o a compras similares recientes?
+    3. **Cambio de Proveedor:** ¿Es un proveedor nuevo en una categoría totalmente distinta a lo que suele comprar?
+    4. **Frecuencia:** ¿Está comprando demasiado rápido lo mismo?
+    5. **Coherencia de Rol:** (Igual que antes, ¿tiene sentido para su rol?).
 
-    SI detectas un cambio brusco de comportamiento (ej: gastaba $10 y ahora $500, o compraba software y ahora comida), marca como FLAGGED.
+    SI detectas un cambio brusco de comportamiento SIN una justificación sólida, o si la justificación es absurda ("compré un yate porque tenía sed"), marca como FLAGGED o REJECTED.
     
     SALIDA JSON:
     {{
         "decision": "APPROVED" | "REJECTED" | "FLAGGED",
         "risk_score": 0-100,
         "anomaly_detected": true/false,
-        "reason": "Explica la desviación del patrón histórico o la razón del rechazo."
+        "reason": "Explica la desviación del patrón o valida la justificación."
     }}
     """
 
