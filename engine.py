@@ -563,8 +563,70 @@ class UniversalEngine:
             "action_taken": verdict.get('suggested_action')
         }
 
+    def register_new_agent(self, client_name):
+        """Registra un nuevo agente y crea su wallet inicial."""
+        agent_id = f"sk_{uuid.uuid4().hex[:12]}"
+        try:
+            self.db.table("wallets").insert({
+                "agent_id": agent_id,
+                "client_name": client_name,
+                "balance": 0.0,
+                "credit_score": 750,
+                "max_transaction_limit": 50.0,
+                "daily_limit": 200.0,
+                "allowed_vendors": [],
+                "currency": "USD"
+            }).execute()
+            
+            return {
+                "status": "CREATED",
+                "api_key": agent_id,
+                "agent_id": agent_id,
+                "dashboard_url": f"{self.admin_url}/v1/analytics/dashboard/{agent_id}"
+            }
+        except Exception as e:
+            return {"status": "ERROR", "message": f"DB Error: {str(e)}"}
+
+    def update_agent_settings(self, agent_id, webhook_url=None, owner_email=None):
+        data = {}
+        if webhook_url: data["webhook_url"] = webhook_url
+        if owner_email: data["owner_email"] = owner_email
+        self.db.table("wallets").update(data).eq("agent_id", agent_id).execute()
+        return {"status": "UPDATED"}
+
+    def update_limits(self, agent_id, max_tx=None, daily_limit=None):
+        data = {}
+        if max_tx: data["max_transaction_limit"] = max_tx
+        if daily_limit: data["daily_limit"] = daily_limit
+        self.db.table("wallets").update(data).eq("agent_id", agent_id).execute()
+        return {"status": "LIMITS_UPDATED"}
+
+    def check_payment_status(self, transaction_id):
+        res = self.db.table("transaction_logs").select("*").eq("id", transaction_id).execute()
+        if res.data: return res.data[0]
+        return {"error": "Not found"}
+
+    def get_invoice_url(self, transaction_id):
+        return {"invoice_url": f"{self.admin_url}/v1/invoices/{transaction_id}.pdf"}
+
+    def dispute_transaction(self, agent_id, transaction_id, reason):
+        self.db.table("transaction_logs").update({
+            "status": "DISPUTED", 
+            "reason": f"Disputa iniciada por el agente: {reason}"
+        }).eq("id", transaction_id).execute()
+        return {"status": "DISPUTE_OPENED"}
+
+    def get_agent_passport(self, agent_id):
+        return self.legal_wrapper.issue_kyc_passport(agent_id, "Synthetic Entity")
+
+    def process_quote_request(self, provider_id, service_type, parameters: dict):
+        return {"quote": 1.50, "currency": "USD", "provider": provider_id, "expires_in": 3600}
+
     def get_service_directory(self, role="ALL"):
-        return {"directory": []}
+        return {"directory": [
+            {"name": "DataScraper_AI", "role": "data_procurement", "price": 0.50},
+            {"name": "Translator_Bot", "role": "translation", "price": 0.10}
+        ]}
 
     def send_alert(self, agent_id, message):
-        return {"success": True}
+        return {"success": True, "agent_id": agent_id, "status": "QUEUED"}
