@@ -296,6 +296,11 @@ async def report_value(req: dict):
     """Reportar valor generado por una transacción (ROI)"""
     return engine.report_value(req.get("agent_id"), req.get("transaction_id"), float(req.get("perceived_value", 0.0)))
 
+@app.get("/v1/analytics/dashboard/{agent_id}")
+async def analytics_dashboard(agent_id: str):
+    """Dashboard de Observabilidad (ROI, Salud Financiera)"""
+    return engine.get_dashboard_metrics(agent_id)
+
 @app.post("/v1/transactions/approve")
 async def approve_tx(req: dict):
     return engine.process_approval(req.get("token"))

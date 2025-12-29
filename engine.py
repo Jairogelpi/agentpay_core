@@ -793,6 +793,42 @@ class UniversalEngine:
                  "judicial_opinion": verdict.get('judicial_opinion')
              }
 
+             }
+ 
+    def verify_service_delivery(self, agent_id, transaction_id, service_logs):
+        """
+        [PROACTIVE TRUST] Verificación Automática de Servicio.
+        Analiza logs técnicos post-pago.
+        Si detecta fallo total del servicio (ej: 500 Error, Timeline), abre disputa AUTOMÁTICAMENTE.
+        """
+        print(f"🕵️ [AUTO-VERIFY] Analizando entrega de servicio para Tx {transaction_id}...")
+        
+        # 1. Análisis de Patrones de Fallo
+        is_failure = False
+        failure_reason = ""
+        
+        if "500 Internal Server Error" in service_logs or "Timeout" in service_logs:
+            is_failure = True
+            failure_reason = "Critical Service Failure (Technical Log Analysis)"
+        elif "empty response" in service_logs.lower():
+            is_failure = True
+            failure_reason = "Non-Delivery (Empty Payload)"
+            
+        if is_failure:
+            print(f"🚨 [AUTO-DISPUTE] Fallo detectado: {failure_reason}. Iniciando protocolo de protección.")
+            
+            # 2. Auto-Disputa
+            dispute_res = self.raise_escrow_dispute(agent_id, transaction_id, failure_reason, technical_evidence=service_logs)
+            
+            return {
+                "status": "DISPUTE_OPENED",
+                "trigger": failure_reason,
+                "dispute_details": dispute_res
+            }
+        else:
+            print(f"✅ [AUTO-VERIFY] Servicio verificado correctamente.")
+            return {"status": "VERIFIED_OK", "message": "Service delivery confirmed by log analysis."}
+
     def sign_terms_of_service(self, agent_id, platform_url, forensic_hash="N/A"):
         """
         Permite a un agente firmar TyC (Terms of Service) con respaldo legal.
@@ -905,6 +941,50 @@ class UniversalEngine:
             "directory": results
         }
 
+    def get_dashboard_metrics(self, agent_id):
+        """
+        [OBSERVABILITY] Dashboard de Negocio para el CFO Agéntico.
+        Calcula ROI, Gasto Total vs Límites, y Salud Crediticia.
+        """
+        # 1. Finanzas Básicas
+        status = self.get_agent_status(agent_id)
+        if status.get("status") != "ACTIVE": return status
+        
+        # 2. Métricas de ROI (Value vs Spend)
+        # Simulamos agregación. En prod: select sum(amount), sum(perceived_value) ...
+        # Aquí usamos datos mock realistas basados en el 'status'
+        
+        balance = float(status['finance']['balance'])
+        credit_score = status['credit']['score']
+        
+        # Simulación de datos históricos
+        total_spent = 450.00
+        total_value_generated = 1200.00 
+        roi_percent = ((total_value_generated - total_spent) / total_spent) * 100 if total_spent > 0 else 0
+        
+        return {
+            "agent_id": agent_id,
+            "period": "current_month",
+            "financial_health": {
+                "balance": balance,
+                "credit_score": credit_score,
+                "credit_tier": status['credit']['tier'],
+                "monthly_limit": 500.0, # Hardcoded default for MVP
+                "spent_percent": (total_spent / 500.0) * 100
+            },
+            "roi_analytics": {
+                "total_spent_usd": total_spent,
+                "value_generated_usd": total_value_generated,
+                "roi_percentage": round(roi_percent, 2),
+                "profit_usd": total_value_generated - total_spent
+            },
+            "risk_profile": {
+                "insurance_active": True, # Would check DB
+                "disputes_won": 2,
+                "trust_level": "HIGH" if credit_score > 700 else "MEDIUM"
+            }
+        }
+        
     def report_value(self, agent_id, transaction_id, perceived_value_usd):
         """
         [ROI ENGINE] Reporte de Valor Generado.
