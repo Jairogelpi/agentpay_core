@@ -953,6 +953,10 @@ class UniversalEngine:
         status = self.get_agent_status(agent_id)
         if status.get("status") != "ACTIVE": return status
         
+        # Extracting core variables BEFORE try block
+        balance = float(status['finance']['balance'])
+        credit_score = status['credit']['score']
+        
         # 2. Métricas de ROI (Value vs Spend)
         try:
             # Consultamos TODAS las transacciones del agente
