@@ -98,6 +98,54 @@ def solve_captcha(image_url: str) -> str:
     except Exception as e:
         return json.dumps({"status": "ERROR", "message": str(e)})
 
+
+# --- GOVERNANCE OS TOOLS ---
+
+@mcp.tool()
+def get_status(agent_id: str) -> str:
+    """[GOVERNANCE] Check financial health, credit score, and balance."""
+    try:
+        res = engine.get_agent_status(agent_id)
+        return json.dumps(res)
+    except Exception as e:
+        return json.dumps({"status": "ERROR", "message": str(e)})
+
+@mcp.tool()
+def get_dashboard(agent_id: str) -> str:
+    """[GOVERNANCE] CFO Dashboard: View ROI, Total Spend, and Value Generated."""
+    try:
+        res = engine.get_dashboard_metrics(agent_id)
+        return json.dumps(res)
+    except Exception as e:
+        return json.dumps({"status": "ERROR", "message": str(e)})
+
+@mcp.tool()
+def sign_tos(agent_id: str, platform_url: str, forensic_hash: str = "N/A") -> str:
+    """[LEGAL] Sign Terms of Service with Liability Certificate and Intent Hash."""
+    try:
+        res = engine.sign_terms_of_service(agent_id, platform_url, forensic_hash)
+        return json.dumps(res)
+    except Exception as e:
+        return json.dumps({"status": "ERROR", "message": str(e)})
+
+@mcp.tool()
+def verify_service(agent_id: str, transaction_id: str, logs: str) -> str:
+    """[TRUST] Report service failure (e.g. 500 Error). Triggers Auto-Dispute if valid."""
+    try:
+        res = engine.verify_service_delivery(agent_id, transaction_id, logs)
+        return json.dumps(res)
+    except Exception as e:
+        return json.dumps({"status": "ERROR", "message": str(e)})
+
+@mcp.tool()
+def market_directory(role: str = None) -> str:
+    """[M2M] Find other agents to hire based on Reputation Score."""
+    try:
+        res = engine.get_service_directory(role)
+        return json.dumps(res)
+    except Exception as e:
+        return json.dumps({"status": "ERROR", "message": str(e)})
+
 # --- ESTA ES LA PARTE QUE CAMBIA PARA RENDER ---
 if __name__ == "__main__":
     # En despliegues como Render, FastMCP puede funcionar en modo SSE 
