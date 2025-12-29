@@ -172,16 +172,24 @@ async def approve_endpoint(token: str):
 
 @app.get("/v1/debug/stripe")
 async def debug_stripe():
-    """Diagnóstico ultra-seguro sin llamadas a la API."""
+    """Diagnóstico directo de Issuing."""
+    import stripe
     key = os.getenv("STRIPE_SECRET_KEY", "")
-    mode = "TEST" if key.startswith("sk_test") else "LIVE" if key.startswith("sk_live") else "RESTRICTED" if key.startswith("rk_") else "UNKNOWN"
-    
-    return {
-        "mode": mode,
-        "key_prefix": key[:8],
-        "key_length": len(key),
-        "env_var_exists": bool(key)
-    }
+    try:
+        # Intentamos una operación de Issuing básica
+        holders = stripe.issuing.Cardholder.list(limit=1)
+        return {
+            "mode": "TEST" if key.startswith("sk_test") else "LIVE",
+            "issuing_access": "SUCCESS",
+            "holders_found": len(holders.data)
+        }
+    except Exception as e:
+        return {
+            "mode": "TEST" if key.startswith("sk_test") else "LIVE",
+            "issuing_access": "FAILED",
+            "error_type": type(e).__name__,
+            "error_detail": str(e)
+        }
 
 @app.post("/v1/pay")
 async def pay(req: dict):
