@@ -24,12 +24,37 @@ def send_approval_email(to_email, agent_id, vendor, amount, link):
     <p>Si no lo reconoce, ignore este mensaje.</p>
     """
 
-    # Simulación de envío
-    print(f"\n📧 [EMAIL SYSTEM] ENVIANDO CORREO A: {to_email}")
-    print(f"   | Asunto: {subject}")
-    print(f"   | Link: {link}")
-    print(f"   | (Enviado vía Simulated SMTP Service)\n")
+    # Real SMTP Implementation
+    # Requiere variables de entorno: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
+    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_port = os.environ.get("SMTP_PORT", 587)
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_pass = os.environ.get("SMTP_PASS")
     
-    # Aquí iría el código real:
-    # sendgrid.send(to=to_email, subject=subject, html=body)
-    return True
+    if not all([smtp_host, smtp_user, smtp_pass]):
+        print("❌ [EMAIL ERROR] No SMTP credentials configured. Email NOT sent.")
+        # En modo estricto, esto debería ser una excepción, pero para evitar crash total en demo inicial:
+        raise Exception("Strict Mode Error: SMTP Configuration Missing. Cannot send real email.")
+
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    msg = MIMEMultipart()
+    msg['From'] = f"AgentPay Security <{smtp_user}>"
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'html'))
+
+    try:
+        server = smtplib.SMTP(smtp_host, int(smtp_port))
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        text = msg.as_string()
+        server.sendmail(smtp_user, to_email, text)
+        server.quit()
+        print(f"✅ [EMAIL SENT] Enviado real vía {smtp_host} a {to_email}")
+        return True
+    except Exception as e:
+        print(f"❌ [SMTP ERROR] Fallo al enviar: {str(e)}")
+        raise e
