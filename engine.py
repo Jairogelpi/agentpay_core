@@ -194,17 +194,18 @@ class UniversalEngine:
             log_message = f"{risk_reason} [INTENT_HASH: {intent_hash}]"
             
             if audit['decision'] == 'REJECTED':
-                  return self._result(False, "REJECTED", f"Bloqueado por The Oracle ({sensitivity}): {log_message}", request)
+                  return self._result(False, "REJECTED", f"Bloqueado por The Oracle ({sensitivity}): {log_message}", request, mcc_category=mcc_category, intent_hash=intent_hash)
 
             if audit['decision'] == 'FLAGGED' and sensitivity != "LOW":
                   return self._create_approval_request(request, clean_vendor, reason_prefix=f"Alerta de Seguridad ({sensitivity}): {log_message}")
         else:
             mcc_category = 'services' # Default
+            intent_hash = "N/A"
 
         # --- CAPA 2: FINANCIERA ---
         max_tx = float(wallet.get('max_transaction_limit', 0))
         if max_tx > 0 and request.amount > max_tx:
-             return self._result(False, "REJECTED", f"Excede límite tx (${max_tx})", request)
+             return self._result(False, "REJECTED", f"Excede límite tx (${max_tx})", request, mcc_category=mcc_category, intent_hash=intent_hash)
              
         FEE_PERCENT = 0.035 if insurance_enabled else 0.015
         fee = round(request.amount * FEE_PERCENT, 2)
@@ -217,7 +218,7 @@ class UniversalEngine:
             if credit_check['eligible'] and total_deducted <= (current_balance + credit_check['credit_limit']):
                  print(f"💳 [CREDIT] Usando línea de crédito {credit_check['tier']}")
             else:
-                 return self._result(False, "REJECTED", f"Fondos insuficientes (Req: ${total_deducted})", request)
+                 return self._result(False, "REJECTED", f"Fondos insuficientes (Req: ${total_deducted})", request, mcc_category=mcc_category, intent_hash=intent_hash)
 
         # --- CAPA 3: EJECUCIÓN (TARJETA VIRTUAL REAL) ---
         print(f"💳 [ISSUING] Generando Tarjeta Virtual ({mcc_category}) para {request.vendor}...")
@@ -256,7 +257,9 @@ class UniversalEngine:
             invoice_url=invoice_path, 
             fee=fee,
             card_data=card,
-            forensic_url=forensic_url
+            forensic_url=forensic_url,
+            mcc_category=mcc_category,
+            intent_hash=intent_hash
         )
 
     def _execute_stripe_charge(self, amount, vendor_desc, invisible_context=None):
@@ -487,15 +490,28 @@ class UniversalEngine:
             self.db.table("transaction_logs").update({"perceived_value": perceived_value_usd}).eq("id", transaction_id).execute()
         return {"status": "VALUE_RECORDED", "perceived_value": perceived_value_usd}
 
-    def _result(self, auth, status, reason, req, bal=None, invoice_url=None, fee=0.0, card_data=None, forensic_url=None):
+    def _result(self, auth, status, reason, req, bal=None, invoice_url=None, fee=0.0, card_data=None, forensic_url=None, mcc_category=None, intent_hash=None):
         txn_id = str(uuid.uuid4())
         payload = {
-            "id": txn_id, "agent_id": req.agent_id, "vendor": req.vendor, "amount": req.amount,
-            "status": status, "reason": reason, "fee": fee,
+            "id": txn_id, 
+            "agent_id": req.agent_id, 
+            "vendor": req.vendor, 
+            "amount": req.amount,
+            "status": status, 
+            "reason": reason, 
+            "fee": fee,
+            "justification": req.justification,
+            "mcc_category": mcc_category,
+            "intent_hash": intent_hash,
             "forensic_hash": forensic_url.split('/')[-1] if forensic_url else None
         }
         if invoice_url: payload["invoice_url"] = invoice_url
-        self.db.table("transaction_logs").insert(payload).execute()
+        
+        try:
+            self.db.table("transaction_logs").insert(payload).execute()
+        except Exception as e:
+            print(f"⚠️ Error guardando log en Supabase: {e}")
+            # En producción, esto debería ir a un sistema de observabilidad
         
         card_details = None
         if card_data:
