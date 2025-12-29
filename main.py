@@ -172,22 +172,16 @@ async def approve_endpoint(token: str):
 
 @app.get("/v1/debug/stripe")
 async def debug_stripe():
-    """Diagnóstico detallado de Stripe."""
-    import stripe
-    try:
-        key = os.getenv("STRIPE_SECRET_KEY", "")
-        mode = "TEST" if key.startswith("sk_test") else "LIVE" if key.startswith("sk_live") else "UNKNOWN"
-        
-        balance = stripe.Balance.retrieve()
-        
-        return {
-            "mode": mode,
-            "key_preview": key[:12] + "...",
-            "balance": balance,
-            "issuing_status": "Checking..."
-        }
-    except Exception as e:
-        return {"error": str(e), "note": "Si ves 'livemode', la llave podría ser de un tipo restringido."}
+    """Diagnóstico ultra-seguro sin llamadas a la API."""
+    key = os.getenv("STRIPE_SECRET_KEY", "")
+    mode = "TEST" if key.startswith("sk_test") else "LIVE" if key.startswith("sk_live") else "RESTRICTED" if key.startswith("rk_") else "UNKNOWN"
+    
+    return {
+        "mode": mode,
+        "key_prefix": key[:8],
+        "key_length": len(key),
+        "env_var_exists": bool(key)
+    }
 
 @app.post("/v1/pay")
 async def pay(req: dict):
