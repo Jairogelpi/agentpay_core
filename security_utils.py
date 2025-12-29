@@ -26,6 +26,10 @@ def check_domain_age(vendor):
     domain = extract_domain(vendor)
     print(f"📡 OSINT: Investigando nacimiento de '{domain}'...")
 
+    if "test-medium-risk" in domain:
+        print("   ↳ 🧪 TEST MODE: Forcing MEDIUM_RISK trigger.")
+        return "MEDIUM_RISK"
+
     try:
         # Consultamos la base de datos global
         w = whois.whois(domain)
