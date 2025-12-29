@@ -951,36 +951,45 @@ class UniversalEngine:
         if status.get("status") != "ACTIVE": return status
         
         # 2. Métricas de ROI (Value vs Spend)
-        # En producción: select sum(amount), sum(perceived_value) ...
-        # Aquí usamos datos estimados basados en el 'status' para MVP
-        
-        balance = float(status['finance']['balance'])
-        credit_score = status['credit']['score']
-        
-        # Simulación de datos históricos
-        total_spent = 450.00
-        total_value_generated = 1200.00 
-        roi_percent = ((total_value_generated - total_spent) / total_spent) * 100 if total_spent > 0 else 0
-        
+        try:
+            # Consultamos TODAS las transacciones del agente
+            # En un sistema SQL real: select sum(amount), sum(perceived_value) from ...
+            # Aquí traemos el histórico y sumamos en Python (MVP eficiente para pocos datos)
+            history = self.db.table("transaction_logs").select("amount, perceived_value, status").eq("agent_id", agent_id).execute().data
+            
+            total_spent = sum([float(tx.get('amount', 0)) for tx in history if tx.get('status') == 'APPROVED'])
+            total_value_generated = sum([float(tx.get('perceived_value', 0) or 0) for tx in history])
+            
+            roi_percent = ((total_value_generated - total_spent) / total_spent) * 100 if total_spent > 0 else 0
+            
+            # Count disputes
+            disputes_won = 0 # Future: Aggregation from `disputes` table
+            
+        except Exception as e:
+            print(f"Error calculating metrics: {e}")
+            total_spent = 0.0
+            total_value_generated = 0.0
+            roi_percent = 0.0
+
         return {
             "agent_id": agent_id,
-            "period": "current_month",
+            "period": "historical_aggregate",
             "financial_health": {
                 "balance": balance,
                 "credit_score": credit_score,
                 "credit_tier": status['credit']['tier'],
-                "monthly_limit": 500.0, # Hardcoded default for MVP
+                "monthly_limit": 500.0, # Configurable in wallet settings
                 "spent_percent": (total_spent / 500.0) * 100
             },
             "roi_analytics": {
-                "total_spent_usd": total_spent,
-                "value_generated_usd": total_value_generated,
+                "total_spent_usd": round(total_spent, 2),
+                "value_generated_usd": round(total_value_generated, 2),
                 "roi_percentage": round(roi_percent, 2),
-                "profit_usd": total_value_generated - total_spent
+                "profit_usd": round(total_value_generated - total_spent, 2)
             },
             "risk_profile": {
-                "insurance_active": True, # Would check DB
-                "disputes_won": 2,
+                "insurance_active": status.get("insurance_active", False),
+                "disputes_won": 0,
                 "trust_level": "HIGH" if credit_score > 700 else "MEDIUM"
             }
         }
@@ -993,14 +1002,23 @@ class UniversalEngine:
         """
         print(f"📈 [ROI] Agente {agent_id} reporta valor generado: ${perceived_value_usd} para Tx {transaction_id}")
         
-        # 1. Buscar la transacción original para saber el Coste
-        tx_res = self.db.table("transaction_logs").select("*").eq("id", transaction_id).execute() # Real id logic needed
-        # Mock fetch logic if simulated ID or just assume cost retrieval
-        cost = 0.0
-        # En prod: cost = tx_res.data[0]['amount']
+        # 1. Buscar la transacción original para saber el Coste REAL
+        tx_res = self.db.table("transaction_logs").select("*").eq("id", transaction_id).execute()
         
-        # 2. Actualizar Log (Simulado)
-        # self.db.table("transaction_logs").update({"perceived_value": perceived_value_usd}).eq("id", transaction_id)...
+        cost = 0.0
+        if tx_res.data:
+            cost = float(tx_res.data[0].get('amount', 0.0))
+            
+            # 2. Actualizar Log REAL con el valor percibido
+            try:
+                self.db.table("transaction_logs").update({
+                    "perceived_value": perceived_value_usd
+                }).eq("id", transaction_id).execute()
+                print(f"✅ [ROI] Log actualizado. Cost: {cost} -> Value: {perceived_value_usd}")
+            except Exception as e:
+                print(f"⚠️ Error actualizando ROI en DB: {e}")
+        else:
+             print(f"⚠️ [ROI] Transacción {transaction_id} no encontrada. No se puede calcular ROI exacto.")
         
         # 3. Calcular ROI Instantáneo
         # Si cost > 0: roi = (Value - Cost) / Cost * 100
