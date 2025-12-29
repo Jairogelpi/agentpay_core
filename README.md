@@ -57,5 +57,17 @@ agent.save_session_state(identity['identity_id'], navigator.cookies_dict)
 - **Backend**: FastAPI + Supabase + Stripe + Twilio.
 - **Env Vars Required**: `STRIPE_SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `OPENAI_API_KEY`.
 
+## 🧠 How it Works: The Financial Lifecycle
+
+AgentPay acts as a **Trust Middleware** between humans and AI. Here is how money actually moves in a real environment:
+
+1.  **Top-up (Funding)**: The Human Client uses the `/v1/topup/create` endpoint to generate a real Stripe Checkout link. They pay with their own card/bank. This money lands in the **AgentPay Master Account**.
+2.  **Credit Allocation**: The system updates the Agent's `wallet` in the database. For every $1 credit, AgentPay holds $1 in the **Stripe Issuing Balance**.
+3.  **The Request**: An AI Agent wants to purchase something on a website. It calls `/v1/pay`.
+4.  **Virtual Card Issuance**: AgentPay verifies the Agent's balance and reasoning (AI Guard). If approved, it calls the **Stripe Issuing API** to create a unique **Virtual Credit Card** on the fly.
+5.  **The Vendor Purchase**: The Agent receives the Card Number, CVV, and Expiry. It enters these details on the vendor's site (e.g., OpenAI, Amazon, Midjourney).
+6.  **Real Movement**: The vendor charges the Virtual Card. The money flows from the **Stripe Issuing Balance** (previously funded by the Client) directly to the **Vendor**.
+7.  **Forensic Proof**: Simultaneously, a **Forensic Ledger** bundle is created, linking the AI's "Chain of Thought" justification to that specific transaction ID for the human CFO to review.
+
 ---
 *Built with ❤️ for the Agentic Economy.*

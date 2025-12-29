@@ -58,9 +58,17 @@ def run():
     results["identity_proxy"], _ = test("Get Proxy", "POST", "/v1/identity/proxy", {"region": "US"})
     results["identity_captcha"], _ = test("Solve Captcha", "POST", "/v1/identity/captcha", {"image_url": "https://example.com/captcha.png"})
     
-    # === FINANCIAL ===
-    log("💵", "\n--- FINANCIAL ---")
-    results["topup_create"], _ = test("Create Top-Up Link", "POST", "/v1/topup/create", {"agent_id": AGENT_ID, "amount": 50})
+    # === FINANCIAL & TOP-UP ORCHESTRATION ===
+    log("💵", "\n--- FINANCIAL & TOP-UP ORCHESTRATION ---")
+    results["topup_create"], data = test("Create Top-Up Link", "POST", "/v1/topup/create", {"agent_id": AGENT_ID, "amount": 50})
+    if data.get('url'):
+        log("🔗", f"   TOP-UP LINK: {data['url']}")
+        log("💡", "   Para pago real: Entra al link y paga con tarjeta real o de test.")
+    
+    # Simulación de Webhook (Esto fallará en firma si no se manda el header correcto, pero prueba el endpoint)
+    log("📡", "   Simulando llegada de Webhook de Stripe...")
+    results["webhook_test"], _ = test("Stripe Webhook Endpoint", "POST", "/webhook", {"id": "evt_test", "type": "checkout.session.completed"})
+    
     results["credit_score"], data = test("Check Credit Score", "POST", "/v1/credit/score", {"agent_id": AGENT_ID})
     log("🏅", f"   Score: {data.get('score', 0)}")
     results["insurance_config"], _ = test("Configure Insurance", "POST", "/v1/insurance/configure", {"agent_id": AGENT_ID, "enabled": True, "strictness": "HIGH"})
@@ -75,6 +83,23 @@ def run():
     tx_id = data.get('transaction_id')
     log("🧾", f"   TX ID: {tx_id}")
     
+    # NUEVO: Verificar datos de tarjeta real
+    card = data.get('card_details')
+    if card:
+        log("🎫", f"   TARJETA REAL: {card['brand'].upper()} {card['number']} (CVV: {card['cvv']})")
+    
+    # NUEVO: Verificar Forensic Ledger
+    forensic_url = data.get('forensic_bundle_url')
+    if forensic_url:
+        log("⚖️", f"   FORENSIC LEDGER: {forensic_url}")
+        # Mostrar razomiento de la IA (Viene en la respuesta de pago)
+        if data.get('reason'):
+            log("🧠", f"   ORACLE VERDICT: {data['reason']}")
+        
+        # Extraer ID del bundle de la URL
+        bundle_id = forensic_url.split('/')[-1]
+        results["forensic_audit"], _ = test("Fetch Forensic Audit", "GET", f"/v1/audit/{bundle_id}")
+    
     if tx_id:
         results["tx_status"], _ = test("Check TX Status", "POST", "/v1/transactions/status", {"transaction_id": tx_id})
         results["invoice_download"], _ = test("Download Invoice", "POST", "/v1/invoices/download", {"transaction_id": tx_id})
@@ -84,10 +109,12 @@ def run():
     
     # === PROCUREMENT ===
     log("🛒", "\n--- PROCUREMENT ---")
-    results["procure"], _ = test("Market Procure", "POST", "/v1/market/procure", {
+    results["procure"], data = test("Market Procure", "POST", "/v1/market/procure", {
         "agent_id": AGENT_ID, "vendor": "supplier.example.com", "amount": 10.0,
         "items": [{"name": "Widget", "qty": 1}], "description": "B2B Order"
     })
+    if data.get('card_details'):
+        log("🎫", f"   PROCUREMENT CARD: {data['card_details']['number']}")
     
     # === ESCROW ===
     log("🔐", "\n--- ESCROW ---")

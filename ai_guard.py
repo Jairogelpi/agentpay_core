@@ -1,124 +1,143 @@
-# Configuración: Router de Modelos
-# GOD_TIER: GPT-5 (o lo mejor disponible) para transacciones críticas (>$1000) o disputas.
-# HIGH_TIER: GPT-4o para el día a día corporativo.
-# LOW_TIER: GPT-3.5-turbo para micropagos eficiencia.
-MODELS = {
-    "GOD_TIER": "gpt-4o", # TODO: Actualizar a 'gpt-5' en cuanto OpenAI libere la API
-    "HIGH_TIER": "gpt-4o",
-    "LOW_TIER": "gpt-3.5-turbo"
-}
+import os
+import json
+import hashlib
+import statistics
+from openai import OpenAI
+
+# Configuración: The Oracle Tier (Supreme Governance)
+# Enforced for all transactions.
+ORACLE_MODEL = "gpt-4o" 
 
 try:
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     AI_ENABLED = True
 except:
     AI_ENABLED = False
+
+def calculate_statistical_risk(amount, history):
+    """
+    Advanced Z-Score + Trend Analysis.
+    """
+    if not history or len(history) < 2:
+        return 0.0, "INITIAL_BASELINE"
     
-def select_model(budget_status="NORMAL", complexity="HIGH", amount=0):
-    """
-    Router de Modelos (Cost-Aware Gateway).
-    Elige el modelo más eficiente según el contexto financiero, riesgo y MONTO.
-    """
-    if amount > 1000:
-        return MODELS["GOD_TIER"]  # "Si lo necesita" -> High Stakes
+    amounts = [float(h['amount']) for h in history]
+    mean = statistics.mean(amounts)
+    stdev = statistics.stdev(amounts)
+    
+    if stdev == 0:
+        return (50.0 if amount > mean else 0.0), "STATIC_HISTORY_DEVIATION"
         
-    if budget_status == "LOW_FUNDS" or (amount < 10 and complexity == "LOW"):
-        return MODELS["LOW_TIER"]
-        
-    return MODELS["HIGH_TIER"]
+    z_score = (amount - mean) / stdev
+    return z_score, f"Stats(m:{mean:.1f}, s:{stdev:.1f})"
+
+def _oracle_call(system_prompt, user_prompt, temperature=0.0):
+    """
+    Internal helper for high-precision Oracle calls.
+    """
+    response = client.chat.completions.create(
+        model=ORACLE_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        response_format={"type": "json_object"},
+        temperature=temperature
+    )
+    return json.loads(response.choices[0].message.content)
 
 def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", domain_status="UNKNOWN"):
     """
-    NIVEL DIOS: Analiza no solo el gasto actual, sino la desviación del patrón histórico.
-    Genera un 'Intent Hash' forense para auditoría legal.
+    THE ORACLE v3: Multi-Stage Adversarial Governance.
+    The highest security standard for AI-driven financial operations.
     """
-    import hashlib
-    
     if not AI_ENABLED:
-        return {"decision": "FLAGGED", "reason": "IA Off (Forensic Data Missing)"}
+        return {"decision": "FLAGGED", "reason": "Oracle Offline (Forensic Warning)"}
 
-    # Calculamos el promedio de gasto histórico para dar contexto matemático a la IA
-    avg_spend = sum([float(h['amount']) for h in history]) / len(history) if history else 0
-    
-    history_text = "\n".join([f"- {h.get('created_at', 'N/A')}: ${h['amount']} a {h['vendor']} ({h.get('reason', 'N/A')})" for h in history])
+    z_score, stats_desc = calculate_statistical_risk(amount, history)
+    history_md = "\n".join([f"- {h['vendor']} (${h['amount']}): {h.get('reason', 'N/A')}" for h in history[-5:]])
 
-    print(f"🕵️‍♂️ AI GUARD (Policy: {sensitivity}): Auditando {vendor} (${amount})...")
+    print(f"👁️ [THE ORACLE] Commencing 3-Stage Elite Audit for ${amount} at {vendor}...")
 
-    prompt = f"""
-    Eres el Auditor de Comportamiento de AgentPay.
-    POLICY SENSITIVITY: {sensitivity}
-    DOMAIN STATUS: {domain_status}
+    # --- STAGE 1: THE EXPERT PANEL ---
+    panel_prompt = f"""
+    PERSPECTIVES:
+    1. THE DETECTIVE: Domain reputation ({domain_status}), carding risk, fraud patterns.
+    2. THE PSYCHOLOGIST: Agent Drift. Does this intent match role '{agent_role}'?
+    3. THE CFO: ROI, Z-Score ({z_score:.2f}), budget health, business sense.
     
-    OBJETIVO: Detectar si esta transacción es una ALUCINACIÓN FINANCIERA o una acción legítima.
+    CONTEXT:
+    Agent: {agent_role} (ID: {agent_id})
+    Target: {vendor} (${amount})
+    Justification: {justification}
+    Recent History: {history_md}
     
-    CONTEXTO:
-    - Agente: {agent_role} (ID: {agent_id})
-    - Histórico: ${avg_spend:.2f} avg.
-    {history_text}
+    TAREA ADICIONAL: Determina el Merchant Category Code (MCC) más apropiado.
+    Categorías disponibles en Stripe: 'software', 'cloud_computing', 'advertising', 'travel', 'food_and_beverage', 'retail', 'services', 'entertainment', 'utilities'.
     
-    TRANSACCIÓN:
-    - Vendor: {vendor}
-    - Amount: ${amount}
-    - Desc: {description}
-    - Justification (User/Agent Provided): {justification}
-    
-    EVALUACIÓN:
-    Analyza coherencia, desviación y riesgo. Si el Justification es vago, aumenta el riesgo.
-    
-    SALIDA JSON:
+    OUTPUT JSON:
     {{
-        "decision": "APPROVED" | "REJECTED" | "FLAGGED",
-        "risk_score": 0-100,
-        "reasoning": "Explicación detallada (Chain of Thought)",
-        "short_reason": "Resumen 1 linea"
+        "detective_audit": "detailed analysis",
+        "psychologist_audit": "behavioral drift check",
+        "cfo_audit": "financial viability check",
+        "suggested_mcc_category": "string (one of the valid categories)",
+        "preliminary_risk": 0-100,
+        "preliminary_decision": "APPROVE" | "REJECT" | "FLAG"
     }}
     """
-
+    
     try:
-        # Router Logic
-        # Asumimos 'NORMAL' budget por ahora.
-        # < $10 -> LOW_TIER
-        # $10 - $1000 -> HIGH_TIER
-        # > $1000 -> GOD_TIER (GPT-5 Ready)
+        # Step 1: Experts weigh in
+        stage1 = _oracle_call("You are the Elite Panel of AgentPay Experts.", panel_prompt)
         
-        current_model = select_model(complexity="HIGH", amount=amount)
+        # --- STAGE 2: ADVERSARIAL REVIEW (DEVIL'S ADVOCATE) ---
+        adversary_prompt = f"""
+        PRELIMINARY ANALYSIS: {json.dumps(stage1)}
         
-        print(f"🤖 [AI ROUTER] Usando {current_model} para auditar ${amount}...")
-
-        response = client.chat.completions.create(
-            model=current_model,
-            messages=[
-                {"role": "system", "content": "Sistema de Seguridad Bancaria IA."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.0
-        )
+        TASK: Act as a Devil's Advocate. Your job is to find reasons to REJECT this transaction. 
+        Detect if the experts were too lenient or missed a subtle fraud signal (Agent Hijacking).
         
-        content = json.loads(response.choices[0].message.content)
-        risk = content.get('risk_score', 0)
-        reasoning = content.get('reasoning', content.get('reason', 'No reasoning'))
+        OUTPUT JSON:
+        {{
+            "weaknesses_found": ["signal 1", "signal 2"],
+            "adversarial_risk_multiplier": 1.0-2.0,
+            "final_warning": "string"
+        }}
+        """
+        stage2 = _oracle_call("Act as a ruthless Adversarial Security Auditor.", adversary_prompt, temperature=0.3)
         
-        # --- FORENSIC AUDIT (INTENT HASH) ---
-        # Vinculamos criptográficamente: QUIÉN + QUÉ + POR QUÉ + RIESGO
-        # Esto es inmutable. Si alguien cambia la justificación a posteriori, el hash no coincidirá.
+        # --- STAGE 3: THE ARBITER CONSENSUS ---
+        final_risk = min(100, stage1['preliminary_risk'] * stage2['adversarial_risk_multiplier'])
         
-        forensic_data = f"{agent_id}|{vendor}|{amount}|{reasoning}|{risk}|{domain_status}"
-        intent_hash = hashlib.sha256(forensic_data.encode()).hexdigest()
+        arbiter_prompt = f"""
+        PANEL DECISION: {stage1['preliminary_decision']}
+        MCC CATEGORY: {stage1.get('suggested_mcc_category', 'services')}
+        RISK: {final_risk}
+        ADVERSARY FINDINGS: {stage2['final_warning']}
         
-        content['intent_hash'] = intent_hash
-        content['forensic_string'] = f"SHA256(Agent+Vendor+Amount+Reasoning+Risk)"
+        TASK: Consolidate the verdict. If Risk > {sensitivity == "HIGH" and 30 or 50}, REJECT or FLAG.
         
-        # Umbrales Dinámicos según Póliza
-        thresholds = {"HIGH": 30, "MEDIUM": 50, "LOW": 80}
-        limit = thresholds.get(sensitivity, 50)
+        OUTPUT JSON:
+        {{
+            "decision": "APPROVED" | "REJECTED" | "FLAGGED",
+            "mcc_category": "string (confirm the MCC from the panel)",
+            "risk_score": {final_risk},
+            "short_reason": "Veredicto final",
+            "reasoning": "Chain of Thought consolidation",
+            "metadata": {{ "z_score": {z_score}, "adversary_active": true }}
+        }}
+        """
+        final_verdict = _oracle_call("You are The Arbiter. Your decision is final and legally binding.", arbiter_prompt)
         
-        if risk > limit:
-             content['decision'] = 'REJECTED' if sensitivity == "HIGH" else "FLAGGED"
-             content['short_reason'] += f" [Risk {risk} > {limit}]"
-             
-        return content
+        # --- FORENSIC SIGNING ---
+        forensic_data = f"ORACLE|{agent_id}|{vendor}|{amount}|{final_verdict['reasoning']}|{final_risk}"
+        final_verdict['intent_hash'] = hashlib.sha256(forensic_data.encode()).hexdigest()
+        
+        # Asegurar que el MCC llegue al motor
+        final_verdict['mcc_category'] = final_verdict.get('mcc_category', stage1.get('suggested_mcc_category', 'services'))
+        
+        return final_verdict
 
     except Exception as e:
-        print(f"❌ Error Crítico IA: {e}")
-        return {"decision": "REJECTED", "reason": "Fallo en sistema de seguridad. Bloqueo preventivo."}
+        print(f"❌ Oracle Failure: {e}")
+        return {"decision": "REJECTED", "reason": f"Oracle Internal Conflict: {str(e)}"}
