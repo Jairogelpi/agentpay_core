@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends, Security
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 import os
 import json
@@ -10,8 +11,17 @@ from mcp.server.fastmcp import FastMCP
 
 # Inicializamos
 app = FastAPI(title="AgentPay Production Server")
+security = HTTPBearer()
 engine = UniversalEngine()
 identity_mgr = IdentityManager(engine.db)
+
+def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
+    """Dependencia de Seguridad: Valida el Bearer Token contra la DB."""
+    token = credentials.credentials
+    agent_id = engine.verify_agent_credentials(token)
+    if not agent_id:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    return agent_id
 
 # --- CONFIGURACIÓN MCP (MODEL CONTEXT PROTOCOL) ---
 # Creamos el servidor MCP con el nombre del proyecto
@@ -192,10 +202,16 @@ async def debug_stripe():
         }
 
 @app.post("/v1/pay")
-async def pay(req: dict):
-    """Endpoint principal para que los agentes pidan dinero"""
-    # { "agent_id": "...", "vendor": "...", "amount": 10.0, "description": "..." }
+async def pay(req: dict, agent_id: str = Depends(verify_api_key)):
+    """Endpoint principal PROTEGIDO con Bearer Token."""
+    # NO confiamos en el agent_id del cuerpo JSON si difiere del token.
+    # Forzamos el uso del ID autenticado.
+    
     real_req = TransactionRequest(**req)
+    
+    # OVERRIDE DE SEGURIDAD: El pagador es quien tiene la llave.
+    real_req.agent_id = agent_id 
+    
     res = engine.evaluate(real_req)
     return {
         "success": res.authorized,

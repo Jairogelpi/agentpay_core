@@ -27,7 +27,8 @@ def agent_log(msg):
 
 class EliteAgent:
     def __init__(self):
-        self.api_key = None
+        self.api_key = None # El Secreto (sk_live_...)
+        self.agent_id = None # El ID Público (ag_...)
         
     def setup(self):
         agent_log(f"--- INICIALIZANDO AGENTE: {AGENT_NAME} ---")
@@ -40,9 +41,13 @@ class EliteAgent:
                 raise Exception(f"❌ Error de Registro en Servidor: {data.get('message')}")
             
             self.api_key = data.get("api_key")
+            self.agent_id = data.get("agent_id")
+            
             if not self.api_key:
                 raise Exception("❌ Error de Registro: No se recibió API Key en la respuesta.")
-            agent_log(f"Wallet vinculada. API Key: {self.api_key}")
+            
+            agent_log(f"✅ Agente Registrado. ID: {self.agent_id}")
+            agent_log(f"🔑 Secret Key recibida (y guardada en memoria): {self.api_key[:10]}...")
         else:
             raise Exception(f"❌ Error HTTP en Registro: {r.status_code} - {r.text[:100]}")
 
@@ -65,14 +70,17 @@ class EliteAgent:
         
         # Simulamos que la IA extrae los datos del plan
         payload = {
-            "agent_id": self.api_key,
+            "agent_id": self.agent_id, # Esto es ahora irrelevante, el server usa el token
             "vendor": "cloud-services.com",
             "amount": 15.00,
             "description": "Compute Units for Data Analysis",
             "justification": "Necesitamos potencia de cálculo para procesar el set de datos objetivo."
         }
         
-        r = requests.post(f"{HOST}/v1/pay", json=payload)
+        # AUTENTICACIÓN REAL: Enviamos el secreto en el header
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        
+        r = requests.post(f"{HOST}/v1/pay", json=payload, headers=headers)
         auth_data = r.json()
         
         if auth_data.get("success"):

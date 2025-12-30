@@ -4,6 +4,8 @@ import stripe
 import base64
 import uuid
 import time
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from dotenv import load_dotenv
@@ -583,26 +585,60 @@ class UniversalEngine:
             "action_taken": verdict.get('suggested_action')
         }
 
-    def register_new_agent(self, client_name):
-        """Registra un nuevo agente simplificado para evitar errores de esquema."""
-        agent_id = f"sk_{uuid.uuid4().hex[:12]}"
+    # --- SECURITY & AUTHENTICATION ---
+    def _hash_key(self, key: str) -> str:
+        """SHA-256 hashing para almacenamiento seguro."""
+        return hashlib.sha256(key.encode()).hexdigest()
+
+    def verify_agent_credentials(self, token: str) -> str:
+        """
+        Verifica si el Bearer token es válido.
+        Retorna: agent_id si es válido, None si no lo es.
+        """
         try:
-            # Insertamos solo lo mínimo necesario y dejamos que Supabase use sus DEFAULTS
+            # 1. Hasheamos el token entrante
+            token_hash = self._hash_key(token)
+            
+            # 2. Buscamos en la DB
+            # Importante: Buscamos por el HASH, nunca por el token plano
+            resp = self.db.table("wallets").select("agent_id").eq("api_secret_hash", token_hash).execute()
+            
+            if resp.data and len(resp.data) > 0:
+                print(f"🔐 Acceso Autorizado: {resp.data[0]['agent_id']}")
+                return resp.data[0]['agent_id']
+                
+            print(f"🛑 Acceso Denegado: Token inválido")
+            return None
+        except Exception as e:
+            print(f"⚠️ Auth Error: {e}")
+            return None
+
+    def register_new_agent(self, client_name):
+        """Registra un nuevo agente con credenciales seguras (Secret Key)."""
+        agent_id = f"ag_{uuid.uuid4().hex[:12]}" # Identificador público
+        
+        # Generamos la LLAVE SECRETA (Solo se muestra una vez)
+        # Formato: sk_live_<random_url_safe>
+        raw_secret = f"sk_live_{secrets.token_urlsafe(32)}"
+        secret_hash = self._hash_key(raw_secret)
+        
+        try:
             self.db.table("wallets").insert({
                 "agent_id": agent_id,
                 "owner_name": client_name,
-                "balance": 100.0, # Regalo de bienvenida para que el test no falle por falta de fondos
+                "api_secret_hash": secret_hash, # GUARDAMOS SOLO EL HASH
+                "balance": 100.0,
                 "owner_email": "demo-agent@agentpay.io"
             }).execute()
             
             return {
                 "status": "CREATED",
-                "api_key": agent_id,
                 "agent_id": agent_id,
-                "dashboard_url": f"{self.admin_url}/v1/analytics/dashboard/{agent_id}"
+                "api_key": raw_secret, # DEVOLVEMOS EL SECRETO (SOLO UNA VEZ)
+                "dashboard_url": f"{self.admin_url}/v1/analytics/dashboard/{agent_id}",
+                "note": "⚠️ GUARDA TU API KEY AHORA. No podrás verla de nuevo."
             }
         except Exception as e:
-            # Si falla, imprimimos el error real en los logs de Render para debug
             print(f"❌ Error en registro DB: {str(e)}")
             return {"status": "ERROR", "message": str(e)}
 
