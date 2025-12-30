@@ -815,7 +815,7 @@ class UniversalEngine:
             # 2. CREAR CUENTA CONNECT (Express) EN STRIPE
             # Esto crea el "balance" separado para este cliente.
             account = stripe.Account.create(
-                country="US", # O "ES" si tus clientes son de España
+                country="ES", # España - Para Stripe Issuing en Europa
                 type="express",
                 capabilities={
                     "card_issuing": {"requested": True},
