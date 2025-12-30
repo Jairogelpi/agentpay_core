@@ -73,7 +73,9 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     Justification: {justification}
     Recent History: {history_md}
     
-    TAREA ADICIONAL: Determina el Merchant Category Code (MCC) más apropiado.
+    TAREA ADICIONAL 1: Determina el Merchant Category Code (MCC) más apropiado.
+    TAREA ADICIONAL 2: Actúa como CONTABLE EXPERTO. Asigna un Código Contable (GL Code) y determina deducibilidad.
+    
     Categorías disponibles en Stripe: 'software', 'cloud_computing', 'advertising', 'travel', 'food_and_beverage', 'retail', 'services', 'entertainment', 'utilities'.
     
     OUTPUT JSON:
@@ -81,7 +83,12 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         "detective_audit": "detailed analysis",
         "psychologist_audit": "behavioral drift check",
         "cfo_audit": "financial viability check",
-        "suggested_mcc_category": "string (one of the valid categories)",
+        "suggested_mcc_category": "string(mcc)",
+        "accounting": {{
+            "gl_code": "string (ej: 6209-Cloud-Services, 6210-Travel)",
+            "tax_deductible": boolean,
+            "justification": "Why is it deductible?"
+        }},
         "preliminary_risk": 0-100,
         "preliminary_decision": "APPROVE" | "REJECT" | "FLAG"
     }}
@@ -95,7 +102,7 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         adversary_prompt = f"""
         PRELIMINARY ANALYSIS: {json.dumps(stage1)}
         
-        TASK: Act as a Devil's Advocate. Your job is to find reasons to REJECT this transaction. 
+        TASK: Act as a Devil's Advocate PURELY on security/fraud. Do not critique the accounting.
         Detect if the experts were too lenient or missed a subtle fraud signal (Agent Hijacking).
         
         OUTPUT JSON:

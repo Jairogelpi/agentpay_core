@@ -20,6 +20,8 @@ from legal import LegalWrapper
 from identity import IdentityManager
 from lawyer import AutoLawyer
 from forensic_auditor import ForensicAuditor
+import redis
+from integrations import send_slack_approval
 
 load_dotenv()
 
@@ -42,9 +44,16 @@ class UniversalEngine:
         self.lawyer = AutoLawyer()
         self.forensic_auditor = ForensicAuditor()
         
-        # Memoria volátil para Circuit Breaker (En prod usar Redis)
-        self.transaction_velocity = {} 
+        # Memoria persistente para Circuit Breaker (Redis)
         self.webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+        try:
+             self.redis = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+             self.redis_enabled = True
+             print(f"✅ Redis conectado")
+        except:
+             print(f"⚠️ Redis no disponible. Usando memoria RAM (Inseguro para prod).")
+             self.redis_enabled = False
+             self.transaction_velocity = {} 
 
     def process_stripe_webhook(self, payload, sig_header):
         """
@@ -114,20 +123,33 @@ class UniversalEngine:
 
     def check_circuit_breaker(self, agent_id):
         """
-        El Fusible Financiero: Detecta bucles infinitos (runaway agents).
+        Fusible Financiero Indestructible (Redis)
         """
-        current_time = time.time()
-        
-        if agent_id not in self.transaction_velocity:
-            self.transaction_velocity[agent_id] = []
-            
-        self.transaction_velocity[agent_id] = [t for t in self.transaction_velocity[agent_id] if current_time - t < 60]
-        
-        if len(self.transaction_velocity[agent_id]) >= 10:
-            return True # 🔥 FUSIBLE ACTIVADO
-            
-        self.transaction_velocity[agent_id].append(current_time)
-        return False
+        current_time = int(time.time())
+        try:
+            if self.redis_enabled:
+                key = f"velocity:{agent_id}"
+                pipe = self.redis.pipeline()
+                pipe.zadd(key, {str(current_time): current_time})
+                pipe.zremrangebyscore(key, 0, current_time - 60) # Borrar viejos (>60s)
+                pipe.zcard(key) # Contar actuales
+                pipe.expire(key, 65) # Auto-limpieza
+                results = pipe.execute()
+                
+                count = results[2]
+                if count >= 10: # Límite de 10 tx/min
+                    return True # 🔥 FUSIBLE ACTIVADO
+                return False
+            else:
+                 # Fallback RAM
+                if agent_id not in self.transaction_velocity: self.transaction_velocity[agent_id] = []
+                self.transaction_velocity[agent_id] = [t for t in self.transaction_velocity[agent_id] if current_time - t < 60]
+                if len(self.transaction_velocity[agent_id]) >= 10: return True
+                self.transaction_velocity[agent_id].append(current_time)
+                return False
+        except Exception as e:
+            print(f"⚠️ Circuit Breaker Error: {e}")
+            return False
 
     async def evaluate(self, request: TransactionRequest) -> TransactionResult:
         if self.check_circuit_breaker(request.agent_id):
@@ -147,6 +169,27 @@ class UniversalEngine:
         
         wallet = response.data[0]
         agent_role = wallet.get('agent_role', 'Asistente IA General')
+        
+        # --- INTERNAL CLEARING HOUSE (P2P ECONOMY) ---
+        # Si el vendor es otro agente, ejecutamos off-chain (0 fees)
+        try:
+             internal_vendor = self.db.table("wallets").select("*").eq("agent_id", request.vendor).execute()
+             if internal_vendor.data:
+                 print(f"⚡ [INTERNAL] Transacción P2P Detectada: {request.agent_id} -> {request.vendor}")
+                 # 1. Atomic DEDUCT from sender (RPC)
+                 new_balance_resp = self.db.rpc("deduct_balance", {"p_agent_id": request.agent_id, "p_amount": request.amount}).execute()
+                 sender_bal = float(new_balance_resp.data)
+                 
+                 # 2. Atomic ADD to receiver (Direct Update is safe here as no negative check needed, or could use another RPC)
+                 vendor_wallet = internal_vendor.data[0]
+                 new_vendor_bal = float(vendor_wallet['balance']) + request.amount
+                 self.db.table("wallets").update({"balance": new_vendor_bal}).eq("agent_id", request.vendor).execute()
+                 
+                 return self._result(True, "APPROVED_INTERNAL", "Pago P2P Instantáneo (Zero Fees)", request, bal=sender_bal)
+        except Exception as e:
+             if "Saldo insuficiente" in str(e):
+                  return self._result(False, "REJECTED", "Fondos insuficientes para P2P", request)
+             pass
         
         # --- CAPA 1: FIREWALL & INSURANCE (SECURITY FIRST) ---
         clean_vendor = self._normalize_domain(request.vendor)
@@ -194,16 +237,24 @@ class UniversalEngine:
             intent_hash = audit.get('intent_hash', 'N/A')
             mcc_category = audit.get('mcc_category', 'services')
             risk_reason = audit.get('reasoning', audit.get('short_reason', 'N/A'))
+            
+            # Accounting Extraction
+            accounting_data = audit.get('accounting', {})
+            gl_code = accounting_data.get('gl_code', 'Uncategorized')
+            is_deductible = accounting_data.get('tax_deductible', False)
+
             log_message = f"{risk_reason} [INTENT_HASH: {intent_hash}]"
             
             if audit['decision'] == 'REJECTED':
-                  return self._result(False, "REJECTED", f"Bloqueado por The Oracle ({sensitivity}): {log_message}", request, mcc_category=mcc_category, intent_hash=intent_hash)
+                  return self._result(False, "REJECTED", f"Bloqueado por The Oracle ({sensitivity}): {log_message}", request, mcc_category=mcc_category, intent_hash=intent_hash, gl_code=gl_code, deductible=is_deductible)
 
             if audit['decision'] == 'FLAGGED' and sensitivity != "LOW":
                   return self._create_approval_request(request, clean_vendor, reason_prefix=f"Alerta de Seguridad ({sensitivity}): {log_message}")
         else:
             mcc_category = 'services' # Default
             intent_hash = "N/A"
+            gl_code = "Uncategorized"
+            is_deductible = False
 
         # --- CAPA 2: FINANCIERA ---
         max_tx = float(wallet.get('max_transaction_limit', 0))
@@ -411,12 +462,21 @@ class UniversalEngine:
         token = base64.b64encode(payload.encode()).decode()
         magic_link = f"{self.admin_url}/admin/approve?token={token}"
         try:
-            response = self.db.table("wallets").select("owner_email").eq("agent_id", request.agent_id).execute()
-            owner_email = response.data[0].get('owner_email') if response.data else None
+            response = self.db.table("wallets").select("owner_email, slack_webhook_url").eq("agent_id", request.agent_id).execute()
+            wallet_data = response.data[0] if response.data else {}
+            
+            # 1. Slack (Real-time Control)
+            if wallet_data.get('slack_webhook_url'):
+                sent = send_slack_approval(wallet_data.get('slack_webhook_url'), request.agent_id, request.amount, clean_vendor, magic_link, reason=reason_prefix)
+                if sent: print(f"   🔔 Slack Notification sent to {request.agent_id}")
+            
+            # 2. Email (Legacy Fallback)
+            owner_email = wallet_data.get('owner_email')
             if owner_email:
                 send_approval_email(owner_email, request.agent_id, clean_vendor, request.amount, magic_link)
+
         except Exception as e:
-            print(f"   ⚠️ Error enviando notificación email: {e}")
+            print(f"   ⚠️ Error enviando notificación: {e}")
 
         return TransactionResult(
             authorized=False, 
@@ -521,7 +581,7 @@ class UniversalEngine:
             self.db.table("transaction_logs").update({"perceived_value": perceived_value_usd}).eq("id", transaction_id).execute()
         return {"status": "VALUE_RECORDED", "perceived_value": perceived_value_usd}
 
-    def _result(self, auth, status, reason, req, bal=None, invoice_url=None, fee=0.0, card_data=None, forensic_url=None, mcc_category=None, intent_hash=None):
+    def _result(self, auth, status, reason, req, bal=None, invoice_url=None, fee=0.0, card_data=None, forensic_url=None, mcc_category=None, intent_hash=None, gl_code=None, deductible=None):
         txn_id = str(uuid.uuid4())
         payload = {
             "id": txn_id, 
@@ -536,6 +596,8 @@ class UniversalEngine:
             "intent_hash": intent_hash,
             "forensic_hash": forensic_url.split('/')[-1] if forensic_url else None
         }
+        if gl_code: payload['accounting_tag'] = gl_code
+        if deductible is not None: payload['tax_deductible'] = deductible
         if invoice_url: payload["invoice_url"] = invoice_url
         
         try:
