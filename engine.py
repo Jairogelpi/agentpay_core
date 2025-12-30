@@ -833,6 +833,7 @@ class UniversalEngine:
                 type="express",
                 capabilities={
                     #"card_issuing": {"requested": True}, # Se activa en el Paso 2 (Upgrade)
+                    "card_payments": {"requested": True},
                     "transfers": {"requested": True},
                 },
                 business_type="individual",
