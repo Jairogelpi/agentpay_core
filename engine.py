@@ -800,7 +800,7 @@ class UniversalEngine:
             print(f"⚠️ Auth Error: {e}")
             return None
 
-    def register_new_agent(self, client_name):
+    def register_new_agent(self, client_name, country_code="ES"):
         """
         Registra un agente y le crea su propia CUENTA BANCARIA (Stripe Connect).
         Esto separa los balances y cumple con la ley.
@@ -815,7 +815,7 @@ class UniversalEngine:
             # 2. CREAR CUENTA CONNECT (Express) EN STRIPE
             # Esto crea el "balance" separado para este cliente.
             account = stripe.Account.create(
-                country="ES", # España - Para Stripe Issuing en Europa
+                country=country_code, # Configurable: ES, FR, DE, IT, etc.
                 type="express",
                 capabilities={
                     "card_issuing": {"requested": True},
