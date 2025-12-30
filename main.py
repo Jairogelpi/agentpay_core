@@ -212,7 +212,7 @@ async def pay(req: dict, agent_id: str = Depends(verify_api_key)):
     # OVERRIDE DE SEGURIDAD: El pagador es quien tiene la llave.
     real_req.agent_id = agent_id 
     
-    res = engine.evaluate(real_req)
+    res = await engine.evaluate(real_req)
     return {
         "success": res.authorized,
         "status": res.status,

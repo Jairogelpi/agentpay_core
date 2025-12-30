@@ -129,7 +129,7 @@ class UniversalEngine:
         self.transaction_velocity[agent_id].append(current_time)
         return False
 
-    def evaluate(self, request: TransactionRequest) -> TransactionResult:
+    async def evaluate(self, request: TransactionRequest) -> TransactionResult:
         if self.check_circuit_breaker(request.agent_id):
             print(f"🔥 [CIRCUIT BREAKER] Agente {request.agent_id} bloqueado por velocidad excesiva.")
             return TransactionResult(
@@ -188,7 +188,8 @@ class UniversalEngine:
             if not insurance_enabled: sensitivity = "LOW"
             
             print(f"🛡️ [THE ORACLE] Auditando ({sensitivity})...")
-            audit = audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status)
+            # ASYNC AWAIT: No bloqueamos el hilo principal mientras OpenAI piensa
+            audit = await audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status)
             
             intent_hash = audit.get('intent_hash', 'N/A')
             mcc_category = audit.get('mcc_category', 'services')
@@ -213,14 +214,22 @@ class UniversalEngine:
         fee = round(request.amount * FEE_PERCENT, 2)
         total_deducted = request.amount + fee
         
-        current_balance = float(wallet['balance'])
-        
-        if total_deducted > current_balance:
-            credit_check = self.credit_bureau.check_credit_eligibility(request.agent_id)
-            if credit_check['eligible'] and total_deducted <= (current_balance + credit_check['credit_limit']):
-                 print(f"💳 [CREDIT] Usando línea de crédito {credit_check['tier']}")
-            else:
-                 return self._result(False, "REJECTED", f"Fondos insuficientes (Req: ${total_deducted})", request, mcc_category=mcc_category, intent_hash=intent_hash)
+        # --- ATOMIC TRANSACTION (RPC) ---
+        # Usamos la función deduct_balance en DB para evitar Race Conditions
+        try:
+            print(f"💰 [ATOMIC] Intentando debitar ${total_deducted}...")
+            new_balance_resp = self.db.rpc("deduct_balance", {"p_agent_id": request.agent_id, "p_amount": total_deducted}).execute()
+            
+            # Si llegamos aquí, el dinero YA SE DESCONTÓ con seguridad
+            new_balance = float(new_balance_resp.data)
+            
+        except Exception as e:
+            # Si falla el RPC (ej: Saldo insuficiente), capturamos el error
+            error_msg = str(e)
+            if "Saldo insuficiente" in error_msg:
+                return self._result(False, "REJECTED", f"Fondos insuficientes (Req: ${total_deducted})", request, mcc_category=mcc_category, intent_hash=intent_hash)
+            print(f"❌ Error crítico en DB RPC: {e}")
+            return self._result(False, "REJECTED", "Error interno de base de datos", request)
 
         # --- CAPA 3: EJECUCIÓN (TARJETA VIRTUAL REAL) ---
         print(f"💳 [ISSUING] Generando Tarjeta Virtual ({mcc_category}) para {request.vendor}...")
@@ -228,11 +237,10 @@ class UniversalEngine:
         card = self._issue_virtual_card(request.agent_id, request.amount, clean_vendor, mcc_category=mcc_category)
         
         if not card:
-            return self._result(False, "REJECTED", "Error en Stripe Issuing (Card Creation Failed)", request)
-
-        # Deducción de Saldo + Comisión
-        new_balance = float(wallet['balance']) - total_deducted
-        self.db.table("wallets").update({"balance": new_balance}).eq("agent_id", request.agent_id).execute()
+            # CRITICAL ROLLBACK (Si Stripe falla, devolvemos el dinero)
+            # En producción esto también debería ser atómico, por ahora sumamos
+            self.db.table("wallets").update({"balance": new_balance + total_deducted}).eq("agent_id", request.agent_id).execute()
+            return self._result(False, "REJECTED", "Error en Stripe Issuing (Rollback ejecutado)", request)
         
         # --- GENERACIÓN DE FACTURA (Resistente a fallos) ---
         try:
