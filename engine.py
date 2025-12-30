@@ -805,6 +805,20 @@ class UniversalEngine:
         Registra un agente y le crea su propia CUENTA BANCARIA (Stripe Connect).
         Esto separa los balances y cumple con la ley.
         """
+        country_code = country_code.upper()
+        # Lista oficial de países soportados por Stripe Issuing en Europa (EEA + UK)
+        SUPPORTED_EUROPE = [
+            "AT", "BE", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", 
+            "IE", "IT", "LT", "LU", "LV", "MT", "NL", "NO", "PL", "PT", "SE", 
+            "SI", "SK", "GB"
+        ]
+        
+        if country_code not in SUPPORTED_EUROPE:
+            return {
+                "status": "ERROR", 
+                "message": f"País '{country_code}' no soportado para Stripe Issuing. Países permitidos: {', '.join(SUPPORTED_EUROPE)}"
+            }
+
         agent_id = f"ag_{uuid.uuid4().hex[:12]}"
         
         # 1. Generar la Secret Key (API Key) para el cliente
