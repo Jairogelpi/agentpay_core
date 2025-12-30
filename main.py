@@ -420,6 +420,18 @@ async def get_audit_bundle(bundle_id: str):
         "message": "Full Forensic Evidence Bundle available for download."
     }
 
+@app.post("/v1/agent/upgrade")
+async def upgrade_agent_issuing(req: dict):
+    """
+    Ruta para activar tarjetas a un agente existente.
+    Uso: POST con JSON { "agent_id": "ag_..." }
+    """
+    agent_id = req.get("agent_id")
+    if not agent_id:
+        return {"error": "Falta agent_id"}
+        
+    return engine.activate_issuing_for_agent(agent_id)
+
 if __name__ == "__main__":
     # Para correr local: python main.py
     port = int(os.environ.get("PORT", 8000))

@@ -832,7 +832,7 @@ class UniversalEngine:
                 country=country_code, # Configurable: ES, FR, DE, IT, etc.
                 type="express",
                 capabilities={
-                    "card_issuing": {"requested": True},
+                    #"card_issuing": {"requested": True}, # Se activa en el Paso 2 (Upgrade)
                     "transfers": {"requested": True},
                 },
                 business_type="individual",
@@ -913,3 +913,37 @@ class UniversalEngine:
 
     def send_alert(self, agent_id, message):
         return {"success": True, "agent_id": agent_id, "status": "QUEUED"}
+
+    def activate_issuing_for_agent(self, agent_id):
+        """
+        PASO 2: Activa la capacidad de emitir tarjetas para un agente YA registrado.
+        Se debe llamar después de que el agente haya completado el KYC.
+        """
+        try:
+            # 1. Recuperamos el ID de cuenta de Stripe (acct_...)
+            wallet = self.db.table("wallets").select("stripe_account_id").eq("agent_id", agent_id).execute()
+            if not wallet.data:
+                return {"status": "ERROR", "message": "Agente no encontrado."}
+            
+            acct_id = wallet.data[0]['stripe_account_id']
+            
+            print(f"🚀 Activando Issuing para la cuenta {acct_id}...")
+
+            # 2. Llamada a la API de Stripe para solicitar la capability
+            stripe.Account.modify(
+                acct_id,
+                capabilities={
+                    "card_issuing": {"requested": True}, # <--- AQUÍ SÍ LO PEDIMOS
+                }
+            )
+
+            return {
+                "status": "ACTIVATED",
+                "message": "Solicitud de Issuing enviada a Stripe. Si el KYC está ok, se activará en minutos.",
+                "agent_id": agent_id,
+                "stripe_account": acct_id
+            }
+
+        except Exception as e:
+            print(f"❌ Error activando Issuing: {e}")
+            return {"status": "ERROR", "message": str(e)}
