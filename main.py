@@ -206,7 +206,11 @@ async def check_kyc_status(agent_id: str):
     return engine.verify_agent_kyc(agent_id)
 
 @app.post("/v1/pay")
-async def pay(req: dict, agent_id: str = Depends(verify_api_key)):
+async def pay(
+    req: dict, 
+    agent_id: str = Depends(verify_api_key),
+    idempotency_key: str = Header(None, alias="Idempotency-Key")
+):
     """Endpoint principal PROTEGIDO con Bearer Token."""
     # NO confiamos en el agent_id del cuerpo JSON si difiere del token.
     # Forzamos el uso del ID autenticado.
@@ -216,7 +220,7 @@ async def pay(req: dict, agent_id: str = Depends(verify_api_key)):
     # OVERRIDE DE SEGURIDAD: El pagador es quien tiene la llave.
     real_req.agent_id = agent_id 
     
-    res = await engine.evaluate(real_req)
+    res = await engine.evaluate(real_req, idempotency_key=idempotency_key)
     return {
         "success": res.authorized,
         "status": res.status,
