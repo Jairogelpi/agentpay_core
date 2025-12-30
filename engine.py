@@ -408,14 +408,14 @@ class UniversalEngine:
                     email=f"{agent_id[:8]}@agentpay.ai",
                     status="active",
                     type="individual",
-                    billing={"address": {"line1": "Cyber St 1", "city": "Cloud", "country": "US", "postal_code": "90210"}},
+                    billing={"address": {"line1": "Calle Gran Via 1", "city": "Madrid", "country": "ES", "postal_code": "28013"}},
                     stripe_account=connected_acct_id # <--- MAGIA AQUÍ
                 )
 
             # 3. Emitir la Tarjeta contra SU saldo
             card = stripe.issuing.Card.create(
                 cardholder=cardholder.id,
-                currency="usd", # O 'eur' si tu plataforma es europea
+                currency="eur",  # <--- CAMBIO CLAVE A EUROS
                 type="virtual",
                 status="active",
                 spending_controls={
