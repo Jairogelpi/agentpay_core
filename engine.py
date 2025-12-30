@@ -832,7 +832,7 @@ class UniversalEngine:
                 country=country_code,
                 type="custom",  # <--- CAMBIO CLAVE: Custom en vez de Express
                 capabilities={
-                    "card_issuing": {"requested": True},
+                    # "card_issuing": {"requested": True},
                     "card_payments": {"requested": True},
                     "transfers": {"requested": True},
                 },
