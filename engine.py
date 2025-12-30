@@ -298,19 +298,6 @@ class UniversalEngine:
             error_msg = str(e)
             return self._result(False, "REJECTED", f"Error Transaccional: {error_msg}", request, mcc_category=mcc_category, intent_hash=intent_hash, gl_code=gl_code, deductible=is_deductible)
 
-        # 3. Issue Virtual Card (Si aplica) & Log
-        # ... (rest of logic) ...
-        card_details = None
-        # (Assuming virtual card logic is here, if needed update accordingly or ensure flow continues)
-        
-        # FINAL SUCCESS RESULT
-        result = self._result(True, "APPROVED", "Aprobado por The Oracle y Fondos Verificados", request, new_balance, mcc_category=mcc_category, intent_hash=intent_hash, gl_code=gl_code, deductible=is_deductible)
-        
-        # IDEMPOTENCY SAVE
-        if idempotency_key and self.redis_enabled:
-             self.redis.setex(f"idempotency:{idempotency_key}", 86400, result.model_dump_json())
-             
-        return result
 
         # --- CAPA 3: EJECUCIÓN (TARJETA VIRTUAL REAL) ---
         print(f"💳 [ISSUING] Generando Tarjeta Virtual ({mcc_category}) para {request.vendor}...")
@@ -346,7 +333,7 @@ class UniversalEngine:
         
         success_msg = f"Tarjeta Virtual Emitida. (Subtotal: ${request.amount} + Fee: ${fee})" + log_suffix
         
-        return self._result(
+        result = self._result(
             True, "APPROVED", success_msg, request, 
             bal=new_balance, 
             invoice_url=invoice_path, 
@@ -354,8 +341,16 @@ class UniversalEngine:
             card_data=card,
             forensic_url=forensic_url,
             mcc_category=mcc_category,
-            intent_hash=intent_hash
+            intent_hash=intent_hash,
+            gl_code=gl_code,
+            deductible=is_deductible
         )
+
+        # IDEMPOTENCY SAVE (Al final de todo)
+        if idempotency_key and self.redis_enabled:
+             self.redis.setex(f"idempotency:{idempotency_key}", 86400, result.model_dump_json())
+
+        return result
 
     def _execute_stripe_charge(self, amount, vendor_desc, invisible_context=None):
         """
