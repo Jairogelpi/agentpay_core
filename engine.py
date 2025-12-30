@@ -456,13 +456,27 @@ class UniversalEngine:
 
     def create_topup_link(self, agent_id, amount):
         try:
+            # Recuperar la cuenta Connect del Agente para enviarle los fondos
+            wallet = self.db.table("wallets").select("stripe_account_id").eq("agent_id", agent_id).execute()
+            if not wallet.data or not wallet.data[0].get('stripe_account_id'):
+                raise Exception("El agente no tiene cuenta Stripe Connect configurada.")
+            
+            connected_account_id = wallet.data[0]['stripe_account_id']
+
             session = stripe.checkout.Session.create(
                 payment_method_types=['card'],
-                line_items=[{'price_data': {'currency': 'usd', 'product_data': {'name': 'Recarga Saldo AgentPay'}, 'unit_amount': int(amount * 100)}, 'quantity': 1}],
+                line_items=[{'price_data': {'currency': 'usd', 'product_data': {'name': 'Recarga Saldo AI'}, 'unit_amount': int(amount * 100)}, 'quantity': 1}],
                 mode='payment',
                 success_url=f"{self.admin_url}/success?agent={agent_id}",
                 cancel_url=f"{self.admin_url}/cancel",
-                metadata={'agent_id': agent_id, 'type': 'topup'}
+                metadata={'agent_id': agent_id, 'type': 'topup'},
+                payment_intent_data={
+                    'transfer_data': {
+                        'destination': connected_account_id, 
+                    },
+                    # TÚ COBRAS AQUÍ: 2% + 30 centavos
+                    'application_fee_amount': int(amount * 100 * 0.02) + 30, 
+                }
             )
             return session.url
         except Exception as e:
@@ -597,6 +611,81 @@ class UniversalEngine:
         }
 
     # --- SECURITY & AUTHENTICATION ---
+    def verify_agent_kyc(self, agent_id):
+        """
+        Llama a Stripe para ver si el usuario ya pasó el KYC/KYB.
+        """
+        try:
+            # 1. Recuperar el ID de cuenta de Stripe
+            wallet = self.db.table("wallets").select("stripe_account_id").eq("agent_id", agent_id).execute()
+            if not wallet.data: return {"status": "ERROR", "message": "Agente no encontrado"}
+            
+            acct_id = wallet.data[0]['stripe_account_id']
+            
+            # 2. Consultar a Stripe
+            account = stripe.Account.retrieve(acct_id)
+            
+            # 3. Verificar estado
+            details_submitted = account.details_submitted
+            charges_enabled = account.charges_enabled
+            
+            status = "PENDING_KYC"
+            if details_submitted and charges_enabled:
+                status = "ACTIVE"
+            elif details_submitted and not charges_enabled:
+                status = "IN_REVIEW" # Stripe está verificando documentos
+                
+            # 4. Actualizar DB
+            self.db.table("wallets").update({"kyc_status": status}).eq("agent_id", agent_id).execute()
+            
+            return {
+                "agent_id": agent_id,
+                "kyc_status": status,
+                "needs_more_info": account.requirements.currently_due
+            }
+        except Exception as e:
+            return {"status": "ERROR", "message": str(e)}
+
+    def process_stripe_webhook(self, payload, sig_header):
+        try:
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, self.webhook_secret
+            )
+        except Exception as e:
+            # Si falla la firma normal, podría ser un evento de Connect
+            # En producción, deberías configurar un webhook secreto separado para Connect
+            print(f"⚠️ Webhook signature error (o evento Connect): {e}")
+            return {"status": "ignored"}
+
+        # 1. RECARGAS (El dinero entra)
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+            agent_id = session.get('metadata', {}).get('agent_id')
+            # Con Connect, el dinero ya está en SU cuenta, solo registramos el evento
+            if agent_id:
+                print(f"💰 Recarga completada para {agent_id}")
+                self.db.table("transaction_logs").insert({
+                    "id": session['id'],
+                    "agent_id": agent_id,
+                    "type": "TOPUP",
+                    "amount": session['amount_total'] / 100,
+                    "status": "COMPLETED"
+                }).execute()
+
+        # 2. GASTOS (El dinero sale de la tarjeta)
+        elif event['type'] == 'issuing_authorization.request':
+            # ¡EL MOMENTO DE LA VERDAD! Alguien está pasando la tarjeta.
+            auth = event['data']['object']
+            agent_id = auth['metadata'].get('agent_id') # Asegúrate de meter metadata al crear la tarjeta
+            
+            # Aquí podrías ejecutar ai_guard de nuevo para una "Segunda Opinión" en tiempo real
+            print(f"💳 Intento de cobro: ${auth['amount']/100} en {auth['merchant_data']['name']}")
+            
+            # Por defecto aprobamos porque ya validamos antes de emitir la tarjeta
+            return {"status": "approved"} # Stripe espera un 200 OK
+
+        return {"status": "processed"}
+
     def _hash_key(self, key: str) -> str:
         """SHA-256 hashing para almacenamiento seguro."""
         return hashlib.sha256(key.encode()).hexdigest()

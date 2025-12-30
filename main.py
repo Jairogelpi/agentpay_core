@@ -201,6 +201,10 @@ async def debug_stripe():
             "error_detail": str(e)
         }
 
+@app.get("/v1/agent/check-kyc")
+async def check_kyc_status(agent_id: str):
+    return engine.verify_agent_kyc(agent_id)
+
 @app.post("/v1/pay")
 async def pay(req: dict, agent_id: str = Depends(verify_api_key)):
     """Endpoint principal PROTEGIDO con Bearer Token."""
