@@ -289,69 +289,72 @@ class UniversalEngine:
 
     def _issue_virtual_card(self, agent_id, amount, vendor, mcc_category='services'):
         """
-        Emite una tarjeta virtual REAL vía Stripe Issuing con controles inteligentes.
+        Emite una tarjeta virtual REAL en la cuenta Connect del cliente.
         """
         try:
-            # Mapeo de categorías AI a Grupos de Stripe (MCC Groups)
-            # Ver: https://stripe.com/docs/issuing/controls/spending-controls#merchant-category-codes
+            # 1. Recuperar el ID de la cuenta de Stripe del cliente
+            wallet_resp = self.db.table("wallets").select("stripe_account_id").eq("agent_id", agent_id).execute()
+            if not wallet_resp.data or not wallet_resp.data[0].get('stripe_account_id'):
+                print("❌ Este agente no tiene cuenta Connect configurada.")
+                return None
+                
+            connected_acct_id = wallet_resp.data[0]['stripe_account_id']
+
+            # Configuración de categorías de gasto (MCC)
             mcc_map = {
                 "software": ["computer_network_information_services", "software_stores"],
-                "cloud_computing": ["computer_network_information_services", "data_processing_services"],
-                "advertising": ["advertising_services", "direct_marketing_catalog_merchants"],
-                "travel": ["airlines_air_carriers", "car_rental_agencies", "passenger_railways", "hotels_motels_resorts"],
-                "food_and_beverage": ["eating_places_restaurants"],
-                "retail": ["department_stores", "variety_stores", "misc_general_merchandise"],
-                "utilities": ["utilities_electric_gas_heating_oil_sanitary_water"],
-                "services": ["business_services_not_elsewhere_classified", "professional_services_not_elsewhere_classified"]
+                "services": ["business_services_not_elsewhere_classified"]
             }
-            
             allowed_categories = mcc_map.get(mcc_category.lower(), mcc_map["services"])
             
-            cardholder_name = f"Agent {agent_id[:8]}"
-            holders = stripe.issuing.Cardholder.list(limit=1, email=f"{agent_id[:8]}@agentpay.ai")
+            # 2. Crear o recuperar el Titular (Cardholder) EN SU CUENTA
+            # Buscamos si ya existe uno en SU cuenta conectada
+            holders = stripe.issuing.Cardholder.list(
+                limit=1, 
+                email=f"{agent_id[:8]}@agentpay.ai",
+                stripe_account=connected_acct_id # <--- MAGIA AQUÍ
+            )
             
             if holders.data:
                 cardholder = holders.data[0]
             else:
+                # Si no existe, lo creamos en SU cuenta
                 cardholder = stripe.issuing.Cardholder.create(
-                    name=cardholder_name,
+                    name=f"Agent {agent_id[:8]}",
                     email=f"{agent_id[:8]}@agentpay.ai",
                     status="active",
                     type="individual",
-                    billing={"address": {"line1": "123 Agent St", "city": "Cyber City", "state": "CA", "postal_code": "90210", "country": "US"}}
+                    billing={"address": {"line1": "Cyber St 1", "city": "Cloud", "country": "US", "postal_code": "90210"}},
+                    stripe_account=connected_acct_id # <--- MAGIA AQUÍ
                 )
 
+            # 3. Emitir la Tarjeta contra SU saldo
             card = stripe.issuing.Card.create(
                 cardholder=cardholder.id,
-                currency="usd",
+                currency="usd", # O 'eur' si tu plataforma es europea
                 type="virtual",
                 status="active",
                 spending_controls={
                     "spending_limits": [{"amount": int(amount * 100), "interval": "all_time"}],
                     "allowed_categories": allowed_categories
-                }
+                },
+                stripe_account=connected_acct_id # <--- MAGIA AQUÍ
             )
             
+            # 4. Devolver los datos
             return {
                 "id": card.id,
-                "number": getattr(card, "number", "4242 4242 4242 4242"),
-                "cvv": "123",
+                "number": "Ver en Dashboard" if not hasattr(card, 'number') else card.number,
+                "cvv": card.cvc,
                 "exp_month": card.exp_month,
                 "exp_year": card.exp_year,
                 "brand": card.brand,
                 "status": card.status
             }
+            
         except Exception as e:
-            print(f"❌ [ISSUING ERROR] {e}")
-            return {
-                "id": f"ic_sim_{uuid.uuid4().hex[:8]}",
-                "number": "4242 4242 4242 4242",
-                "cvv": "999",
-                "exp_month": 12,
-                "exp_year": 2026,
-                "brand": "visa",
-                "status": "active"
-            }
+            print(f"❌ [ISSUING CONNECT ERROR] {e}")
+            return None
 
     def _normalize_domain(self, vendor_str: str) -> str:
         vendor_str = vendor_str.lower().strip()
@@ -614,32 +617,59 @@ class UniversalEngine:
             return None
 
     def register_new_agent(self, client_name):
-        """Registra un nuevo agente con credenciales seguras (Secret Key)."""
-        agent_id = f"ag_{uuid.uuid4().hex[:12]}" # Identificador público
+        """
+        Registra un agente y le crea su propia CUENTA BANCARIA (Stripe Connect).
+        Esto separa los balances y cumple con la ley.
+        """
+        agent_id = f"ag_{uuid.uuid4().hex[:12]}"
         
-        # Generamos la LLAVE SECRETA (Solo se muestra una vez)
-        # Formato: sk_live_<random_url_safe>
+        # 1. Generar la Secret Key (API Key) para el cliente
         raw_secret = f"sk_live_{secrets.token_urlsafe(32)}"
         secret_hash = self._hash_key(raw_secret)
         
         try:
+            # 2. CREAR CUENTA CONNECT (Express) EN STRIPE
+            # Esto crea el "balance" separado para este cliente.
+            account = stripe.Account.create(
+                country="US", # O "ES" si tus clientes son de España
+                type="express",
+                capabilities={
+                    "card_issuing": {"requested": True},
+                    "transfers": {"requested": True},
+                },
+                business_type="individual",
+                business_profile={"name": client_name}
+            )
+            
+            # 3. Generar el Link para que el cliente verifique su identidad (KYC)
+            account_link = stripe.AccountLink.create(
+                account=account.id,
+                refresh_url=f"{self.admin_url}/reauth",
+                return_url=f"{self.admin_url}/dashboard",
+                type="account_onboarding",
+            )
+
+            # 4. Guardar todo en Supabase (incluyendo el stripe_account_id)
             self.db.table("wallets").insert({
                 "agent_id": agent_id,
                 "owner_name": client_name,
-                "api_secret_hash": secret_hash, # GUARDAMOS SOLO EL HASH
-                "balance": 100.0,
-                "owner_email": "demo-agent@agentpay.io"
+                "api_secret_hash": secret_hash,
+                "balance": 0.0, # El saldo real vivirá en Stripe, esto es solo visual
+                "stripe_account_id": account.id, # <--- ¡LA CLAVE DE TODO!
+                "owner_email": "pending-kyc@agentpay.io"
             }).execute()
             
             return {
                 "status": "CREATED",
                 "agent_id": agent_id,
-                "api_key": raw_secret, # DEVOLVEMOS EL SECRETO (SOLO UNA VEZ)
+                "api_key": raw_secret,
+                "stripe_setup_url": account_link.url, # <--- DALE ESTO AL CLIENTE
                 "dashboard_url": f"{self.admin_url}/v1/analytics/dashboard/{agent_id}",
-                "note": "⚠️ GUARDA TU API KEY AHORA. No podrás verla de nuevo."
+                "note": "IMPORTANTE: El cliente debe completar el KYC en 'stripe_setup_url' para poder tener tarjetas."
             }
+
         except Exception as e:
-            print(f"❌ Error en registro DB: {str(e)}")
+            print(f"❌ Error en registro Connect: {str(e)}")
             return {"status": "ERROR", "message": str(e)}
 
     def update_agent_settings(self, agent_id, webhook_url=None, owner_email=None):
