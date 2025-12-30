@@ -800,7 +800,7 @@ class UniversalEngine:
             print(f"⚠️ Auth Error: {e}")
             return None
 
-    def register_new_agent(self, client_name, country_code="ES"):
+    def register_new_agent(self, client_name, country_code="US"):
         """
         Registra un agente y le crea su propia CUENTA BANCARIA (Stripe Connect).
         Esto separa los balances y cumple con la ley.
@@ -810,7 +810,7 @@ class UniversalEngine:
         SUPPORTED_EUROPE = [
             "AT", "BE", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", 
             "IE", "IT", "LT", "LU", "LV", "MT", "NL", "NO", "PL", "PT", "SE", 
-            "SI", "SK", "GB"
+            "SI", "SK", "GB", "US"
         ]
         
         if country_code not in SUPPORTED_EUROPE:

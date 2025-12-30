@@ -319,7 +319,7 @@ async def download_invoice(req: dict):
 @app.post("/v1/agent/register")
 async def register_agent(req: dict):
     # Extraemos el país (con soporte para ambos nombres 'country' y 'country_code')
-    country = req.get("country") or req.get("country_code", "ES")
+    country = req.get("country") or req.get("country_code", "US")
     return engine.register_new_agent(req.get("client_name"), country_code=country)
 
 @app.post("/v1/agent/limits")
