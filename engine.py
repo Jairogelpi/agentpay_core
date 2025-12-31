@@ -861,7 +861,7 @@ class UniversalEngine:
                         "postal_code": test_data["postal_code"],
                         "country": country_code
                     },
-                    "ssn_last_4": test_data["ssn_last_4"], # Solo en Test Mode
+                    # "ssn_last_4": test_data["ssn_last_4"],
                 }
             )
 
