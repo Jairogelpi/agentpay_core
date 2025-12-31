@@ -212,13 +212,12 @@ async def pay(
     idempotency_key: str = Header(None, alias="Idempotency-Key")
 ):
     """Endpoint principal PROTEGIDO con Bearer Token."""
-    # NO confiamos en el agent_id del cuerpo JSON si difiere del token.
-    # Forzamos el uso del ID autenticado.
     
+    # 1. Inyectamos el ID autenticado en el diccionario ANTES de validar con Pydantic
+    req["agent_id"] = agent_id
+    
+    # 2. Ahora sí podemos crear el objeto TransactionRequest
     real_req = TransactionRequest(**req)
-    
-    # OVERRIDE DE SEGURIDAD: El pagador es quien tiene la llave.
-    real_req.agent_id = agent_id 
     
     res = await engine.evaluate(real_req, idempotency_key=idempotency_key)
     return {
