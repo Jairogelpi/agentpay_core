@@ -847,7 +847,7 @@ class UniversalEngine:
 
             # 2. INYECTAR DATOS DE VERIFICACIÓN (KYC AUTOMÁTICO)
             # Esto es lo que antes hacía el usuario en el link rosa. Ahora lo haces tú por código.
-            stripe.Account.update(
+            stripe.Account.modify(
                 account.id,
                 individual={
                     "first_name": client_name.split(" ")[0],
