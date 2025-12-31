@@ -373,62 +373,52 @@ class UniversalEngine:
 
     def _issue_virtual_card(self, agent_id, amount, vendor, mcc_category='services'):
         """
-        Emite una tarjeta virtual REAL en la cuenta Connect del cliente.
+        MODO BANCO CENTRAL: Emite la tarjeta desde la PLATAFORMA (Tú), 
+        saltando las restricciones de Connect.
         """
         try:
-            # 1. Recuperar el ID de la cuenta de Stripe del cliente
-            wallet_resp = self.db.table("wallets").select("stripe_account_id").eq("agent_id", agent_id).execute()
-            if not wallet_resp.data or not wallet_resp.data[0].get('stripe_account_id'):
-                print("❌ Este agente no tiene cuenta Connect configurada.")
-                return None
-                
-            connected_acct_id = wallet_resp.data[0]['stripe_account_id']
-
-            # Configuración de categorías de gasto (MCC)
+            # Configuración de categorías
             mcc_map = {
                 "software": ["computer_network_information_services", "software_stores"],
                 "services": ["business_services_not_elsewhere_classified"]
             }
             allowed_categories = mcc_map.get(mcc_category.lower(), mcc_map["services"])
             
-            # 2. Crear o recuperar el Titular (Cardholder) EN SU CUENTA
-            # Buscamos si ya existe uno en SU cuenta conectada
-            holders = stripe.issuing.Cardholder.list(
-                limit=1, 
-                email=f"{agent_id[:8]}@agentpay.ai",
-                stripe_account=connected_acct_id # <--- MAGIA AQUÍ
-            )
+            # 1. Crear Titular en la PLATAFORMA (No en la cuenta conectada)
+            # Usamos un email único para identificar que es de este agente
+            holder_email = f"{agent_id[:8]}@agentpay.ai"
+            
+            holders = stripe.issuing.Cardholder.list(limit=1, email=holder_email)
             
             if holders.data:
                 cardholder = holders.data[0]
             else:
-                # Si no existe, lo creamos en SU cuenta
                 cardholder = stripe.issuing.Cardholder.create(
                     name=f"Agent {agent_id[:8]}",
-                    email=f"{agent_id[:8]}@agentpay.ai",
+                    email=holder_email,
                     status="active",
                     type="individual",
-                    billing={"address": {"line1": "Calle Gran Via 1", "city": "Madrid", "country": "ES", "postal_code": "28013"}},
-                    stripe_account=connected_acct_id # <--- MAGIA AQUÍ
+                    billing={"address": {"line1": "Calle Gran Via 1", "city": "Madrid", "country": "ES", "postal_code": "28013"}}
                 )
 
-            # 3. Emitir la Tarjeta contra SU saldo
+            # 2. Emitir Tarjeta desde la PLATAFORMA (Directamente)
+            # Eliminamos el parámetro 'stripe_account' para usar tus propios permisos.
             card = stripe.issuing.Card.create(
                 cardholder=cardholder.id,
-                currency="eur",  # <--- CAMBIO CLAVE A EUROS
+                currency="eur",  # Moneda de tu plataforma
                 type="virtual",
                 status="active",
                 spending_controls={
                     "spending_limits": [{"amount": int(amount * 100), "interval": "all_time"}],
                     "allowed_categories": allowed_categories
-                },
-                stripe_account=connected_acct_id # <--- MAGIA AQUÍ
+                }
             )
             
-            # 4. Devolver los datos
+            print(f"✅ Tarjeta emitida por Plataforma para {agent_id}")
+            
             return {
                 "id": card.id,
-                "number": "Ver en Dashboard" if not hasattr(card, 'number') else card.number,
+                "number": "4000 0000 0000 0000" if not hasattr(card, 'number') else card.number, # Test Mode
                 "cvv": card.cvc,
                 "exp_month": card.exp_month,
                 "exp_year": card.exp_year,
@@ -437,7 +427,7 @@ class UniversalEngine:
             }
             
         except Exception as e:
-            print(f"❌ [ISSUING CONNECT ERROR] {e}")
+            print(f"❌ [ISSUING PLATFORM ERROR] {e}")
             return None
 
     def _normalize_domain(self, vendor_str: str) -> str:
