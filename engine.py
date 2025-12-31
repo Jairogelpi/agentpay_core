@@ -812,16 +812,15 @@ class UniversalEngine:
         raw_secret = f"sk_live_{secrets.token_urlsafe(32)}"
         secret_hash = self._hash_key(raw_secret)
         
-        # Datos ficticios para MODO TEST (En producción, estos deben ser datos reales del cliente)
-        # Para que Stripe verifique la cuenta al instante en Test, usamos estos valores mágicos:
+        # Datos ficticios para MODO TEST (VERSIÓN ESPAÑA)
         test_data = {
-            "day": 1, "month": 1, "year": 1980, # +18 años
-            "line1": "123 Market Street",
-            "city": "San Francisco",
-            "state": "CA",
-            "postal_code": "94111",
-            "ssn_last_4": "0000", # SSN de prueba válido
-            "phone": "+18885551234"
+            "day": 1, "month": 1, "year": 1980,
+            "line1": "Calle de Alcalá 1",   # Dirección real
+            "city": "Madrid",
+            "state": "Madrid",              # Provincia
+            "postal_code": "28014",         # CP Válido de Madrid
+            "ssn_last_4": "0000",
+            "phone": "+34600123456"         # Teléfono formato ES
         }
 
         try:
