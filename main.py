@@ -254,6 +254,11 @@ async def create_topup_link(req: dict):
     url = engine.create_topup_link(req.get("agent_id"), req.get("amount"))
     return {"url": url}
 
+@app.post("/v1/topup/auto")
+async def automatic_topup(req: dict):
+    """Recarga automática sin intervención humana (Solo Test Mode)"""
+    return engine.automatic_topup(req.get("agent_id"), req.get("amount"))
+
 @app.post("/v1/identity/proxy")
 async def get_proxy(req: dict):
     """Obtiene una IP residencial para evitar bloqueos"""
