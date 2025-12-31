@@ -557,6 +557,54 @@ class UniversalEngine:
         except Exception as e:
             return f"Error: {str(e)}"
 
+    def automatic_topup(self, agent_id, amount):
+        """
+        RECARGA AUTOMÁTICA: Cobra $50 (o lo que sea) usando tarjeta de prueba
+        y los envía a la cuenta del agente sin intervención humana.
+        """
+        try:
+            # 1. Buscar la cuenta destino
+            wallet = self.db.table("wallets").select("stripe_account_id, balance").eq("agent_id", agent_id).execute()
+            if not wallet.data: raise Exception("Agente no encontrado")
+            
+            connected_account_id = wallet.data[0]['stripe_account_id']
+            current_balance = float(wallet.data[0]['balance'])
+
+            print(f"🤖 Iniciando recarga automática de ${amount} para {agent_id}...")
+
+            # 2. EJECUTAR EL COBRO DIRECTO (Confirm=True)
+            intent = stripe.PaymentIntent.create(
+                amount=int(amount * 100), # Convertir a centavos
+                currency='usd',
+                payment_method="pm_card_visa", # <--- TARJETA QUE SIEMPRE FUNCIONA
+                confirm=True, # <--- COBRA YA, NO ESPERES
+                description=f"Auto-Topup for {agent_id}",
+                automatic_payment_methods={'enabled': True, 'allow_redirects': 'never'},
+                transfer_data={
+                    'destination': connected_account_id, # Enviar el dinero al agente
+                }
+            )
+            
+            # 3. ACTUALIZAR SALDO EN TU BASE DE DATOS
+            # Como es automático, no necesitamos esperar al Webhook
+            new_bal = current_balance + amount
+            self.db.table("wallets").update({"balance": new_bal}).eq("agent_id", agent_id).execute()
+
+            print(f"✅ DINERO INGRESADO: ${amount} (Nuevo saldo: ${new_bal})")
+            return {"status": "SUCCESS", "new_balance": new_bal, "tx_id": intent.id}
+
+        except stripe.error.StripeError as e:
+            # Si falla por "capabilities", intentamos activarlas forzosamente
+            if "capabilities" in str(e):
+                print(f"⚠️ Intentando reparar cuenta {connected_account_id}...")
+                try:
+                    stripe.Account.modify(connected_account_id, capabilities={"transfers": {"requested": True}})
+                    return {"status": "RETRY_NEEDED", "message": "Cuenta reparada. Intenta de nuevo en 5 segundos."}
+                except: pass
+            return {"status": "ERROR", "message": str(e)}
+        except Exception as e:
+            return {"status": "ERROR", "message": str(e)}
+
     def get_agent_status(self, agent_id):
         try:
             resp = self.db.table("wallets").select("*").eq("agent_id", agent_id).execute()
@@ -792,92 +840,72 @@ class UniversalEngine:
 
     def register_new_agent(self, client_name, country_code="US"):
         """
-        REGISTRO SILENCIOSO (CUSTOM ACCOUNTS):
-        Crea la cuenta, la verifica y activa Issuing SIN intervención del usuario.
+        REGISTRO SILENCIOSO Y AUTOMÁTICO:
+        Crea la cuenta activando 'transfers' y 'card_payments' al instante.
         """
         country_code = country_code.upper()
-        
-        # Generar claves internas
         agent_id = f"ag_{uuid.uuid4().hex[:12]}"
         raw_secret = f"sk_live_{secrets.token_urlsafe(32)}"
         secret_hash = self._hash_key(raw_secret)
         
-        # Datos ficticios para MODO TEST (VERSIÓN ESPAÑA)
-        test_data = {
-            "day": 1, "month": 1, "year": 1980,
-            "line1": "Calle de Alcalá 1",   # Dirección real
-            "city": "Madrid",
-            "state": "Madrid",              # Provincia
-            "postal_code": "28014",         # CP Válido de Madrid
-            "ssn_last_4": "0000",
-            "phone": "+34600123456"         # Teléfono formato ES
-        }
+        # Datos Dummy para pasar validación en Test Mode
+        test_ip = "8.8.8.8"
+        timestamp = int(time.time())
 
         try:
-            print(f"🥷 Iniciando Registro Silencioso para {client_name} ({country_code})...")
+            print(f"🥷 Creando Agente Automático: {client_name}...")
 
-            # 1. CREAR CUENTA CUSTOM (Invisible para el usuario)
+            # 1. CREAR CUENTA PRE-ACTIVADA
             account = stripe.Account.create(
                 country=country_code,
-                type="custom",  # <--- CAMBIO CLAVE: Custom en vez de Express
+                type="custom",
                 capabilities={
-                    # "card_issuing": {"requested": True},
                     "card_payments": {"requested": True},
-                    "transfers": {"requested": True},
+                    "transfers": {"requested": True}, # <--- CRUCIAL PARA EL ERROR
                 },
                 business_type="individual",
-                business_profile={"name": client_name, "mcc": "5734"}, # MCC de Software
-                email=f"{agent_id}@agentpay.ai", # Email interno
+                business_profile={"name": client_name, "mcc": "5734", "url": "http://agentpay.ai"},
+                email=f"{agent_id}@agentpay.ai",
+                # ESTO ES LO QUE FALTA PARA EVITAR EL ERROR DE CAPABILITIES:
                 tos_acceptance={
-                    "date": int(time.time()),
-                    "ip": "8.8.8.8", # IP del servidor (simulada)
+                    "date": timestamp,
+                    "ip": test_ip, 
                 },
             )
 
-            # 2. INYECTAR DATOS DE VERIFICACIÓN (KYC AUTOMÁTICO)
-            # Esto es lo que antes hacía el usuario en el link rosa. Ahora lo haces tú por código.
+            # 2. INYECTAR DATOS DE VERIFICACIÓN (KYC FALSO PARA TEST)
             stripe.Account.modify(
                 account.id,
                 individual={
-                    "first_name": client_name.split(" ")[0],
-                    "last_name": client_name.split(" ")[-1] if " " in client_name else "Agent",
+                    "first_name": "Agente",
+                    "last_name": "IA",
                     "email": f"{agent_id}@agentpay.ai",
-                    "phone": test_data["phone"],
-                    "dob": {"day": test_data["day"], "month": test_data["month"], "year": test_data["year"]},
-                    "address": {
-                        "line1": test_data["line1"],
-                        "city": test_data["city"],
-                        "state": test_data["state"],
-                        "postal_code": test_data["postal_code"],
-                        "country": country_code
-                    },
-                    # "ssn_last_4": test_data["ssn_last_4"],
+                    "dob": {"day": 1, "month": 1, "year": 1990},
+                    "address": {"line1": "Calle Test 123", "city": "Madrid", "state": "Madrid", "postal_code": "28001", "country": country_code},
+                    "phone": "+34000000000"
                 }
             )
 
-            print(f"✅ Cuenta {account.id} verificada por API. Esperando activación...")
-
-            # 3. Guardar en Base de Datos
+            # 3. Guardar en DB
             self.db.table("wallets").insert({
                 "agent_id": agent_id,
                 "owner_name": client_name,
                 "api_secret_hash": secret_hash,
                 "balance": 0.0,
                 "stripe_account_id": account.id,
-                "kyc_status": "ACTIVE" # Ya nace activo
+                "kyc_status": "ACTIVE"
             }).execute()
             
             return {
-                "status": "CREATED_SILENTLY",
+                "status": "CREATED",
                 "agent_id": agent_id,
                 "api_key": raw_secret,
                 "stripe_account_id": account.id,
-                "message": "Cuenta creada y verificada automáticamente. ¡Ya puedes emitir tarjetas!",
-                # Ya no devolvemos stripe_setup_url porque NO hace falta
+                "message": "Agente listo y activo para recibir dinero automáticamente."
             }
 
         except Exception as e:
-            print(f"❌ Error en Registro Silencioso: {str(e)}")
+            print(f"❌ Error creando agente: {e}")
             return {"status": "ERROR", "message": str(e)}
 
     def update_agent_settings(self, agent_id, webhook_url=None, owner_email=None):
