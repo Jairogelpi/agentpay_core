@@ -259,6 +259,20 @@ async def automatic_topup(req: dict):
     """Recarga automática sin intervención humana (Solo Test Mode)"""
     return engine.automatic_topup(req.get("agent_id"), req.get("amount"))
 
+@app.post("/v1/topup/direct_charge")
+async def direct_charge(req: dict):
+    """
+    Recibe { agent_id, amount, payment_method_id }
+    Cobra la tarjeta sin redirecciones.
+    """
+    if hasattr(engine, 'charge_user_card'):
+        return engine.charge_user_card(
+            req.get("agent_id"), 
+            float(req.get("amount", 0)), 
+            req.get("payment_method_id") # El token de la tarjeta
+        )
+    return {"status": "ERROR", "message": "Función no implementada en Engine"}
+
 @app.post("/v1/identity/proxy")
 async def get_proxy(req: dict):
     """Obtiene una IP residencial para evitar bloqueos"""

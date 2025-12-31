@@ -605,6 +605,53 @@ class UniversalEngine:
         except Exception as e:
             return {"status": "ERROR", "message": str(e)}
 
+    def charge_user_card(self, agent_id, amount, payment_method_id):
+        """
+        COBRO REAL INVISIBLE:
+        Recibe el token de tarjeta del usuario (desde el Frontend) y cobra al instante.
+        """
+        try:
+            # 1. Recuperar cuenta destino (El Agente)
+            wallet = self.db.table("wallets").select("stripe_account_id, balance").eq("agent_id", agent_id).execute()
+            if not wallet.data: raise Exception("Agente no encontrado")
+            
+            connected_account_id = wallet.data[0]['stripe_account_id']
+            current_balance = float(wallet.data[0]['balance'])
+
+            print(f"💳 Procesando cobro de tarjeta ({payment_method_id}) para {agent_id}...")
+
+            # 2. EJECUTAR EL COBRO REAL (Sin redirección)
+            intent = stripe.PaymentIntent.create(
+                amount=int(amount * 100),
+                currency='usd',
+                payment_method=payment_method_id, # <--- LA TARJETA DEL USUARIO
+                confirm=True, # <--- COBRO INMEDIATO
+                description=f"Recarga de Saldo para {agent_id}",
+                automatic_payment_methods={'enabled': True, 'allow_redirects': 'never'},
+                transfer_data={
+                    'destination': connected_account_id, # El dinero va al agente
+                },
+                # Si es un pago real, a veces requerimos retorno (3D Secure), 
+                # pero con 'never' forzamos el intento directo.
+            )
+            
+            # 3. ACTUALIZAR SALDO INTERNO
+            new_bal = current_balance + amount
+            self.db.table("wallets").update({"balance": new_bal}).eq("agent_id", agent_id).execute()
+
+            return {
+                "status": "SUCCESS", 
+                "new_balance": new_bal, 
+                "tx_id": intent.id,
+                "message": "Pago completado correctamente."
+            }
+
+        except stripe.error.CardError as e:
+            # Error real de tarjeta (fondos insuficientes, denegada, etc.)
+            return {"status": "FAILED", "message": f"Tarjeta rechazada: {e.user_message}"}
+        except Exception as e:
+            return {"status": "ERROR", "message": str(e)}
+
     def get_agent_status(self, agent_id):
         try:
             resp = self.db.table("wallets").select("*").eq("agent_id", agent_id).execute()
