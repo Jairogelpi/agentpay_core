@@ -130,6 +130,35 @@ class IdentityManager:
             print(f"Error AI Extracting: {e}")
             return "AI_PARSING_ERROR"
 
+    # --- AÑADIR DENTRO DE class IdentityManager ---
+    
+    def check_sms_inbox(self):
+        """
+        Mira en la tabla inbound_sms si ha llegado algo nuevo.
+        """
+        if not self.db:
+            return "DB_NOT_CONNECTED"
+
+        try:
+            # Buscamos el último SMS recibido (sin filtrar por agente para este test)
+            response = self.db.table("inbound_sms").select("*").order("created_at", desc=True).limit(1).execute()
+            
+            if not response.data:
+                return "NO_SMS"
+            
+            last_sms = response.data[0]
+            cuerpo = str(last_sms.get('body', '')) # Forzamos string
+            remitente = last_sms.get('sender', 'Unknown')
+            
+            print(f"   📱 [SMS] Mensaje encontrado de {remitente}: {cuerpo}")
+
+            # Reutilizamos tu lógica de extracción (IA o Regex)
+            return self._extract_code_with_ai("SMS Verification", cuerpo)
+
+        except Exception as e:
+            print(f"❌ Error Checking SMS: {e}")
+            return f"ERROR: {str(e)}"
+
     # --- RESTO DE FUNCIONES (Proxy, Captcha, Session) ---
     def get_residential_proxy(self, region="US"):
         return {"status": "MOCK_PROXY", "ip": "1.2.3.4", "region": region}

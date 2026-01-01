@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException, Depends, Security, Header
+from fastapi import FastAPI, Request, HTTPException, Depends, Security, Header, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
@@ -22,6 +22,36 @@ def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security
     if not agent_id:
         raise HTTPException(status_code=401, detail="Invalid API Key")
     return agent_id
+
+@app.post("/v1/identity/twilio-webhook")
+async def twilio_webhook(From: str = Form(...), Body: str = Form(...), To: str = Form(...)):
+    """
+    Recibe SMS reales de Twilio y los guarda en Supabase.
+    """
+    print(f"📲 [SMS RECIBIDO] De: {From} | Para: {To} | Msj: {Body}")
+    
+    try:
+        # Guardar en la tabla que acabamos de crear
+        # Nota: asumo que engine.db es accesible o usamos supabase directo si importado
+        # En este archivo 'engine' está inicializado globalmente, identidad usa engine.db.
+        # Podemos usar engine.db para insertar.
+        engine.db.table("inbound_sms").insert({
+            "sender": From,
+            "body": Body,
+            "to_number": To,
+            "agent_id": "UNKNOWN" # En el futuro, buscaríamos a quién pertenece el número 'To'
+        }).execute()
+        
+        return {"status": "received"}
+    except Exception as e:
+        print(f"❌ Error guardando SMS: {e}")
+        return {"status": "error", "detail": str(e)}
+
+# --- IMPORTANTE: Endpoint para que tu script de prueba pueda LEER el SMS ---
+@app.get("/v1/identity/sms/latest")
+async def read_latest_sms():
+    # Usamos el identity_mgr que ya tienes inicializado en main.py
+    return identity_mgr.check_sms_inbox()
 
 # --- CONFIGURACIÓN MCP (MODEL CONTEXT PROTOCOL) ---
 # Creamos el servidor MCP con el nombre del proyecto
