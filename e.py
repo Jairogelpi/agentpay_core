@@ -118,9 +118,11 @@ def flow_realidad_total():
         print(f"   💸 El dinero se ha descontado correctamente del balance.")
 
     except stripe.error.StripeError as e:
-        print(f"   ❌ [STRIPE] Error: {e.user_message}")
+        print(f"   ❌ [STRIPE] Error: {e.user_message or str(e)}")
     except Exception as e:
-        print(f"   ❌ [ERROR] Fallo al cobrar: {e}")
+        import traceback
+        print(f"   ❌ [ERROR] Fallo al cobrar: {repr(e)}")
+        traceback.print_exc()
 
     print("\n✨ --- TEST FINALIZADO --- ✨")
 
