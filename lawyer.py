@@ -9,7 +9,7 @@ COURT_MODEL = "gpt-4o"
 class AutoLawyer:
     """
     TRIBUNAL SUPREMO: Infraestructura judicial robusta.
-    Incluye manejo de errores para evitar que el servidor devuelva 'null'.
+    Nunca devuelve 'None'. Siempre devuelve un veredicto estructural.
     """
     
     def __init__(self):
@@ -42,16 +42,15 @@ class AutoLawyer:
             
         except Exception as e:
             print(f"⚖️ [COURT ERROR] {str(e)}")
-            # Fallback estructural para no romper el flujo
             return {}
 
     def analyze_case(self, agent_id, vendor, amount, claim_reason, proof_logs, transaction_context={}):
         """
-        EL PROCESO JUDICIAL: Blindado contra fallos.
+        EL PROCESO JUDICIAL: Blindado.
         """
         print(f"⚖️ [HIGH COURT] Iniciando Arbitraje contra {vendor}...")
         
-        # --- SAFEGUARD: Si no hay IA, rechazamos la disputa por defecto ---
+        # Fallback si no hay IA configurada
         if not self.ai_enabled:
             return {
                 "viability": "DISMISSED",
@@ -61,23 +60,21 @@ class AutoLawyer:
             }
 
         try:
-            # --- ETAPA 1: DESCUBRIMIENTO ---
+            # ETAPA 1: DESCUBRIMIENTO
             discovery_prompt = f"""
-            ACTÚA COMO PERITO FORENSE. Analiza estos logs: {proof_logs}.
-            Busca fallos técnicos (500, Timeout).
+            ACTÚA COMO PERITO FORENSE. Analiza logs: {proof_logs}.
             OUTPUT JSON: {{ "technical_failures": [], "evidence_weight": 0-100 }}
             """
             discovery = self._court_call("Forensic Agent", discovery_prompt)
 
-            # --- ETAPA 2: DEFENSA ---
+            # ETAPA 2: DEFENSA
             adversary_prompt = f"""
             EVIDENCIA: {json.dumps(discovery)}. RECLAMO: "{claim_reason}".
-            ACTÚA COMO ABOGADO DEFENSOR. ¿Es culpa del usuario?
             OUTPUT JSON: {{ "counter_arguments": [], "doubt_level": 0-100 }}
             """
             cross_exam = self._court_call("Defense Attorney", adversary_prompt, temperature=0.3)
 
-            # --- ETAPA 3: VEREDICTO FINAL ---
+            # ETAPA 3: VEREDICTO FINAL
             tribunal_prompt = f"""
             EVIDENCIA: {json.dumps(discovery)}
             DEFENSA: {json.dumps(cross_exam)}
@@ -94,10 +91,14 @@ class AutoLawyer:
             """
             verdict = self._court_call("Supreme Court", tribunal_prompt)
             
-            # Validación final: Si el JSON vino vacío, forzar rechazo
+            # 🛡️ DEFENSA FINAL: Si el JSON vino vacío, forzar rechazo
             if not verdict.get("suggested_action"):
-                verdict["suggested_action"] = "REJECT_CLAIM"
-                verdict["judicial_opinion"] = "Mistrial: Evidence inconclusive (AI Parse Error)."
+                return {
+                    "viability": "ERROR",
+                    "judicial_opinion": "Mistrial: AI generated invalid verdict.",
+                    "suggested_action": "REJECT_CLAIM",
+                    "confidence_score": 0
+                }
             
             return verdict
 
@@ -106,6 +107,6 @@ class AutoLawyer:
             return {
                 "viability": "ERROR",
                 "judicial_opinion": f"System Error: {str(e)}",
-                "suggested_action": "REJECT_CLAIM", # Por seguridad, ante duda, no devolvemos el dinero
+                "suggested_action": "REJECT_CLAIM",
                 "confidence_score": 0
             }
