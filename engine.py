@@ -373,8 +373,8 @@ class UniversalEngine:
 
     def _issue_virtual_card(self, agent_id, amount, vendor, mcc_category='services'):
         """
-        MODO BANCO CENTRAL: Emite la tarjeta desde la PLATAFORMA (Tú), 
-        saltando las restricciones de Connect.
+        MODO BANCO CENTRAL: Emite la tarjeta desde la PLATAFORMA.
+        CORRECCIÓN: Asegura que el nombre del titular NO tenga números.
         """
         try:
             # Configuración de categorías
@@ -384,28 +384,32 @@ class UniversalEngine:
             }
             allowed_categories = mcc_map.get(mcc_category.lower(), mcc_map["services"])
             
-            # 1. Crear Titular en la PLATAFORMA (No en la cuenta conectada)
-            # Usamos un email único para identificar que es de este agente
-            holder_email = f"{agent_id[:8]}@agentpay.ai"
+            # 1. Crear Titular (Cardholder)
+            # FIX: Stripe prohíbe números en el nombre. Usamos un nombre genérico o limpio.
+            # En producción, aquí pondrías el nombre real del humano verificado (ej: "Jairo Gelpi")
+            safe_name = "Agent Pay User" 
             
+            # Usamos el email para identificarlo, eso sí es único
+            holder_email = f"{agent_id[:10]}@agentpay.ai"
+            
+            # Buscamos si ya existe para no duplicar
             holders = stripe.issuing.Cardholder.list(limit=1, email=holder_email)
             
             if holders.data:
                 cardholder = holders.data[0]
             else:
                 cardholder = stripe.issuing.Cardholder.create(
-                    name=f"Agent {agent_id[:8]}",
+                    name=safe_name, # <--- AQUÍ ESTABA EL ERROR (Antes ponía variables con números)
                     email=holder_email,
                     status="active",
                     type="individual",
                     billing={"address": {"line1": "Calle Gran Via 1", "city": "Madrid", "country": "ES", "postal_code": "28013"}}
                 )
 
-            # 2. Emitir Tarjeta desde la PLATAFORMA (Directamente)
-            # Eliminamos el parámetro 'stripe_account' para usar tus propios permisos.
+            # 2. Emitir Tarjeta
             card = stripe.issuing.Card.create(
                 cardholder=cardholder.id,
-                currency="eur",  # Moneda de tu plataforma
+                currency="eur", 
                 type="virtual",
                 status="active",
                 spending_controls={
@@ -418,7 +422,7 @@ class UniversalEngine:
             
             return {
                 "id": card.id,
-                "number": "4000 0000 0000 0000" if not hasattr(card, 'number') else card.number, # Test Mode
+                "number": "4000 0000 0000 0000" if not hasattr(card, 'number') else card.number,
                 "cvv": card.cvc,
                 "exp_month": card.exp_month,
                 "exp_year": card.exp_year,
