@@ -445,8 +445,8 @@ class UniversalEngine:
             
             return {
                 "id": card.id,
-                "number": "4000 0000 0000 0000" if not hasattr(card, 'number') else card.number,
-                "cvv": card.cvc,
+                "number": getattr(card, 'number', "4000 0000 0000 0000"),
+                "cvv": getattr(card, 'cvc', "000"),
                 "exp_month": card.exp_month,
                 "exp_year": card.exp_year,
                 "brand": card.brand,
