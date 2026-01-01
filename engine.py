@@ -797,6 +797,93 @@ class UniversalEngine:
         
         # 3. Acciones Automáticas basadas en el veredicto
         status = "REFUNDED" if verdict.get('suggested_action') == "REFUND" else "DISPUTE_REJECTED"
+
+    # --- AÑADIR EN ENGINE.PY (DENTRO DE LA CLASE UniversalEngine) ---
+    
+    def scan_and_pay_qr(self, payer_agent_id, qr_url):
+        """
+        SISTEMA DE VISIÓN FINANCIERA (QR PARSER):
+        1. Recibe una URL de QR (ej: Stripe Checkout).
+        2. Consulta a Stripe qué contiene (Monto y Destinatario).
+        3. Ejecuta el pago instantáneo desde el Payer hacia el Receiver.
+        """
+        print(f"🤖 [QR VISION] Analizando QR para el agente {payer_agent_id}...")
+        print(f"   🔗 URL Detectada: {qr_url}")
+
+        try:
+            # 1. Extraer el Session ID de la URL
+            # Formato típico: https://checkout.stripe.com/c/pay/cs_test_a1b2c3...
+            if "cs_test_" not in qr_url and "cs_live_" not in qr_url:
+                return {"status": "ERROR", "message": "Formato de QR no válido o desconocido."}
+
+            session_id = qr_url.split("/")[-1].split("#")[0]  # Limpieza básica
+            
+            # 2. Consultar a Stripe los detalles de esa sesión (La "Factura")
+            # Como somos la Plataforma, podemos leer la sesión aunque sea de otro usuario
+            session = stripe.checkout.Session.retrieve(session_id)
+            
+            if session.payment_status == 'paid':
+                return {"status": "ALREADY_PAID", "message": "Este QR ya ha sido pagado."}
+
+            # 3. Extraer datos clave
+            amount_dollars = session.amount_total / 100.0
+            receiver_agent_id = session.metadata.get('agent_id')
+            
+            if not receiver_agent_id:
+                return {"status": "ERROR", "message": "El QR no contiene metadatos del agente destino."}
+
+            print(f"   🧠 [QR ANALYSIS] Detectado cobro de ${amount_dollars} para {receiver_agent_id}")
+
+            # 4. EJECUTAR EL PAGO (M2M Transfer)
+            # Usamos la lógica de cobro directo (pm_card_visa simula la tarjeta del agente pagador)
+            
+            # Recuperar cuenta Stripe del DESTINATARIO para enviarle la plata
+            receiver_wallet = self.db.table("wallets").select("stripe_account_id").eq("agent_id", receiver_agent_id).execute()
+            if not receiver_wallet.data:
+                 return {"status": "ERROR", "message": "El destinatario no tiene cuenta conectada."}
+            
+            dest_acct_id = receiver_wallet.data[0]['stripe_account_id']
+
+            # Crear el movimiento de dinero REAL
+            intent = stripe.PaymentIntent.create(
+                amount=int(amount_dollars * 100),
+                currency="usd",
+                payment_method="pm_card_visa", # Simula la tarjeta del Agente Pagador
+                confirm=True, # Pago Inmediato
+                description=f"QR Payment: {payer_agent_id} -> {receiver_agent_id}",
+                automatic_payment_methods={'enabled': True, 'allow_redirects': 'never'},
+                transfer_data={
+                    'destination': dest_acct_id, # El dinero llega al que generó el QR
+                }
+            )
+
+            # 5. Opcional: Expirar la sesión de checkout para que nadie más la pague
+            try:
+                stripe.checkout.Session.expire(session_id)
+            except: pass # Si ya expiró o falló, no importa, el pago ya se hizo
+
+            # 6. Registrar en Base de Datos (Log de Payer y Receiver)
+            # Restamos saldo lógico al pagador (si gestionamos saldo interno)
+            # Nota: deduct_balance debe existir en la DB como función RPC
+            try:
+                self.db.rpc("deduct_balance", {"p_agent_id": payer_agent_id, "p_amount": amount_dollars}).execute()
+            except Exception as e:
+                print(f"⚠️ Nota: No se pudo descontar saldo interno (quizás usa tarjeta directa): {e}")
+
+            return {
+                "status": "SUCCESS",
+                "message": "Pago por QR completado exitosamente.",
+                "tx_details": {
+                    "id": intent.id,
+                    "amount": amount_dollars,
+                    "from": payer_agent_id,
+                    "to": receiver_agent_id
+                }
+            }
+
+        except Exception as e:
+            print(f"❌ Error procesando QR: {e}")
+            return {"status": "ERROR", "message": str(e)}
         
         # Actualizar DB
         self.db.table("transaction_logs").update({

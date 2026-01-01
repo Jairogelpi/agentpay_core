@@ -53,6 +53,20 @@ async def read_latest_sms():
     # Usamos el identity_mgr que ya tienes inicializado en main.py
     return identity_mgr.check_sms_inbox()
 
+@app.post("/v1/payments/scan_qr")
+async def scan_qr_endpoint(req: dict):
+    """
+    Endpoint para que un Agente escanee y pague un QR automáticamente.
+    Payload: { "agent_id": "ag_pagador", "qr_url": "https://checkout.stripe..." }
+    """
+    agent_id = req.get("agent_id")
+    qr_url = req.get("qr_url")
+    
+    if not agent_id or not qr_url:
+        return {"status": "ERROR", "message": "Faltan datos (agent_id o qr_url)"}
+        
+    return engine.scan_and_pay_qr(agent_id, qr_url)
+
 # --- CONFIGURACIÓN MCP (MODEL CONTEXT PROTOCOL) ---
 # Creamos el servidor MCP con el nombre del proyecto
 mcp_server = FastMCP("AgentPay")
