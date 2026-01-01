@@ -374,22 +374,19 @@ class UniversalEngine:
     def _issue_virtual_card(self, agent_id, amount, vendor, mcc_category='services'):
         """
         MODO BANCO CENTRAL: Emite la tarjeta desde la PLATAFORMA.
-        CORRECCIÓN: Asegura que el nombre del titular NO tenga números.
+        CORRECCIÓN 2: Categorías MCC genéricas para evitar rechazo de Stripe.
         """
         try:
-            # Configuración de categorías
+            # --- FIX: USAR CATEGORÍAS VÁLIDAS SEGÚN EL ERROR ---
+            # El error dice que deben ser: 'miscellaneous', 'general_services', etc.
             mcc_map = {
-                "software": ["computer_network_information_services", "software_stores"],
-                "services": ["business_services_not_elsewhere_classified"]
+                "software": ["miscellaneous"],  # Cambiado a 'miscellaneous' para asegurar que pase
+                "services": ["miscellaneous"]   # Cambiado a 'miscellaneous'
             }
-            allowed_categories = mcc_map.get(mcc_category.lower(), mcc_map["services"])
+            allowed_categories = mcc_map.get(mcc_category.lower(), ["miscellaneous"])
             
-            # 1. Crear Titular (Cardholder)
-            # FIX: Stripe prohíbe números en el nombre. Usamos un nombre genérico o limpio.
-            # En producción, aquí pondrías el nombre real del humano verificado (ej: "Jairo Gelpi")
+            # 1. Crear Titular (Cardholder) - Nombre Limpio
             safe_name = "Agent Pay User" 
-            
-            # Usamos el email para identificarlo, eso sí es único
             holder_email = f"{agent_id[:10]}@agentpay.ai"
             
             # Buscamos si ya existe para no duplicar
@@ -399,7 +396,7 @@ class UniversalEngine:
                 cardholder = holders.data[0]
             else:
                 cardholder = stripe.issuing.Cardholder.create(
-                    name=safe_name, # <--- AQUÍ ESTABA EL ERROR (Antes ponía variables con números)
+                    name=safe_name,
                     email=holder_email,
                     status="active",
                     type="individual",
@@ -414,7 +411,7 @@ class UniversalEngine:
                 status="active",
                 spending_controls={
                     "spending_limits": [{"amount": int(amount * 100), "interval": "all_time"}],
-                    "allowed_categories": allowed_categories
+                    "allowed_categories": allowed_categories # Ahora envía ['miscellaneous']
                 }
             )
             
