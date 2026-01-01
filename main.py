@@ -367,6 +367,12 @@ async def get_credit_score(req: dict):
     """Consulta el Bureau de Crédito de IA"""
     return engine.credit_bureau.check_credit_eligibility(req.get("agent_id"))
 
+@app.post("/v1/credit/request")
+async def request_credit(req: dict):
+    from credit import CreditBureau 
+    credit_sys = CreditBureau(engine.db)
+    return credit_sys.evaluate_loan(req['agent_id'], req['amount'], req['reason'])
+
 @app.post("/v1/legal/sign")
 async def sign_contract(req: dict):
     """Wrapper Legal: Firma contratos en nombre del agente"""

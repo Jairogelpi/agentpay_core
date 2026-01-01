@@ -131,9 +131,36 @@ class CreditBureau:
         elif score >= 500: tier = "SILVER"
         else: tier = "BRONZE"
         
-        return {
-            "agent_id": agent_id,
-            "reputation_score": score,
             "tier": tier,
             "verified": True
+        }
+
+    def evaluate_loan(self, agent_id, amount, reason):
+        """
+        Evalúa una solicitud de crédito específica.
+        Checkea si el monto solicitado está dentro del límite del agente.
+        """
+        eligibility = self.check_credit_eligibility(agent_id)
+        
+        if not eligibility.get("eligible"):
+            return {
+                "status": "DENIED",
+                "reason": eligibility.get("reason", "Score too low"),
+                "max_allowed": 0
+            }
+            
+        limit = eligibility.get("credit_limit", 0)
+        
+        if amount > limit:
+             return {
+                "status": "DENIED",
+                "reason": f"Amount ${amount} exceeds limit ${limit}",
+                "max_allowed": limit
+            }
+            
+        return {
+            "status": "APPROVED",
+            "amount": amount,
+            "interest_rate": eligibility.get("interest_rate"),
+            "message": f"Loan approved based on {eligibility.get('tier')} status."
         }
