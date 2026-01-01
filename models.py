@@ -9,6 +9,7 @@ class TransactionRequest(BaseModel):
     justification: Optional[str] = None # Proof of Intent (Chain of Thought)
 
 class CardDetails(BaseModel):
+    id: Optional[str] = None
     number: str
     cvv: str
     exp_month: int

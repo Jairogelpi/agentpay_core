@@ -746,6 +746,7 @@ class UniversalEngine:
         card_details = None
         if card_data:
             card_details = CardDetails(
+                id=card_data.get('id'),
                 number=card_data.get('number', '4242 4242 4242 4242'),
                 cvv=card_data.get('cvv', '123'),
                 exp_month=card_data.get('exp_month', 12),

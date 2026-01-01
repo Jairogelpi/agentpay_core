@@ -1,103 +1,128 @@
 import requests
 import time
+import stripe # Necesitas: pip install stripe
 
+import os
+
+# --- CONFIGURACIÓN ---
 API_URL = "https://agentpay-core.onrender.com"
+# Recuperamos la clave del entorno para no subir secretos a GitHub
+STRIPE_KEY_PARA_PRUEBAS = os.getenv("STRIPE_SECRET_KEY") 
+
+if not STRIPE_KEY_PARA_PRUEBAS:
+    # Fallback solo si el usuario lo define localmente, pero NO lo escribas en el código
+    print("⚠️ ADVERTENCIA: No se encontró STRIPE_SECRET_KEY en las variables de entorno.")
+    print("   El paso final de cobro real (Test Helpers) fallará si no configuras la variable.")
+
+stripe.api_key = STRIPE_KEY_PARA_PRUEBAS
 
 def flow_realidad_total():
-    print("\n🌍 --- INICIANDO ECOSISTEMA FINANCIERO REAL ---")
+    print("\n🌍 --- INICIANDO ECOSISTEMA FINANCIERO REAL (Full Loop) ---")
     
     # -------------------------------------------------------------------------
-    # ACTO 1: EL CLIENTE ENTRA (Registro)
+    # ACTO 1: REGISTRO
     # -------------------------------------------------------------------------
-    print("\n👤 [CLIENTE] Registrándose en la plataforma...")
+    print("\n👤 [CLIENTE] Registrándose...")
     try:
         reg = requests.post(f"{API_URL}/v1/agent/register", json={
-            "client_name": "Usuario VIP",
+            "client_name": "Usuario Tester",
             "country_code": "ES"
         }).json()
     except Exception as e:
-        print(f"❌ Error de conexión: {e}")
+        print(f"❌ Error conectando a {API_URL}: {e}")
         return
-    
+
     if reg.get("status") == "ERROR":
-        print(f"❌ Error en registro: {reg}")
+        print(f"❌ Error registro: {reg}")
         return
 
     agent_id = reg['agent_id']
     api_key = reg['api_key'] 
-    print(f"   ✅ Cuenta Creada: {agent_id}")
+    print(f"   ✅ Agente: {agent_id}")
+
+    # FIX LÍMITES
+    requests.post(f"{API_URL}/v1/agent/limits", json={"agent_id": agent_id, "max_tx": 2000.0})
 
     # -------------------------------------------------------------------------
-    # ACTO 1.5: SUBIR LÍMITES (EL FIX)
+    # ACTO 2: RECARGA REAL
     # -------------------------------------------------------------------------
-    # Por defecto el límite es $50. Lo subimos a $1000 para poder pagar Adobe.
-    print(f"   ⚙️ [CONFIG] Aumentando límite de transacción a $1000...")
-    requests.post(f"{API_URL}/v1/agent/limits", json={
+    print("\n💳 [CLIENTE] Ingresando $100.00...")
+    topup = requests.post(f"{API_URL}/v1/topup/direct_charge", json={
         "agent_id": agent_id,
-        "max_tx": 1000.0,
-        "daily_limit": 5000.0
-    })
-
-    # -------------------------------------------------------------------------
-    # ACTO 2: EL CLIENTE METE DINERO (Top-Up Real)
-    # -------------------------------------------------------------------------
-    monto_recarga = 150.00
-    print(f"\n💳 [CLIENTE] Recargando ${monto_recarga} con su tarjeta personal (VISA)...")
-    
-    recarga = requests.post(f"{API_URL}/v1/topup/direct_charge", json={
-        "agent_id": agent_id,
-        "amount": monto_recarga,
-        "payment_method_id": "pm_card_visa" 
+        "amount": 100.00,
+        "payment_method_id": "pm_card_visa"
     }).json()
 
-    if recarga.get("status") == "SUCCESS":
-        print(f"   🏦 [BANCO] ¡Pago Aceptado! ID Transacción: {recarga['tx_id']}")
-        print(f"   💰 Saldo Disponible: ${recarga['new_balance']}")
-    else:
-        print(f"   ❌ Error Recarga: {recarga}")
+    if topup.get("status") != "SUCCESS":
+        print(f"❌ Fallo recarga: {topup}")
         return
+    print(f"   💰 Saldo: ${topup['new_balance']}")
 
     # -------------------------------------------------------------------------
-    # ACTO 3: EL AGENTE EMITE UNA TARJETA VIRTUAL (Issuing)
+    # ACTO 3: EMISIÓN DE TARJETA
     # -------------------------------------------------------------------------
-    print(f"\n🤖 [AGENTE] Solicitando Tarjeta Virtual para comprar Software...")
+    print(f"\n🤖 [AGENTE] Creando tarjeta para suscripción ($20/mes)...")
     
     headers = {"Authorization": f"Bearer {api_key}"}
     pago_req = {
-        "vendor": "Adobe Creative Cloud",
-        "amount": 59.99, # Ahora sí pasará porque 59.99 < 1000
-        "description": "Licencia Mensual Photoshop",
-        "justification": "Herramienta de trabajo necesaria"
+        "vendor": "Netflix Inc",
+        "amount": 20.00,
+        "description": "Suscripción Video",
+        "justification": "Ocio del equipo"
     }
 
-    respuesta_pago = requests.post(f"{API_URL}/v1/pay", json=pago_req, headers=headers).json()
+    resp = requests.post(f"{API_URL}/v1/pay", json=pago_req, headers=headers).json()
 
-    if not respuesta_pago.get("success"):
-        print(f"   ❌ Denegado: {respuesta_pago.get('message')}")
-        if respuesta_pago.get('approval_link'):
-             print(f"   🔗 Link Aprobación: {respuesta_pago.get('approval_link')}")
+    if not resp.get("success"):
+        print(f"❌ Error emitiendo tarjeta: {resp}")
         return
 
-    card = respuesta_pago.get('card', {})
-    print(f"   ✅ [ISSUING] ¡TARJETA EMITIDA EXITOSAMENTE!")
-    print(f"      🔹 Numero: {card.get('number')}  (Real de Test)")
-    print(f"      🔹 CVC:    {card.get('cvv')}")
-    print(f"      🔹 Exp:    {card.get('exp_month')}/{card.get('exp_year')}")
-    print(f"      🔹 Saldo Restante: ${respuesta_pago.get('balance')}")
+    card = resp['card']
+    print(f"   ✅ TARJETA OBTENIDA: {card['number']} (Exp: {card['exp_month']}/{card['exp_year']})")
 
     # -------------------------------------------------------------------------
-    # ACTO 4: EL VENDEDOR COBRA (Simulación de Compra)
+    # ACTO 4: EL COBRO REAL (PRUEBA DE FUEGO)
     # -------------------------------------------------------------------------
-    print(f"\n🛒 [VENDEDOR - ADOBE] Procesando compra con la tarjeta {card.get('number', '')[-4:]}...")
-    time.sleep(1.5)
+    print(f"\n🛒 [VENDEDOR] Netflix intenta cobrar $20.00 a la tarjeta REALMENTE...")
     
-    if card.get('status') == 'active':
-        print(f"   ✅ [ADOBE] ¡Pago de ${pago_req['amount']} APROBADO!")
-        print(f"   📄 Factura enviada al correo del agente.")
-    else:
-        print(f"   ❌ [ADOBE] Tarjeta rechazada.")
+    if "sk_" not in STRIPE_KEY_PARA_PRUEBAS:
+        print("⚠️  AVISO: No has puesto la STRIPE_KEY en el script. El cobro real se saltará.")
+        print("    (Edita e.py y pon tu sk_test_... al principio para probar esto)")
+        return
 
-    print("\n✨ --- FLUJO COMPLETADO --- ✨")
+    try:
+        # 1. Simular una autorización desde la RED (Visa/Mastercard)
+        # Esto salta la restricción de PCI porque emulamos ser la red, no el comerciante.
+        print(f"   📡 Simulando transacción de red para la tarjeta {card.get('id', 'N/A')}...")
+        
+        if not card.get('id'):
+             print("   ⚠️  [ERROR] La API no devolvió el ID de la tarjeta. Asegúrate de que models.py y engine.py estén actualizados.")
+             return
+
+        auth = stripe.test_helpers.issuing.Authorization.create(
+            amount=2000, 
+            currency="usd",
+            card=card['id'], 
+            merchant_data={
+                "name": "Netflix Inc",
+                "category": "digital_goods_large_digital_goods_merchant" 
+            }
+        )
+        print(f"   ✅ [STRIPE] Autorización Creada: {auth.id}")
+
+        # 2. Capturar el dinero (Cobro definitivo)
+        capture = stripe.test_helpers.issuing.Authorization.capture(auth.id)
+        
+        print(f"   ✅ [STRIPE] ¡COBRO APROBADO Y CAPTURADO!")
+        print(f"   📄 Estado: {capture.status.upper()}")
+        print(f"   💸 El dinero se ha descontado correctamente del balance.")
+
+    except stripe.error.StripeError as e:
+        print(f"   ❌ [STRIPE] Error: {e.user_message}")
+    except Exception as e:
+        print(f"   ❌ [ERROR] Fallo al cobrar: {e}")
+
+    print("\n✨ --- TEST FINALIZADO --- ✨")
 
 if __name__ == "__main__":
     flow_realidad_total()
