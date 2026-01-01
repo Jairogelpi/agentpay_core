@@ -131,6 +131,9 @@ class CreditBureau:
         elif score >= 500: tier = "SILVER"
         else: tier = "BRONZE"
         
+        return {
+            "agent_id": agent_id,
+            "reputation_score": score,
             "tier": tier,
             "verified": True
         }
