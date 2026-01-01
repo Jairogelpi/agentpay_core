@@ -781,22 +781,53 @@ class UniversalEngine:
         """
         El Juez IA entra en acción: Arbitraje Real basado en evidencia técnica.
         """
-        # 1. Recuperar contexto de la transacción
-        tx_res = self.db.table("transaction_logs").select("*").eq("id", transaction_id).execute()
-        tx = tx_res.data[0] if tx_res.data else {}
+        # 1. Recuperar contexto
+        try:
+            tx_res = self.db.table("transaction_logs").select("*").eq("id", transaction_id).execute()
+            tx = tx_res.data[0] if tx_res.data else {}
+        except:
+            tx = {}
         
-        # 2. Llamar al Tribunal de Arbitraje (AutoLawyer)
-        verdict = self.lawyer.analyze_case(
-            agent_id=agent_id,
-            vendor=tx.get('vendor', 'Unknown'),
-            amount=float(tx.get('amount', 0)),
-            claim_reason=issue,
-            proof_logs=evidence,
-            transaction_context={"tx_id": transaction_id, "original_status": tx.get('status')}
-        )
+        # 2. Llamar al Tribunal (AutoLawyer)
+        try:
+            verdict = self.lawyer.analyze_case(
+                agent_id=agent_id,
+                vendor=tx.get('vendor', 'Unknown'),
+                amount=float(tx.get('amount', 0)),
+                claim_reason=issue,
+                proof_logs=evidence,
+                transaction_context={"tx_id": transaction_id}
+            )
+        except Exception as e:
+            print(f"❌ Error llamando al Lawyer: {e}")
+            verdict = None
+
+        # 🛡️ DEFENSA DE MOTOR: Si verdict sigue siendo None, creamos uno por defecto
+        if verdict is None:
+            verdict = {
+                "suggested_action": "REJECT_CLAIM",
+                "judicial_opinion": "Error Interno del Tribunal (Null Verdict).",
+                "viability": "ERROR"
+            }
         
-        # 3. Acciones Automáticas basadas en el veredicto
-        status = "REFUNDED" if verdict.get('suggested_action') == "REFUND" else "DISPUTE_REJECTED"
+        # 3. Acciones Automáticas
+        action = verdict.get('suggested_action', 'REJECT_CLAIM')
+        status = "REFUNDED" if action == "REFUND" else "DISPUTE_REJECTED"
+        
+        # Actualizar DB
+        try:
+            self.db.table("transaction_logs").update({
+                "status": status, 
+                "reason": f"Arbitraje IA: {verdict.get('judicial_opinion')}"
+            }).eq("id", transaction_id).execute()
+        except Exception as e:
+            print(f"⚠️ Error actualizando DB en disputa: {e}")
+        
+        return {
+            "status": status,
+            "verdict": verdict,
+            "action_taken": action
+        }
 
     # --- AÑADIR EN ENGINE.PY (DENTRO DE LA CLASE UniversalEngine) ---
     

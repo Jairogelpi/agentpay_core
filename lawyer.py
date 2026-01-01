@@ -9,21 +9,24 @@ COURT_MODEL = "gpt-4o"
 class AutoLawyer:
     """
     TRIBUNAL SUPREMO: Infraestructura judicial robusta.
-    Nunca devuelve 'None'. Siempre devuelve un veredicto estructural.
+    Garantiza que siempre se devuelva un veredicto JSON, incluso si la IA falla.
     """
     
     def __init__(self):
         self.api_key = os.environ.get("OPENAI_API_KEY")
         self.ai_enabled = bool(self.api_key)
+        self.client = None
         if self.ai_enabled:
             try:
                 self.client = OpenAI(api_key=self.api_key)
-            except:
+            except Exception as e:
+                print(f"⚠️ OpenAI Client Init Error: {e}")
                 self.ai_enabled = False
 
     def _court_call(self, system_prompt, user_prompt, temperature=0.0):
-        if not self.ai_enabled:
-            raise Exception("AI Offline")
+        if not self.ai_enabled or not self.client:
+            # Retornamos dict vacío en vez de lanzar excepción
+            return {}
             
         try:
             response = self.client.chat.completions.create(
@@ -37,12 +40,12 @@ class AutoLawyer:
             )
             content = response.choices[0].message.content
             if not content:
-                raise ValueError("Empty response from OpenAI")
+                return {}
             return json.loads(content)
             
         except Exception as e:
             print(f"⚖️ [COURT ERROR] {str(e)}")
-            return {}
+            return {} # Retorno de seguridad
 
     def analyze_case(self, agent_id, vendor, amount, claim_reason, proof_logs, transaction_context={}):
         """
@@ -50,7 +53,7 @@ class AutoLawyer:
         """
         print(f"⚖️ [HIGH COURT] Iniciando Arbitraje contra {vendor}...")
         
-        # Fallback si no hay IA configurada
+        # 1. Fallback si no hay IA
         if not self.ai_enabled:
             return {
                 "viability": "DISMISSED",
@@ -91,8 +94,8 @@ class AutoLawyer:
             """
             verdict = self._court_call("Supreme Court", tribunal_prompt)
             
-            # 🛡️ DEFENSA FINAL: Si el JSON vino vacío, forzar rechazo
-            if not verdict.get("suggested_action"):
+            # 🛡️ DEFENSA FINAL: Si el JSON vino vacío o inválido
+            if not verdict or not verdict.get("suggested_action"):
                 return {
                     "viability": "ERROR",
                     "judicial_opinion": "Mistrial: AI generated invalid verdict.",
@@ -104,6 +107,7 @@ class AutoLawyer:
 
         except Exception as e:
             print(f"🔥 CRITICAL COURT FAILURE: {e}")
+            # RETORNO DE EMERGENCIA (¡Esto es lo que faltaba!)
             return {
                 "viability": "ERROR",
                 "judicial_opinion": f"System Error: {str(e)}",
