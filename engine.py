@@ -374,28 +374,28 @@ class UniversalEngine:
     def _issue_virtual_card(self, agent_id, amount, vendor, mcc_category='services'):
         """
         MODO BANCO CENTRAL: Emite la tarjeta desde la PLATAFORMA.
-        CORRECCIÓN FINAL: Incluye DOB y Aceptación de Términos (Requisito Europeo)
+        CORRECCIÓN FINAL: Incluye DOB, TOS y TELÉFONO (Requisito 3DS Europa).
         """
         try:
-            # 1. CATEGORÍA SEGURA PARA EVITAR RECHAZO
-            # Usamos 'miscellaneous' siempre para asegurar que pase
+            # 1. CATEGORÍA SEGURA
             allowed_categories = ['miscellaneous']
             
             # 2. DATOS DEL TITULAR (CARDHOLDER)
-            # Definimos un nombre "seguro" y único por email
             holder_email = f"{agent_id[:12]}@agentpay.ai"
+            phone_dummy = "+34612345678" # <--- REQUISITO NUEVO: Teléfono para 3D Secure
             
             # Buscamos si ya existe el titular
             holders = stripe.issuing.Cardholder.list(limit=1, email=holder_email)
             
             if holders.data:
                 cardholder = holders.data[0]
-                # Si existe, nos aseguramos de que esté activo y con los datos requeridos
-                if cardholder.status != 'active':
-                    print(f"   ⚠️ Actualizando titular existente para cumplir requisitos...")
+                # Si existe, actualizamos para asegurar que tenga teléfono y requisitos
+                if cardholder.status != 'active' or not getattr(cardholder, 'phone_number', None):
+                    print(f"   ⚠️ Actualizando titular (Teléfono + Requisitos)...")
                     stripe.issuing.Cardholder.modify(
                         cardholder.id,
                         status='active',
+                        phone_number=phone_dummy, # Actualizamos teléfono
                         individual={
                             "first_name": "Agent",
                             "last_name": "User",
@@ -409,19 +409,18 @@ class UniversalEngine:
                         }
                     )
             else:
-                # CREACIÓN NUEVA: Incluyendo TODOS los campos obligatorios en Europa
+                # CREACIÓN NUEVA (EUROPA COMPLIANT + TELÉFONO)
                 cardholder = stripe.issuing.Cardholder.create(
                     name="Agent Pay User",
                     email=holder_email,
+                    phone_number=phone_dummy, # <--- AQUÍ ESTABA EL ERROR
                     status="active",
                     type="individual",
                     individual={
                         "first_name": "Agent",
                         "last_name": "User",
-                        # REQUISITO 1: Fecha de Nacimiento
                         "dob": {"day": 1, "month": 1, "year": 1990}, 
                         "card_issuing": {
-                            # REQUISITO 2: Aceptación de Términos de Servicio
                             "user_terms_acceptance": {
                                 "date": int(time.time()),   
                                 "ip": "8.8.8.8"
