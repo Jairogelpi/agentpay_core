@@ -67,6 +67,35 @@ async def scan_qr_endpoint(req: dict):
         
     return engine.scan_and_pay_qr(agent_id, qr_url)
 
+# --- EN MAIN.PY ---
+@app.get("/v1/agent/{agent_id}/audit_bundle")
+async def get_forensic_bundle(agent_id: str):
+    """
+    Genera un paquete de evidencia criptográfica (CSI) para un agente.
+    """
+    from forensic_auditor import ForensicAuditor
+    # Pasamos el cliente de Supabase ya inicializado en main.py
+    auditor = ForensicAuditor(supabase_client=identity_mgr.db) # Nota: main.py no tiene 'supabase' global explícito en snippet, pero identity_mgr.db = engine.db = supabase
+    # Re-reading main.py from previous output (Step 776): 
+    # line 15: engine = UniversalEngine()
+    # line 16: identity_mgr = IdentityManager(engine.db)
+    # The snippet says `supabase_client=supabase`. But I don't see `supabase` variable in my previous view (lines 1-50).
+    # I see `engine` and `identity_mgr`. engine.db is the supabase client usually.
+    # The user snippet says `supabase_client=supabase`. I should probably check if `supabase` is defined.
+    # Step 776 shows:
+    # 7: from engine import UniversalEngine
+    # 15: engine = UniversalEngine()
+    # It does NOT show `supabase = ...`.
+    # However, `engine` usually has `self.db`.
+    # I will assume `engine.db` is the client. The snippet assumes `supabase` exists.
+    # I will double check `main.py` imports.
+    # Step 804 (requirements) shows `supabase`.
+    # I'll use `engine.db` to be safe as `identity_mgr` uses it. Or I can check if there's a global supabase.
+    # Let's look at `main.py` imports again? I can't.
+    # I'll use `engine.db` which I know exists.
+    
+    return auditor.generate_agent_bundle(agent_id)
+
 # --- CONFIGURACIÓN MCP (MODEL CONTEXT PROTOCOL) ---
 # Creamos el servidor MCP con el nombre del proyecto
 mcp_server = FastMCP("AgentPay")
