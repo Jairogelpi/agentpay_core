@@ -7,6 +7,7 @@ class TransactionRequest(BaseModel):
     amount: float
     description: str
     justification: Optional[str] = None # Proof of Intent (Chain of Thought)
+    vendor_url: Optional[str] = None # For OSINT audit
 
 class CardDetails(BaseModel):
     id: Optional[str] = None

@@ -103,7 +103,7 @@ async def _oracle_call(system_prompt, user_prompt, temperature=0.0, model="gpt-4
     )
     return json.loads(response.choices[0].message.content)
 
-async def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", domain_status="UNKNOWN"):
+async def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", domain_status="UNKNOWN", osint_report=None):
     """
     THE ORACLE v3 (ASYNC): Multi-Stage Adversarial Governance.
     Non-blocking execution for high-concurrency environments.
@@ -123,13 +123,18 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
 
     z_score, stats_desc = calculate_statistical_risk(amount, history)
     history_md = "\n".join([f"- {h['vendor']} (${h['amount']}): {h.get('reason', 'N/A')}" for h in history[-5:]])
+    
+    # Contexto de Desconfianza (OSINT)
+    osint_context = "N/A"
+    if osint_report:
+        osint_context = f"Score: {osint_report.get('score')}/100. Risks: {', '.join(osint_report.get('risk_factors', []))}"
 
     print(f"👁️ [THE ORACLE] Commencing 3-Stage Elite Audit for ${amount} at {vendor} using {model_to_use}...")
 
     # --- STAGE 1: THE EXPERT PANEL ---
     panel_prompt = f"""
     PERSPECTIVES:
-    1. THE DETECTIVE: Domain reputation ({domain_status}), carding risk, fraud patterns.
+    1. THE DETECTIVE: Domain reputation ({domain_status}), OSINT Intelligence ({osint_context}), carding risk, fraud patterns.
     2. THE PSYCHOLOGIST: Agent Drift. Does this intent match role '{agent_role}'?
     3. THE CFO: ROI, Z-Score ({z_score:.2f}), budget health, business sense.
     

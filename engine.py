@@ -1,4 +1,3 @@
-
 import os
 import stripe
 import base64
@@ -6,6 +5,10 @@ import uuid
 import time
 import hashlib
 import secrets
+import whois
+import socket
+import ssl
+import validators
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from dotenv import load_dotenv
@@ -54,6 +57,77 @@ class UniversalEngine:
              print(f"⚠️ Redis no disponible. Usando memoria RAM (Inseguro para prod).")
              self.redis_enabled = False
              self.transaction_velocity = {} 
+
+    async def _perform_osint_scan(self, vendor_url: str):
+        """Investigación en tiempo real del comercio antes del pago (Mente Colmena)."""
+        if not vendor_url: return {"score": 50, "risk_factors": ["No URL provided"]}
+        
+        # 0. Limpieza
+        if not vendor_url.startswith("http"): vendor_url = f"https://{vendor_url}"
+        domain = urlparse(vendor_url).netloc or vendor_url
+        print(f"🔍 [OSINT] Investigando: {domain}")
+
+        # 1. CONSULTAR CACHÉ (Mente Colmena)
+        try:
+            cached = self.db.table("global_reputation_cache").select("*").eq("domain", domain).single().execute()
+            if cached.data:
+                # Comprobar si el scan es reciente (< 7 días)
+                last_scan = datetime.fromisoformat(cached.data['last_scan'].replace('Z', '+00:00'))
+                if (datetime.now(last_scan.tzinfo) - last_scan).days < 7:
+                    print(f"🧠 [HIVE MIND] Usando reputación conocida para {domain}")
+                    return {
+                        "score": cached.data['score'],
+                        "risk_factors": cached.data['risk_factors']
+                    }
+        except: pass
+
+        results = {"score": 100, "risk_factors": []}
+        
+        try:
+            # 2. ANTIGÜEDAD: ¿Es un dominio creado hace poco para una estafa?
+            try:
+                w = whois.whois(domain)
+                creation_date = w.creation_date
+                if isinstance(creation_date, list): creation_date = creation_date[0]
+                
+                if creation_date:
+                    days_old = (datetime.now() - creation_date).days
+                    if days_old < 180: # Menos de 6 meses es sospechoso
+                        results["score"] -= 40
+                        results["risk_factors"].append(f"Dominio joven: {days_old} días")
+                else:
+                    results["score"] -= 10
+                    results["risk_factors"].append("Fecha de creación oculta")
+            except Exception as e:
+                print(f"⚠️ Whois error: {e}")
+                results["score"] -= 20
+                results["risk_factors"].append("Whois privado/oculto")
+
+            # 3. SEGURIDAD SSL: ¿La conexión es cifrada y profesional?
+            try:
+                ctx = ssl.create_default_context()
+                with socket.create_connection((domain, 443), timeout=3) as sock:
+                    with ctx.wrap_socket(sock, server_hostname=domain) as ssock:
+                        cert = ssock.getpeercert()
+                        # Si el certificado es válido, no restamos puntos
+            except Exception as e:
+                results["score"] -= 30
+                results["risk_factors"].append("Sin SSL válido o error de conexión")
+
+            # 4. GUARDAR EN MENTE COLMENA (Global Cache)
+            self.db.table("global_reputation_cache").upsert({
+                "domain": domain,
+                "score": results["score"],
+                "risk_factors": results["risk_factors"],
+                "last_scan": datetime.now().isoformat()
+            }).execute()
+            
+        except Exception as e:
+            print(f"⚠️ OSINT Scan error: {e}")
+            results["score"] -= 10
+            results["risk_factors"].append("Error en análisis")
+
+        return results
 
     def process_stripe_webhook(self, payload, sig_header):
         """
@@ -220,6 +294,26 @@ class UniversalEngine:
              # Si no es un error de saldo, seguimos el flujo normal hacia Stripe (fallback)
              pass
         
+        if request.vendor_url:
+             osint_report = await self._perform_osint_scan(request.vendor_url)
+             
+             if osint_report["score"] < 50:
+                 # Si la reputación es mala, el AI_GUARD debe ser 100% estricto
+                 return TransactionResult(
+                     authorized=False,
+                     status="REJECTED",
+                     reason=f"Riesgo de Seguridad OSINT: {', '.join(osint_report['risk_factors'])}"
+                 )
+             elif osint_report["score"] < 80:
+                 # Si hay dudas, forzamos aprobación humana (Área Gris)
+                 return TransactionResult(
+                     authorized=False,
+                     status="APPROVED_PENDING_AUDIT",
+                     reason="Comercio detectado con baja reputación técnica. Requiere revisión."
+                 )
+             else:
+                 print(f"✅ [OSINT] Sitio confiable (Score: {osint_report['score']})")
+
         # --- CAPA 1: FIREWALL & INSURANCE (SECURITY FIRST) ---
         clean_vendor = self._normalize_domain(request.vendor)
         try:
@@ -696,6 +790,12 @@ class UniversalEngine:
              history = []
              trusted_vendors = {}
 
+             trusted_vendors = {}
+
+        # 0. OSINT AUDIT (Mente Colmena)
+        # Recuperamos datos de reputación en tiempo real para el AI Guard
+        osint_report = await self._perform_osint_scan(tx_data.get('vendor_url') or tx_data.get('vendor'))
+
         # Llamamos a tu AI Guard COMPLETO
         risk_assessment = await audit_transaction(
             vendor=vendor, 
@@ -705,7 +805,8 @@ class UniversalEngine:
             agent_role=agent_role, 
             history=history, 
             justification=tx_data.get('justification', 'N/A'),
-            sensitivity="HIGH"
+            sensitivity="HIGH",
+            osint_report=osint_report  # <--- NUEVO: Contexto de Desconfianza
         )
         
         verdict = risk_assessment.get('decision', 'FLAGGED')

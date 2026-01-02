@@ -13,7 +13,7 @@ class ForensicAuditor:
         # Aceptamos el cliente de base de datos para buscar el historial
         self.db = supabase_client
 
-    def generate_audit_bundle(self, agent_id, vendor, amount, justification, intent_hash, signature):
+    def generate_audit_bundle(self, agent_id, vendor, amount, justification, intent_hash, signature, osint_data=None):
         """
         Bundle para una sola transacción (usado en engine.py).
         """
@@ -29,7 +29,8 @@ class ForensicAuditor:
             "governance_proof": {
                 "intent_hash": intent_hash,
                 "justification_cot": justification,
-                "legal_signature": signature
+                "legal_signature": signature,
+                "osint_investigation": osint_data or "N/A" # Validez legal de due diligence
             },
             "compliance_status": "VERIFIED_BY_AGENTPAY"
         }
