@@ -236,12 +236,15 @@ class UniversalEngine:
         except Exception as e:
             print(f"⚠️ Aviso de Orquestación: {e}")
 
-    def check_circuit_breaker(self, agent_id):
+    def check_circuit_breaker(self, agent_id, kyc_level="UNVERIFIED"):
         """
         Fusible Financiero Indestructible (Redis)
+        Ajustamos el límite: 10 tx/min para nuevos, 30 tx/min para verificados.
         """
         current_time = int(time.time())
         try:
+            limit = 30 if kyc_level == "VERIFIED" else 10
+            
             if self.redis_enabled:
                 key = f"velocity:{agent_id}"
                 pipe = self.redis.pipeline()
@@ -252,14 +255,14 @@ class UniversalEngine:
                 results = pipe.execute()
                 
                 count = results[2]
-                if count >= 10: # Límite de 10 tx/min
+                if count >= limit: # Límite dinámico
                     return True # 🔥 FUSIBLE ACTIVADO
                 return False
             else:
                  # Fallback RAM
                 if agent_id not in self.transaction_velocity: self.transaction_velocity[agent_id] = []
                 self.transaction_velocity[agent_id] = [t for t in self.transaction_velocity[agent_id] if current_time - t < 60]
-                if len(self.transaction_velocity[agent_id]) >= 10: return True
+                if len(self.transaction_velocity[agent_id]) >= limit: return True
                 self.transaction_velocity[agent_id].append(current_time)
                 return False
         except Exception as e:
@@ -289,24 +292,27 @@ class UniversalEngine:
             except Exception as e:
                 print(f"⚠️ Redis Cache Error: {e}")
 
-        if self.check_circuit_breaker(request.agent_id):
-            print(f"🔥 [CIRCUIT BREAKER] Agente {request.agent_id} bloqueado por velocidad excesiva.")
-            return TransactionResult(
-                authorized=False, 
-                status="CIRCUIT_OPEN", 
-                reason="🚨 FUSIBLE ACTIVADO: Detectado bucle infinito (>10 tx/min). Agente congelado."
-            )
-
-        print(f"\n🧠 [ENGINE] Procesando: {request.vendor} (${request.amount})")
-
-        # --- CAPA 0: IDENTITY & CONTEXT ---
+        # --- CAPA 0: IDENTITY & CONTEXT (MOVIDO ANTES DEL CIRCUIT BREAKER) ---
         response = self.db.table("wallets").select("*").eq("agent_id", request.agent_id).execute()
         if not response.data:
+             # Si falla la DB, asumimos UNVERIFIED para el circuit breaker en la siguiente línea (o fallamos)
+             # Pero mejor retornamos error aquí
             return self._result(False, "REJECTED", "Agente no existe", request)
         
         wallet = response.data[0]
         agent_role = wallet.get('agent_role', 'Asistente IA General')
         kyc_level = wallet.get('kyc_status', 'UNVERIFIED') # Default a unverified para seguridad
+
+        # 1.2 CIRCUIT BREAKER (Ahora con KYC Awareness)
+        if self.check_circuit_breaker(request.agent_id, kyc_level):
+            print(f"🔥 [CIRCUIT BREAKER] Agente {request.agent_id} bloqueado por velocidad excesiva.")
+            return TransactionResult(
+                authorized=False, 
+                status="CIRCUIT_OPEN", 
+                reason="🚨 FUSIBLE ACTIVADO: Detectado bucle infinito (>limit tx/min). Agente congelado."
+            )
+            
+        print(f"\n🧠 [ENGINE] Procesando: {request.vendor} (${request.amount})")
         
         # --- PILLAR 2: PROGRESSIVE KYC GATE ---
         # Si el monto es alto, exigimos verificación de identidad humana
@@ -1000,11 +1006,16 @@ class UniversalEngine:
                     print(f"⚠️ Error enviando email approval: {e}")
 
         else:
-            # Si es LOW RISK, el sistema lo marca como aprobado definitivamente sin molestar al humano
-            print(f"✅ [SISTEMA INTELIGENTE] Confianza total. Transacción validada automáticamente.")
+            # CASO: LOW RISK (Confianza Total)
+            print(f"✅ [THE ORACLE] Bajo riesgo detectado. Ejecutando aprendizaje automático para {vendor}.")
+            
+            # 1. Añadir a la whitelist del agente para que no vuelva a pasar por la IA
+            self.add_to_trusted_services(agent_id, vendor)
+            
+            # 2. Actualizar log
             self.db.table("transaction_logs").update({
                 "status": "APPROVED",
-                "reason": "Validación automática de IA (Bajo Riesgo)"
+                "reason": "Auto-Validated (Low Risk) - Added to Trusted Services"
             }).eq("id", tx_data.get('id')).execute()
 
     async def process_instant_payment(self, request: TransactionRequest):

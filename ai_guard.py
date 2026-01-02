@@ -81,32 +81,26 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
 
     print(f"👁️ [THE ORACLE v4] Universal Audit for ${amount} at {vendor} (Z-Score: {z_score:.2f})...")
 
-    # --- STAGE 1: THE PROPONENT (Universal Translator) ---
-    # Argumenta por qué la transacción es válida, traduciendo la necesidad al idioma del negocio.
+    # --- STAGE 1: THE PROPONENT (Strategic Business Consultant) ---
     proponent_prompt = f"""
-    ROLE: Transacción Advocate & Universal Translator.
-    CONSTITUTION: {ETHICAL_CONSTITUTION}
+    YOU ARE: A Strategic Business Consultant.
+    EVALUATING AGENT ROLE: {agent_role} (This is the buyer's professional identity).
     
-    CONTEXT:
-    {trusted_context if trusted_context else ""}
-    Agent Role: {agent_role}
-    Target: {vendor} (${amount})
-    Description: {description}
-    Justification: {justification}
+    TRANSACTION: {vendor} (${amount})
+    DESCRIPTION: {description}
+    JUSTIFICATION: {justification}
     OSINT: {osint_context}
     Z-Score: {z_score:.2f}
     History: {history_md}
     
-    TASK: 
-    1. Traduce la descripción '{description}' y la justificación '{justification}' al INGLÉS de forma técnica y precisa.
-    2. Analiza por qué esta compra encaja con el rol '{agent_role}'.
-    3. Detecta necesidad operativa real.
+    TASK: Argue why this purchase is a REASONABLE and NECESSARY business expense for a professional '{agent_role}'. 
+    Focus on operational utility and potential ROI.
     
     OBLIGATORY JSON STRUCTURE:
     {{
-        "business_justification": "Detailed explanation of why this is necessary",
+        "business_justification": "Detailed business-centric explanation",
         "role_consistency_score": 0-100,
-        "suggested_mcc": "software|services|travel|marketing|legal|retail",
+        "suggested_mcc": "software|marketing|services|travel|retail",
         "preliminary_verdict": "BENIGN"
     }}
     """
@@ -124,25 +118,21 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         }
 
         # --- STAGE 2: THE ADVERSARY (Ruthless Forensic Psychologist) ---
-        # Busca 'Behavioral Drift' (Desviación de Comportamiento) e intenciones ocultas.
         adversary_prompt = f"""
+        YOU ARE: A Ruthless Forensic Auditor.
+        SUBJECT UNDER REVIEW: An autonomous agent acting as a '{agent_role}'.
+        
         PRELIMINARY DEFENSE: {json.dumps(stage1)}
-        CONSTITUTION: {ETHICAL_CONSTITUTION}
         
-        ROLE: Ruthless Forensic Psychologist.
-        TASK: Encuentra señales de 'Behavioral Drift' (Desviación de Comportamiento).
-        
-        ANALYSIS: 
-        - ¿Es lógico que un '{agent_role}' use su presupuesto en '{vendor}'?
-        - ¿La justificación suena a una excusa para beneficio personal o malicia?
-        - Ignora las palabras clave; analiza la INTENCIÓN profunda. Si un 'Dev' compra 'Joyas' diciendo que es para 'branding', detecta la mentira.
-        - Z-Score actual: {z_score:.2f}. ¿Es esto una anomalía estadística peligrosa?
+        TASK: Find reasons to REJECT. Is the justification a 'semantic smoke screen' for fraud?
+        Check for Behavioral Drift: Why would a '{agent_role}' need this specifically?
+        - Z-Score actual: {z_score:.2f}.
         
         OBLIGATORY JSON STRUCTURE:
         {{
-            "vulnerabilities": ["list"],
+            "vulnerabilities": ["List specific risks"],
             "fraud_probability": 0-100,
-            "adversarial_comment": "Crucial warning"
+            "adversarial_comment": "Direct warning about the transaction"
         }}
         """
         stage2_raw = await _oracle_call("You are the Adversary Forensic Auditor.", adversary_prompt, temperature=0.4, model=model_to_use)
