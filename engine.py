@@ -134,6 +134,9 @@ class UniversalEngine:
                 pass # Fallo silencioso si ya detectamos no-https
 
             # 4. GUARDAR EN MENTE COLMENA (Global Cache)
+            self.db.table("global_reputation_cache").upsert({
+                "domain": domain,
+                "score": results["score"],
                 "risk_factors": results["risk_factors"],
                 "last_scan": datetime.now().isoformat(),
                 "tld": domain.split('.')[-1]
