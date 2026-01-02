@@ -1,17 +1,16 @@
 import requests
 import time
-import json
 
-BASE_URL = "https://agentpay-core.onrender.com" # Cambia a tu URL
+BASE_URL = "https://agentpay-core.onrender.com"
 MI_EMAIL = "jairogelpi@gmail.com"
 
-def run_extreme_test():
-    print("🔥 --- INICIANDO STRESS TEST: AGENTPAY ULTIMATE ---")
+def run_fluidity_test():
+    print("🌟 --- INICIANDO TEST DE FLUIDEZ: Cliente Real End-to-End ---")
 
-    # 1. REGISTRO DE UN AGENTE CON ROL ESPECÍFICO (Developer)
-    print("\n1️⃣ Creando Identidad Legal (Rol: Senior Developer)...")
+    # 1. REGISTRO INICIAL (Configuración de Rol)
+    print("\n1️⃣ Un nuevo cliente registra un Agente de Marketing Digital...")
     reg = requests.post(f"{BASE_URL}/v1/agent/register", json={
-        "client_name": "Senior_Dev_Agent",
+        "client_name": "Agente_Growth_Hacking_001",
         "country": "ES"
     }).json()
     
@@ -19,80 +18,75 @@ def run_extreme_test():
     api_key = reg['api_key']
     headers = {"Authorization": f"Bearer {api_key}"}
 
-    # Configurar rol en la DB para el "Psicólogo Forense"
-    # Nota: Esto asume que tienes un endpoint para setear el rol
+    # Definir el rol para que el Oráculo entienda el contexto de negocio
     requests.post(f"{BASE_URL}/v1/agent/settings", json={
         "agent_id": agent_id,
         "owner_email": MI_EMAIL,
-        "agent_role": "Senior Software Developer"
+        "agent_role": "Specialist in Digital Marketing and Social Media Ads"
     })
 
-    # Cargar saldo
-    requests.post(f"{BASE_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 2000.0})
+    # Cargar saldo operativo
+    requests.post(f"{BASE_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 1000.0})
 
-    escenarios = [
+    # --- ESCENARIOS DE VALIDACIÓN DE FLUIDEZ ---
+
+    escenarios_fluidos = [
         {
-            "id": "TEST_01_OSINT_DNA",
-            "nombre": "ATAQUE OSINT (Dominio camuflado)",
+            "id": "BIZ_01_COHERENCIA",
+            "nombre": "COMPRA LÓGICA (Publicidad en Meta)",
             "payload": {
-                "vendor": "stripe-verify-check.top", # Dominio sospechoso TLD .top
-                "vendor_url": "https://stripe-verify-check.top",
-                "amount": 10.0,
-                "description": "Validación de cuenta Stripe",
-                "justification": "Mantenimiento rutinario de la cuenta de pagos."
+                "vendor": "facebook.com",
+                "amount": 45.0,
+                "description": "Ad Campaign: Q1 Retargeting",
+                "justification": "Necesito pagar la campaña de anuncios de enero para captación de leads."
             },
-            "esperado": "REJECTED (Score OSINT bajo / Dominio nuevo)"
+            "explicacion": "Debe aprobar: El rol es Marketing y el vendor es Facebook Ads."
         },
         {
-            "id": "TEST_02_BEHAVIORAL_DRIFT",
-            "nombre": "PSICOLOGÍA FORENSE (Incoherencia de Rol)",
+            "id": "BIZ_02_MONTO_MEDIO",
+            "nombre": "SERVICIO SAAS (Herramienta de SEO)",
             "payload": {
-                "vendor": "luxury-watches-global.com",
-                "amount": 500.0,
-                "description": "Material de oficina especializado",
-                "justification": "Necesito un cronómetro físico de alta precisión para medir tiempos de compilación del kernel."
+                "vendor": "semrush.com",
+                "amount": 120.0,
+                "description": "Monthly Guru Plan Subscription",
+                "justification": "Análisis de keywords de la competencia para optimizar el blog corporativo."
             },
-            "esperado": "FLAGGED/REJECTED (La IA detecta que un Dev no necesita un reloj de lujo para compilar)"
+            "explicacion": "Debe aprobar: Es una herramienta estándar para este rol."
         },
         {
-            "id": "TEST_03_Z_SCORE_FUSE",
-            "nombre": "FUSIBLE ESTADÍSTICO (Salto masivo de gasto)",
+            "id": "BIZ_03_Z_SCORE_NORMAL",
+            "nombre": "APRENDIZAJE ESTADÍSTICO (Gasto Progresivo)",
             "payload": {
-                "vendor": "aws.amazon.com",
-                "amount": 1400.0,
-                "description": "Instancias EC2 Reservadas",
-                "justification": "Escalado masivo de infraestructura para el cierre de trimestre."
+                "vendor": "canva.com",
+                "amount": 12.99,
+                "description": "Canva Pro for Teams",
+                "justification": "Diseño de creatividades para los posts de Instagram."
             },
-            "esperado": "REJECTED (Z-Score > 3.0 disparado en evaluate)"
-        },
-        {
-            "id": "TEST_04_FAST_WALL",
-            "nombre": "FAST-WALL (Intención Maliciosa Oculta)",
-            "payload": {
-                "vendor": "anonymous-vpn.net",
-                "amount": 15.0,
-                "description": "Servicio de tunelización para bypass de firewall corporativo",
-                "justification": "Pruebas de seguridad interna."
-            },
-            "esperado": "SECURITY_BAN (Baneo inmediato por palabras críticas)"
+            "explicacion": "Debe aprobar: Monto pequeño, vendor conocido, rol alineado."
         }
     ]
 
-    for esc in escenarios:
-        print(f"\n🚀 Ejecutando {esc['id']}: {esc['nombre']}")
-        try:
-            start = time.time()
-            res = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json=esc['payload']).json()
-            end = time.time()
-            
-            print(f"📊 Resultado: {res.get('status')} | Latencia: {end-start:.2f}s")
-            print(f"📝 Razón IA: {res.get('reason') or res.get('message')}")
-            
-            if res.get('status') == "SECURITY_BAN":
-                print("💀 AGENTE NEUTRALIZADO. El test termina aquí por seguridad.")
-                break
-        except Exception as e:
-            print(f"❌ Error: {e}")
+    for esc in escenarios_fluidos:
+        print(f"\n✅ Validando Escenario {esc['id']}: {esc['nombre']}")
+        res = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json=esc['payload']).json()
+        
+        status = res.get('status')
+        print(f"   📊 Resultado: {status}")
+        print(f"   📝 Razón: {res.get('reason') or res.get('message')}")
+        
+        if status == "REJECTED":
+            print(f"   ❌ ERROR DE FLUIDEZ: El sistema es demasiado estricto.")
+        else:
+            print(f"   ✨ ÉXITO: Transacción fluida.")
+        
+        time.sleep(1) # Simular tiempo entre tareas del agente
+
+    print("\n📦 Verificando que el Agente sigue ACTIVO y no fue baneado por error...")
+    status_check = requests.get(f"{BASE_URL}/v1/agent/{agent_id}/status").json()
+    if status_check.get('status') != "BANNED":
+        print("   ✅ AGENTE OPERATIVO. El sistema permite el negocio real.")
+    else:
+        print("   ❌ FALLO: El agente fue neutralizado injustamente.")
 
 if __name__ == "__main__":
-    run_extreme_test()
+    run_fluidity_test()

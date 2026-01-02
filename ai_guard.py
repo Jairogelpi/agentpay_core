@@ -190,4 +190,5 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         return final_verdict
 
     except Exception as e:
-
+        print(f"❌ Oracle Failure: {e}")
+        return {"decision": "REJECTED", "reason": f"Oracle Internal Conflict: {str(e)}"}
