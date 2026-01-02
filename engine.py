@@ -662,9 +662,9 @@ class UniversalEngine:
 
     async def run_background_audit(self, tx_data):
         """
-        Fase 2: La IA entra en acción (Sin bloquear al usuario).
+        Auditoría Post-Pago: El cerebro trabaja mientras el dinero ya se movió.
         """
-        print(f"🕵️ [BACKGROUND] 'The Oracle' analizando tx de ${tx_data.get('amount')}...")
+        print(f"🕵️ [THE ORACLE] Analizando rastro de: {tx_data.get('vendor')}")
         
         # Recuperar contexto necesario
         agent_id = tx_data.get('agent_id')
@@ -672,7 +672,6 @@ class UniversalEngine:
         amount = tx_data.get('amount')
         
         # Simular recuperación de contexto (rol, historial)
-        # Para simplificar el ejemplo, usamos valores por defecto o recuperamos rápido
         try:
              w_res = self.db.table("wallets").select("agent_role").eq("agent_id", agent_id).execute()
              agent_role = w_res.data[0]['agent_role'] if w_res.data else "Unknown"
@@ -684,7 +683,6 @@ class UniversalEngine:
              history = []
 
         # Llamamos a tu AI Guard COMPLETO
-        # (Import 'audit_transaction' assumed available from module 'ai_guard')
         risk_assessment = await audit_transaction(
             vendor=vendor, 
             amount=amount, 
@@ -693,17 +691,41 @@ class UniversalEngine:
             agent_role=agent_role, 
             history=history, 
             justification=tx_data.get('justification'),
-            sensitivity="HIGH" # Background audit is always Strict
+            sensitivity="HIGH"
         )
         
-        decision = risk_assessment.get('decision', 'FLAGGED')
-        
-        if decision == "REJECTED":
-            print(f"🚨 [ALERTA] Fraude detectado POST-PAGO. Iniciando Protocolo de Reversión.")
+        verdict = risk_assessment.get('decision', 'FLAGGED')
+        reason_text = risk_assessment.get('reasoning', 'Fraud Detected')
+
+        if "REJECTED" in verdict or "HIGH RISK" in str(risk_assessment).upper():
+            print("🚨 [ALERTA] Fraude confirmado. Activando protocolos de defensa.")
+            
+            # 1. REVERSIÓN: Devolvemos el dinero al agente
+            # (Usamos el monto con signo negativo para que el RPC sume)
             self._reverse_transaction(agent_id, amount)
-            self._ban_agent(agent_id, reason=risk_assessment.get('reasoning', 'Fraud Detected'))
+            
+            # 2. BANEO: Marcamos al agente como inactivo en la tabla 'wallets'
+            # IMPORTANTE: Asegúrate de tener una columna 'status' o 'is_active'
+            try:
+                self.db.table("wallets").update({"status": "BANNED", "ban_reason": reason_text}).eq("agent_id", agent_id).execute()
+            except Exception as e:
+                print(f"❌ Error updating wallet status: {e}")
+            
+            # 3. LOG DE SEGURIDAD: Registramos por qué fue baneado
+            try:
+                self.db.table("transaction_logs").insert({
+                    "agent_id": agent_id,
+                    "vendor": "SECURITY_SENTINEL",
+                    "amount": 0,
+                    "status": "AGENT_BANNED",
+                    "reason": f"Audit Failure: {verdict} - {reason_text}"
+                }).execute()
+            except Exception as e:
+                print(f"❌ Error logging security event: {e}")
+            
+            print(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
         else:
-            print(f"✅ [AUDIT] Transacción validada y segura ({decision}).")
+            print(f"✅ [AUDIT] Transacción validada y segura ({verdict}).")
 
     async def process_instant_payment(self, request: TransactionRequest):
         """

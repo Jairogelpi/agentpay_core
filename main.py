@@ -291,6 +291,14 @@ async def pay(
     
     # 1. Inyectamos el ID autenticado en el diccionario ANTES de validar con Pydantic
     req["agent_id"] = agent_id
+
+    # --- VERIFICACIÓN DE ESTADO (SNIPER TEST FIX) ---
+    try:
+        agent_check = engine.db.table("wallets").select("status").eq("agent_id", agent_id).single().execute()
+        if agent_check.data and agent_check.data.get("status") == "BANNED":
+            return {"status": "REJECTED", "message": "Acceso denegado: Cuenta suspendida por riesgo de seguridad."}
+    except Exception as e:
+        print(f"⚠️ Error checking agent status: {e}")
     
     # 2. Ahora sí podemos crear el objeto TransactionRequest
     real_req = TransactionRequest(**req)
