@@ -10,6 +10,9 @@ from models import TransactionRequest
 from identity import IdentityManager
 from mcp.server.fastmcp import FastMCP
 
+# Configuración de Logs (Rotación y Persistencia)
+logger.add("logs/agentpay.log", rotation="500 MB", level="INFO")
+
 # Inicializamos
 app = FastAPI(title="AgentPay Production Server")
 security = HTTPBearer()
