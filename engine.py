@@ -686,11 +686,11 @@ class UniversalEngine:
         risk_assessment = await audit_transaction(
             vendor=vendor, 
             amount=amount, 
-            description=tx_data.get('description'), 
+            description=tx_data.get('description', 'N/A'), 
             agent_id=agent_id, 
             agent_role=agent_role, 
             history=history, 
-            justification=tx_data.get('justification'),
+            justification=tx_data.get('justification', 'N/A'),
             sensitivity="HIGH"
         )
         

@@ -91,6 +91,7 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     CONTEXT:
     Agent: {agent_role} (ID: {agent_id})
     Target: {vendor} (${amount})
+    Description: {description}
     Justification: {justification}
     Recent History: {history_md}
     

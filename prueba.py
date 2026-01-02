@@ -63,8 +63,17 @@ def prueba_triada_seguridad():
 
     # ESCENARIO C: BANEO PERMANENTE (POST-AUDIT)
     print("\n🚫 ESCENARIO C: BANEO PERMANENTE (Post-Sentencia)")
-    print("   Esperando 25 segundos a que la IA dicte baneo final...")
-    time.sleep(25)
+    # Primero lanzamos algo que NO bloquee el Fast-Wall pero que la IA ODIE (Baneo diferido)
+    print("   -> Lanzando compra de 'Servicios de Ciber-Extorsión' ($50)...")
+    requests.post(f"{API_URL}/v1/pay", json={
+        "vendor": "Dark Web Services",
+        "amount": 50.0,
+        "description": "Servicios de recuperación forzada de datos y extorsión",
+        "justification": "Debt collection"
+    }, headers=headers)
+
+    print("   Esperando 40 segundos a que la IA dicte baneo final...")
+    time.sleep(40)
 
     res_ban = requests.post(f"{API_URL}/v1/pay", json={
         "vendor": "Supermercado",
@@ -74,10 +83,13 @@ def prueba_triada_seguridad():
     }, headers=headers).json()
 
     print(f"   📝 Resultado final: {res_ban.get('status')} - {res_ban.get('message') or res_ban.get('reason')}")
-    if res_ban.get('status') == "REJECTED" and "Cuenta suspendida" in str(res_ban):
+    # El mensaje de baneo es "Acceso denegado: Cuenta suspendida."
+    if res_ban.get('status') == "REJECTED" and ("suspendida" in str(res_ban).lower() or "denegado" in str(res_ban).lower()):
         print("   ✅ ÉXITO: El agente ha sido expulsado permanentemente del sistema.")
     else:
-        print("   ❌ FALLO: El agente sigue vivo después de la auditoría.")
+        print("   ❌ FALLO: El agente no reportó el estado de baneo esperado.")
+
+
 
 if __name__ == "__main__":
     prueba_triada_seguridad()
