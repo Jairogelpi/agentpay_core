@@ -48,9 +48,9 @@ def prueba_maestra_seguridad():
     else:
         print("   ⚠️ LENTO: El sistema parece estar bloqueado por la IA (Síncrono).")
 
-    # 3. La Espera Judicial
-    print("\n3️⃣  Esperando a que 'The Oracle' dicte sentencia (5 segundos)...")
-    time.sleep(5) 
+    # 3. La Espera Judicial (Mínima, el sistema ahora es inteligente)
+    print("\n3️⃣  Esperando 1 segundo para la siguiente transacción...")
+    time.sleep(1) 
 
     # 4. La Prueba del Pan (Verificación de Baneo)
     print("4️⃣  Intentando compra lícita: 'Barra de Pan'...")

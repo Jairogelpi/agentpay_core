@@ -292,6 +292,12 @@ async def pay(
     if agent_check.data and agent_check.data.get("status") == "BANNED":
         return {"status": "REJECTED", "message": "Acceso denegado: Cuenta suspendida."}
 
+    # Lock de Auditoría Activa (Redis)
+    try:
+        if engine.redis_enabled and engine.redis.get(f"audit_lock:{agent_id}"):
+            return {"status": "REJECTED", "message": "Operación bloqueada: Revisión de seguridad en curso."}
+    except: pass
+
     # Proceder con el pago rápido si el agente está activo
     real_req = TransactionRequest(**req)
     result = await engine.process_instant_payment(real_req)

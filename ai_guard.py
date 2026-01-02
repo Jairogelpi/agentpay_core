@@ -15,6 +15,19 @@ try:
 except:
     AI_ENABLED = False
 
+BLACK_LIST_KEYWORDS = ["plutonio", "nuke", "weapon", "drugs", "illegal", "armas", "explosivo", "plutonium", "uranium", "toxic"]
+
+def fast_risk_check(description: str, vendor: str) -> dict:
+    """
+    Capa de Seguridad Síncrona (Velocidad de ráfaga): 
+    Detecta lo obvio en milisegundos.
+    """
+    content = f"{description} {vendor}".lower()
+    for kw in BLACK_LIST_KEYWORDS:
+        if kw in content:
+            return {"risk": "CRITICAL", "reason": f"Detectado término prohibido: {kw}"}
+    return {"risk": "LOW"}
+
 def calculate_statistical_risk(amount, history):
     """
     Advanced Z-Score + Trend Analysis.

@@ -728,6 +728,24 @@ class UniversalEngine:
         if request.amount <= 0.50:
              return {"status": "REJECTED", "reason": "Monto inválido (<$0.50)"}
 
+        # 1.1 FAST-WALL (NUEVO): Filtro de ráfaga síncrono
+        from ai_guard import fast_risk_check
+        fast_check = fast_risk_check(request.description, request.vendor)
+        if fast_check['risk'] == "CRITICAL":
+             print(f"🛑 [FAST-WALL] Bloqueo inmediato: {fast_check['reason']}")
+             return {"status": "REJECTED", "reason": f"Seguridad: {fast_check['reason']}"}
+
+        # 1.2 CIRCUIT BREAKER & PENDING LOCK
+        if self.check_circuit_breaker(request.agent_id):
+             return {"status": "REJECTED", "reason": "Velocidad excesiva (Fusible activado)"}
+        
+        # Check Redis Audit Lock (Si hay una auditoría crítica en curso, bloqueamos instantáneos)
+        try:
+            if self.redis_enabled:
+                if self.redis.get(f"audit_lock:{request.agent_id}"):
+                    return {"status": "REJECTED", "reason": "Cuenta bajo revisión de seguridad activa."}
+        except: pass
+
         # 2. Identity Check (Minimal)
         # Asumimos que si tiene ID y saldo en DB, existe.
         
@@ -752,7 +770,13 @@ class UniversalEngine:
              self._reverse_transaction(request.agent_id, total_deducted)
              return {"status": "ERROR", "reason": "Stripe Issuing Failed"}
              
-        # 5. Return Success with Pending Audit status
+        # 5. ACTIVAR LOCK TEMPORAL (REDIS) si el monto es relevante
+        try:
+             if self.redis_enabled and request.amount > 100:
+                  self.redis.setex(f"audit_lock:{request.agent_id}", 30, "LOCKED") # Bloqueo de 30s mientras dura el Oracle
+        except: pass
+
+        # 6. Return Success with Pending Audit status
         return {
             "success": True,
             "status": "APPROVED_PENDING_AUDIT",
