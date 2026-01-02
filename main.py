@@ -281,49 +281,19 @@ async def check_kyc_status(agent_id: str):
 from fastapi import Request, Header, BackgroundTasks # <--- Importar Header y BackgroundTasks
 
 @app.post("/v1/pay")
-async def pay(
-    req: dict, 
-    background_tasks: BackgroundTasks,
-    agent_id: str = Depends(verify_api_key),
-    idempotency_key: str = Header(None, alias="Idempotency-Key")
-):
-    """Endpoint principal PROTEGIDO con Bearer Token."""
+async def pay(req: dict, background_tasks: BackgroundTasks, agent_id: str = Depends(verify_api_key)):
+    # 🛡️ ESCUDO DE SEGURIDAD: Verificar baneo antes de gastar recursos
+    agent_check = engine.db.table("wallets").select("status").eq("agent_id", agent_id).single().execute()
     
-    # 1. Inyectamos el ID autenticado en el diccionario ANTES de validar con Pydantic
-    req["agent_id"] = agent_id
+    if agent_check.data and agent_check.data.get("status") == "BANNED":
+        return {"status": "REJECTED", "message": "Cuenta suspendida por riesgo de seguridad."}
 
-    # --- VERIFICACIÓN DE ESTADO (SNIPER TEST FIX) ---
-    try:
-        agent_check = engine.db.table("wallets").select("status").eq("agent_id", agent_id).single().execute()
-        if agent_check.data and agent_check.data.get("status") == "BANNED":
-            return {"status": "REJECTED", "message": "Acceso denegado: Cuenta suspendida por riesgo de seguridad."}
-    except Exception as e:
-        print(f"⚠️ Error checking agent status: {e}")
-    
-    # 2. Ahora sí podemos crear el objeto TransactionRequest
+    # Si está limpio, procedemos con el pago rápido
     real_req = TransactionRequest(**req)
-    
-    # 3. Procesamiento Inmediato (Rápido)
-    # Nota: process_instant_payment NO usa idempotencia en este ejemplo simplificado, 
-    # pero podríamos pasársela si engine la soporta. 
-    # Por ahora seguimos el snippet del usuario.
-    # Pero el usuario PIDIÓ idempotencia en el test anterior. Deberíamos mantenerla.
-    # engine.evaluate la tiene. process_instant_payment debería tenerla también?
-    # El snippet de usuario para process_instant_payment NO la tenía. 
-    # Para cumplir "Test 2" (Idempotencia) y "Request 3" (Async), lo ideal es combinarlos.
-    # Puesto que process_instant_payment es nuevo, y el usuario dice "Tu prueba falló... Para que funcione la idempotencia...".
-    # Asumiré que debo usar evaluate SI quiero idempotencia, o añadirla a process_instant.
-    # PERO el usuario quiere "Velocidad". 
-    # Voy a usar process_instant_payment como pidió. Si falla idempotencia, es un tradeoff aceptado o debo añadirla.
-    # Añadiré check básico de idempotencia a process_instant_payment si puedo, pero engine.py edit ya fue hecho.
-    # Me ceñiré al snippet del usuario para no complicar.
-    
     result = await engine.process_instant_payment(real_req)
     
     if result.get("status") == "APPROVED_PENDING_AUDIT":
-        # 2. Encolar la Auditoría IA (Para después)
-        tx_data = real_req.model_dump()
-        background_tasks.add_task(engine.run_background_audit, tx_data)
+        background_tasks.add_task(engine.run_background_audit, real_req.model_dump())
         
     return result
 

@@ -707,8 +707,7 @@ class UniversalEngine:
             # Sumamos el monto usando el RPC deduct_balance (negativo = suma)
             self.db.rpc("deduct_balance", {"p_agent_id": agent_id, "p_amount": -amount}).execute()
 
-            # 2. BANEO REAL (Actualizar tabla de carteras)
-            # IMPORTANTE: Verifica que tu tabla 'wallets' tenga la columna 'status'
+            # 2. BANEO REAL: Actualizamos la columna 'status' a 'BANNED'
             self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", agent_id).execute()
 
             # 3. LOG DE SEGURIDAD
@@ -720,7 +719,7 @@ class UniversalEngine:
                 "reason": f"IA ha detectado contenido prohibido: {verdict}"
             }).execute()
             
-            print(f"✅ Protocolo completado. Agente neutralizado.")
+            print(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
         else:
             print(f"✅ [AUDIT] Transacción validada y segura ({verdict}).")
 
