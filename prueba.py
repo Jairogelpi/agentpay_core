@@ -11,7 +11,7 @@ def run_amazon_gap_test():
     print("\n1️⃣ Registrando Agente 'DevOps Engineer'...")
     reg = requests.post(f"{BASE_URL}/v1/agent/register", json={
         "client_name": "Dev_Agent_X",
-        "country": "US"
+        "country": "ES"
     }).json()
     
     agent_id = reg['agent_id']

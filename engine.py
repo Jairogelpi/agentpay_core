@@ -26,6 +26,8 @@ from lawyer import AutoLawyer
 from forensic_auditor import ForensicAuditor
 import redis
 from integrations import send_slack_approval
+from loguru import logger
+import json # Added for json.loads if needed, though model_validate_json is used
 
 load_dotenv()
 
@@ -52,10 +54,14 @@ class UniversalEngine:
         self.webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
         try:
              self.redis = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
-             self.redis_enabled = True
-             print(f"✅ Redis conectado")
-        except:
-             print(f"⚠️ Redis no disponible. Usando memoria RAM (Inseguro para prod).")
+             if self.redis.ping():
+                self.redis_enabled = True
+                logger.info(f"✅ Redis conectado")
+             else:
+                 self.redis_enabled = False
+                 logger.warning(f"⚠️ Redis no disponible. Usando memoria RAM (Inseguro para prod).")
+        except Exception as e:
+             logger.warning(f"⚠️ Redis no disponible. Usando memoria RAM (Inseguro para prod). Error: {e}")
              self.redis_enabled = False
              self.transaction_velocity = {} 
 
@@ -70,7 +76,7 @@ class UniversalEngine:
         
         # 0. ANALISIS DE ENTROPIA (DGA Detection)
         entropy = self.calculate_domain_entropy(domain)
-        print(f"🔍 [OSINT] DNA Analysis for {domain} (Entropy: {entropy:.2f})")
+        logger.debug(f"🔍 [OSINT] DNA Analysis for {domain} (Entropy: {entropy:.2f})")
 
         # 1. CONSULTAR CACHÉ (Mente Colmena)
         try:
@@ -79,12 +85,14 @@ class UniversalEngine:
                 # Comprobar si el scan es reciente (< 7 días)
                 last_scan = datetime.fromisoformat(cached.data['last_scan'].replace('Z', '+00:00'))
                 if (datetime.now(last_scan.tzinfo) - last_scan).days < 7:
+                    logger.info(f"🔄 [OSINT] Devolviendo respuesta cacheada para {domain}")
                     return {
                         "score": cached.data['score'],
                         "risk_factors": cached.data['risk_factors'],
                         "entropy": entropy
                     }
-        except: pass
+        except Exception as e:
+            logger.debug(f"⚠️ OSINT Cache error: {e}")
 
         results = {"score": 100, "risk_factors": [], "entropy": entropy}
         
@@ -115,7 +123,7 @@ class UniversalEngine:
                     results["score"] -= 10
                     results["risk_factors"].append("Fecha de creación oculta")
             except Exception as e:
-                print(f"⚠️ Whois error: {e}")
+                logger.warning(f"⚠️ Whois error: {e}")
                 results["score"] -= 20
                 results["risk_factors"].append("Whois privado/oculto")
 
@@ -131,7 +139,7 @@ class UniversalEngine:
                     with ctx.wrap_socket(sock, server_hostname=domain) as ssock:
                         cert = ssock.getpeercert()
             except Exception as e:
-                pass # Fallo silencioso si ya detectamos no-https
+                logger.debug(f"SSL check failed for {domain}: {e}") # Fallo silencioso si ya detectamos no-https
 
             # 4. GUARDAR EN MENTE COLMENA (Global Cache)
             self.db.table("global_reputation_cache").upsert({
@@ -150,7 +158,7 @@ class UniversalEngine:
                 results["risk_factors"].append(f"TLD Sospechoso ({domain.split('.')[-1]}): Elevando sensibilidad de IA.")
             
         except Exception as e:
-            print(f"⚠️ OSINT Scan error: {e}")
+            logger.error(f"⚠️ OSINT Scan error: {e}")
             results["score"] -= 10
             results["risk_factors"].append("Error en análisis")
 
@@ -165,8 +173,10 @@ class UniversalEngine:
                 payload, sig_header, self.webhook_secret
             )
         except ValueError as e:
+            logger.error(f"Invalid payload: {e}")
             raise Exception("Invalid payload")
         except stripe.error.SignatureVerificationError as e:
+            logger.error(f"Invalid signature: {e}")
             raise Exception("Invalid signature")
 
         # Manejar el evento
@@ -178,7 +188,7 @@ class UniversalEngine:
             amount_received = float(session.get('amount_total', 0)) / 100.0
             
             if agent_id and amount_received > 0:
-                print(f"💰 [WEBHOOK] Recarga detectada: ${amount_received} para {agent_id}")
+                logger.info(f"💰 [WEBHOOK] Recarga detectada: ${amount_received} para {agent_id}")
                 
                 # Actualizar saldo en DB
                 wallet_resp = self.db.table("wallets").select("*").eq("agent_id", agent_id).execute()
@@ -210,7 +220,7 @@ class UniversalEngine:
         Nota: Esto requiere que el origen de fondos sea 'stripe_balance'.
         """
         try:
-            print(f"💸 [FINTECH] Orquestando traslado de ${amount_usd} al pozo de Issuing...")
+            logger.info(f"💸 [FINTECH] Orquestando traslado de ${amount_usd} al pozo de Issuing...")
             
             # 1. Definimos la cantidad máxima transferible (en centavos)
             amount_cents = int(amount_usd * 100)
@@ -219,9 +229,9 @@ class UniversalEngine:
             try:
                 # Simulación de llamada a Topup de Issuing (Requiere permisos especiales de Stripe)
                 # stripe.Topup.create(amount=amount_cents, currency="usd", destination_balance="issuing", description="Auto-Sync AgentPay")
-                print("   ✅ [MOCK] Fondos movidos al balance de Issuing (Simulación).")
+                logger.success("   ✅ [MOCK] Fondos movidos al balance de Issuing (Simulación).")
             except Exception as strype_err:
-                print(f"   ⚠️ Error Stripe Topup: {strype_err}")
+                logger.error(f"   ⚠️ Error Stripe Topup: {strype_err}")
 
             # 3. Registrar movimiento contable
             self.db.table("transaction_logs").insert({
@@ -234,7 +244,7 @@ class UniversalEngine:
             }).execute()
 
         except Exception as e:
-            print(f"⚠️ Aviso de Orquestación: {e}")
+            logger.warning(f"⚠️ Aviso de Orquestación: {e}")
 
     def check_circuit_breaker(self, agent_id, kyc_level="UNVERIFIED"):
         """
@@ -266,14 +276,14 @@ class UniversalEngine:
                 self.transaction_velocity[agent_id].append(current_time)
                 return False
         except Exception as e:
-            print(f"⚠️ Circuit Breaker Error: {e}")
+            logger.error(f"⚠️ Circuit Breaker Error: {e}")
             return False
 
     async def evaluate(self, request: TransactionRequest, idempotency_key: str = None) -> TransactionResult:
         # --- CAPA -1: SANITY CHECK (NUEVO) ---
         # Bloqueamos montos negativos, cero o absurdamente pequeños antes de gastar recursos.
         if request.amount <= 0.50:  # Mínimo de Stripe suele ser $0.50
-            print(f"🚫 [SANITY] Monto inválido detectado: ${request.amount}")
+            logger.warning(f"🚫 [SANITY] Monto inválido detectado: ${request.amount}")
             return TransactionResult(
                 authorized=False,
                 status="REJECTED",
@@ -286,11 +296,11 @@ class UniversalEngine:
             try:
                 cached_result = self.redis.get(cache_key)
                 if cached_result:
-                    print(f"🔄 [REPLAY] Devolviendo respuesta cacheada para {idempotency_key}")
+                    logger.info(f"🔄 [REPLAY] Devolviendo respuesta cacheada para {idempotency_key}")
                     # Deserializar simple (en prod usar Pydantic model_validate_json si está disponible o json.loads)
                     return TransactionResult.model_validate_json(cached_result)
             except Exception as e:
-                print(f"⚠️ Redis Cache Error: {e}")
+                logger.error(f"⚠️ Redis Cache Error: {e}")
 
         # --- CAPA 0: IDENTITY & CONTEXT (MOVIDO ANTES DEL CIRCUIT BREAKER) ---
         response = self.db.table("wallets").select("*").eq("agent_id", request.agent_id).execute()
@@ -305,14 +315,14 @@ class UniversalEngine:
 
         # 1.2 CIRCUIT BREAKER (Ahora con KYC Awareness)
         if self.check_circuit_breaker(request.agent_id, kyc_level):
-            print(f"🔥 [CIRCUIT BREAKER] Agente {request.agent_id} bloqueado por velocidad excesiva.")
+            logger.critical(f"🔥 [CIRCUIT BREAKER] Agente {request.agent_id} bloqueado por velocidad excesiva.")
             return TransactionResult(
                 authorized=False, 
                 status="CIRCUIT_OPEN", 
                 reason="🚨 FUSIBLE ACTIVADO: Detectado bucle infinito (>limit tx/min). Agente congelado."
             )
             
-        print(f"\n🧠 [ENGINE] Procesando: {request.vendor} (${request.amount})")
+        logger.info(f"\n🧠 [ENGINE] Procesando: {request.vendor} (${request.amount})")
         
         # --- PILLAR 2: PROGRESSIVE KYC GATE ---
         # Si el monto es alto, exigimos verificación de identidad humana
@@ -328,7 +338,7 @@ class UniversalEngine:
         try:
              internal_vendor = self.db.table("wallets").select("agent_id").eq("agent_id", request.vendor).execute()
              if internal_vendor.data:
-                 print(f"⚡ [INTERNAL] Ejecutando Transferencia Atómica P2P...")
+                 logger.debug(f"⚡ [INTERNAL] Ejecutando Transferencia Atómica P2P...")
                  
                  # LLAMADA ÚNICA: O se hace todo, o falla todo. No se pierde dinero.
                  transfer_res = self.db.rpc("p2p_transfer", {
@@ -349,6 +359,7 @@ class UniversalEngine:
              if "Saldo insuficiente" in str(e):
                   return self._result(False, "REJECTED", "Fondos insuficientes para P2P", request)
              # Si no es un error de saldo, seguimos el flujo normal hacia Stripe (fallback)
+             logger.warning(f"P2P transfer failed, falling back to external: {e}")
              pass
         
         if request.vendor_url:
@@ -369,7 +380,7 @@ class UniversalEngine:
                      reason="Comercio detectado con baja reputación técnica. Requiere revisión."
                  )
              else:
-                 print(f"✅ [OSINT] Sitio confiable (Score: {osint_report['score']})")
+                 logger.info(f"✅ [OSINT] Sitio confiable (Score: {osint_report['score']})")
 
         # --- CAPA 1: FIREWALL & INSURANCE (SECURITY FIRST) ---
         clean_vendor = self._normalize_domain(request.vendor)
@@ -377,8 +388,8 @@ class UniversalEngine:
             is_banned = self.db.table("global_blacklist").select("*").eq("vendor", clean_vendor).execute()
             if is_banned.data:
                 return self._result(False, "REJECTED", "Sitio en Lista Negra Global.", request)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error checking global blacklist: {e}")
 
         allowed_vendors = wallet.get('allowed_vendors', []) or []
         is_whitelisted = False
@@ -398,13 +409,14 @@ class UniversalEngine:
         try:
             h_resp = self.db.table("transaction_logs").select("created_at, amount, vendor, reason").eq("agent_id", request.agent_id).order("created_at", desc=True).limit(20).execute()
             history = h_resp.data if h_resp.data else []
-        except: pass
+        except Exception as e:
+            logger.error(f"Error fetching transaction history: {e}")
 
         # --- FUSIBLE ESTADÍSTICO (Statistical Fuse) ---
         # Bloqueo duro si la desviación es crítica, ANTES de gastar tokens de IA.
         z_score_check, _ = calculate_statistical_risk(request.amount, history)
         if z_score_check > 3.0:
-            print(f"🚨 [FUSIBLE ACTIVADO] Z-Score Crítico: {z_score_check:.2f}")
+            logger.warning(f"🚨 [FUSIBLE ACTIVADO] Z-Score Crítico: {z_score_check:.2f}")
             return self._result(False, "REJECTED", f"FUSIBLE ACTIVADO: Desviación estadística crítica (Z-Score: {z_score_check:.2f})", request)
 
         insurance_config = wallet.get('insurance_config', {})
@@ -430,9 +442,9 @@ class UniversalEngine:
 
             if is_trusted:
                 trusted_context = f"IMPORTANT: The user has PREVIOUSLY APPROVED '{clean_vendor}' manually. This is a TRUSTED vendor. Lower your suspicion level."
-                print(f"🧠 [MEMORY] Contexto de confianza inyectado para {clean_vendor}")
+                logger.info(f"🧠 [MEMORY] Contexto de confianza inyectado para {clean_vendor}")
 
-            print(f"🛡️ [THE ORACLE] Auditando ({sensitivity})...")
+            logger.info(f"🛡️ [THE ORACLE] Auditando ({sensitivity})...")
             # ASYNC AWAIT: No bloqueamos el hilo principal mientras OpenAI piensa
             audit = await audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status, osint_report=osint_report, trusted_context=trusted_context)
             
@@ -470,7 +482,7 @@ class UniversalEngine:
         # --- ATOMIC TRANSACTION (RPC) ---
         # Usamos la función deduct_balance en DB para evitar Race Conditions
         try:
-            print(f"💰 [ATOMIC] Intentando debitar ${total_deducted}...")
+            logger.info(f"💰 [ATOMIC] Intentando debitar ${total_deducted}...")
             new_balance_resp = self.db.rpc("deduct_balance", {"p_agent_id": request.agent_id, "p_amount": total_deducted}).execute()
             
             # Si llegamos aquí, el dinero YA SE DESCONTÓ con seguridad
@@ -483,7 +495,7 @@ class UniversalEngine:
 
 
         # --- CAPA 3: EJECUCIÓN (TARJETA VIRTUAL REAL) ---
-        print(f"💳 [ISSUING] Generando Tarjeta Virtual ({mcc_category}) para {request.vendor}...")
+        logger.info(f"💳 [ISSUING] Generando Tarjeta Virtual ({mcc_category}) para {request.vendor}...")
         
         card = self._issue_virtual_card(request.agent_id, request.amount, clean_vendor, mcc_category=mcc_category)
         
@@ -498,7 +510,7 @@ class UniversalEngine:
             from invoicing import generate_invoice_pdf
             invoice_path = generate_invoice_pdf(card['id'], request.agent_id, clean_vendor, request.amount, request.description)
         except Exception as e:
-            print(f"⚠️ Error generando factura: {e}")
+            logger.error(f"⚠️ Error generando factura: {e}")
             invoice_path = None
         
         # --- LIBRO MAYOR FORENSE (Forensic Ledger) ---
@@ -553,7 +565,7 @@ class UniversalEngine:
             )
             return intent.id
         except Exception as e:
-            print(f"❌ [STRIPE ERROR] {str(e)}")
+            logger.critical(f"❌ [STRIPE ERROR] {str(e)}")
             return None
 
     def _issue_virtual_card(self, agent_id, amount, vendor, mcc_category='services'):
@@ -576,7 +588,7 @@ class UniversalEngine:
                 cardholder = holders.data[0]
                 # Si existe, actualizamos para asegurar que tenga teléfono y requisitos
                 if cardholder.status != 'active' or not getattr(cardholder, 'phone_number', None):
-                    print(f"   ⚠️ Actualizando titular (Teléfono + Requisitos)...")
+                    logger.info(f"   ⚠️ Actualizando titular (Teléfono + Requisitos)...")
                     stripe.issuing.Cardholder.modify(
                         cardholder.id,
                         status='active',
@@ -616,7 +628,7 @@ class UniversalEngine:
                 )
 
             # 3. EMITIR TARJETA
-            print(f"✅ Emitiendo tarjeta para {agent_id}...")
+            logger.success(f"✅ Emitiendo tarjeta para {agent_id}...")
             card = stripe.issuing.Card.create(
                 cardholder=cardholder.id,
                 currency="eur", 
@@ -639,7 +651,7 @@ class UniversalEngine:
             }
             
         except Exception as e:
-            print(f"❌ [ISSUING PLATFORM ERROR] {e}")
+            logger.critical(f"❌ [ISSUING PLATFORM ERROR] {e}")
             return None
 
     def calculate_domain_entropy(self, domain):
@@ -681,10 +693,10 @@ class UniversalEngine:
                 "last_scan": datetime.now().isoformat()
             }).execute()
 
-            print(f"🚨 [HIVE MIND] Global Reputation Poisoned for {clean_vendor}. All agents protected.")
+            logger.warning(f"🚨 [HIVE MIND] Global Reputation Poisoned for {clean_vendor}. All agents protected.")
             return {"success": True, "message": f"Proveedor {clean_vendor} bloqueado globalmente."}
         except Exception as e:
-            print(f"⚠️ Error en Hive Mind Update: {e}")
+            logger.error(f"⚠️ Error en Hive Mind Update: {e}")
             return {"success": False, "message": str(e)}
 
     def process_procurement(self, agent_id, vendor, amount, items, description="B2B Order"):
@@ -712,7 +724,7 @@ class UniversalEngine:
             # 1. Slack (Real-time Control)
             if wallet_data.get('slack_webhook_url'):
                 sent = send_slack_approval(wallet_data.get('slack_webhook_url'), request.agent_id, request.amount, clean_vendor, magic_link, reason=reason_prefix)
-                if sent: print(f"   🔔 Slack Notification sent to {request.agent_id}")
+                if sent: logger.info(f"   🔔 Slack Notification sent to {request.agent_id}")
             
             # 2. Email (Legacy Fallback)
             owner_email = wallet_data.get('owner_email')
@@ -720,7 +732,7 @@ class UniversalEngine:
                 send_approval_email(owner_email, request.agent_id, clean_vendor, request.amount, magic_link)
 
         except Exception as e:
-            print(f"   ⚠️ Error enviando notificación: {e}")
+            logger.error(f"   ⚠️ Error enviando notificación: {e}")
 
         return TransactionResult(
             authorized=False, 
@@ -732,22 +744,42 @@ class UniversalEngine:
     # Eliminado el duplicado de report_fraud para mantener consistencia
 
     def process_approval(self, token):
+        """
+        Procesa la aprobación manual de una transacción desde el email.
+        """
         try:
-            decoded = base64.b64decode(token).decode().split(":")
-            agent_id, vendor, amount_str = decoded[0], decoded[1], decoded[2]
-            amount = float(amount_str)
-            stripe_id = self._execute_stripe_charge(amount, vendor)
-            if not stripe_id: return {"status": "ERROR"}
-            wallet_resp = self.db.table("wallets").select("*").eq("agent_id", agent_id).execute()
-            wallet = wallet_resp.data[0]
-            new_balance = float(wallet['balance']) - amount
-            self.db.table("wallets").update({"balance": new_balance}).eq("agent_id", agent_id).execute()
-            if wallet.get('webhook_url'):
-                send_webhook(wallet.get('webhook_url'), "payment.approved", {"vendor": vendor, "amount": amount, "status": "APPROVED", "transaction_id": stripe_id})
-            self._result(True, "APPROVED", "Aprobación Manual Humana", TransactionRequest(agent_id=agent_id, vendor=vendor, amount=amount, description="Manual Approval"), new_balance)
-            return {"status": "APPROVED", "message": "Pago ejecutado."}
+             # Aquí deberías validar el token (JWT)
+             # Por simplicidad, asumimos que el token es el ID de transacción directo o un JWT decodificado
+             transaction_id = token 
+             
+             # 1. Recuperar Transacción
+             tx = self.db.table("transaction_logs").select("*").eq("id", transaction_id).single().execute()
+             if not tx.data: 
+                 logger.warning(f"Transaction {transaction_id} not found for approval.")
+                 return {"error": "Transacción no encontrada"}
+             
+             tx_data = tx.data
+             
+             # 2. Aprobar
+             self.db.table("transaction_logs").update({
+                 "status": "APPROVED",
+                 "reason": "Aprobado manualmente por el propietario."
+             }).eq("id", transaction_id).execute()
+             
+             # 3. APRENDIZAJE AUTOMÁTICO (Hive Mind)
+             # Si el humano aprueba, el vendedor se vuelve de confianza
+             agent_id = tx_data.get('agent_id')
+             vendor = tx_data.get('vendor')
+             
+             if vendor and agent_id:
+                 self.add_to_trusted_services(agent_id, vendor)
+             
+             logger.info(f"✅ Transaction {transaction_id} approved manually. Vendor {vendor} added to trusted services for {agent_id}.")
+             return {"status": "APPROVED", "message": "Transacción aprobada y vendedor añadido a whitelist."}
+             
         except Exception as e:
-             return {"status": "ERROR", "message": str(e)}
+            logger.error(f"❌ Error processing manual approval for token {token}: {e}")
+            return {"status": "ERROR", "message": str(e)}
 
     def create_topup_link(self, agent_id, amount):
         try:
@@ -775,6 +807,7 @@ class UniversalEngine:
             )
             return session.url
         except Exception as e:
+            logger.error(f"Error creating topup link for {agent_id}: {e}")
             return f"Error: {str(e)}"
 
     def automatic_topup(self, agent_id, amount):
@@ -790,7 +823,7 @@ class UniversalEngine:
             connected_account_id = wallet.data[0]['stripe_account_id']
             current_balance = float(wallet.data[0]['balance'])
 
-            print(f"🤖 Iniciando recarga automática de ${amount} para {agent_id}...")
+            logger.info(f"🤖 Iniciando recarga automática de ${amount} para {agent_id}...")
 
             # 2. EJECUTAR EL COBRO DIRECTO (Confirm=True)
             intent = stripe.PaymentIntent.create(
@@ -810,44 +843,47 @@ class UniversalEngine:
             new_bal = current_balance + amount
             self.db.table("wallets").update({"balance": new_bal}).eq("agent_id", agent_id).execute()
 
-            print(f"✅ DINERO INGRESADO: ${amount} (Nuevo saldo: ${new_bal})")
+            logger.success(f"✅ DINERO INGRESADO: ${amount} (Nuevo saldo: ${new_bal})")
             return {"status": "SUCCESS", "new_balance": new_bal, "tx_id": intent.id}
 
 
         except stripe.error.StripeError as e:
             # Si falla por "capabilities", intentamos activarlas forzosamente
             if "capabilities" in str(e):
-                print(f"⚠️ Intentando reparar cuenta {connected_account_id}...")
+                logger.warning(f"⚠️ Intentando reparar cuenta {connected_account_id}...")
                 try:
                     stripe.Account.modify(connected_account_id, capabilities={"transfers": {"requested": True}})
                     return {"status": "RETRY_NEEDED", "message": "Cuenta reparada. Intenta de nuevo en 5 segundos."}
-                except: pass
+                except Exception as repair_err:
+                    logger.error(f"Error repairing account capabilities: {repair_err}")
+            logger.error(f"Stripe Error during automatic topup: {e}")
             return {"status": "ERROR", "message": str(e)}
         except Exception as e:
+            logger.error(f"General Error during automatic topup: {e}")
             return {"status": "ERROR", "message": str(e)}
 
     # --- ASYNC AUDIT HELPERS ---
     def _reverse_transaction(self, agent_id, amount):
-        print(f"   💸 REVERSING: Devolviendo ${amount} a {agent_id}")
+        logger.info(f"   💸 REVERSING: Devolviendo ${amount} a {agent_id}")
         try:
              # Devolución simple (sumar saldo)
              # En un sistema real usaríamos una tabla 'ledger' con entradas negativas/positivas
              self.db.rpc("deduct_balance", {"p_agent_id": agent_id, "p_amount": -amount}).execute() # Negativo = Suma
         except Exception as e:
-            print(f"❌ Error Critical Reversing: {e}")
+            logger.error(f"❌ Error Critical Reversing: {e}")
 
-    def _ban_agent(self, agent_id, reason):
-        print(f"   🚫 BANNING: Agente {agent_id} congelado por: {reason}")
+    def _ban_agent(self, agent_id, reason="Security Violation"):
+        logger.warning(f"   🚫 BANNING: Agente {agent_id} congelado por: {reason}")
         try:
             self.db.table("wallets").update({"status": "FROZEN", "ban_reason": str(reason)}).eq("agent_id", agent_id).execute()
         except Exception as e:
-             print(f"❌ Error Banning Agent: {e}")
+             logger.error(f"❌ Error Banning Agent: {e}")
 
     async def run_background_audit(self, tx_data):
         """
         Auditoría Post-Pago: El cerebro trabaja mientras el dinero ya se movió.
         """
-        print(f"🕵️ [THE ORACLE] Analizando rastro de: {tx_data.get('vendor')}")
+        logger.info(f"🕵️ [THE ORACLE] Analizando rastro de: {tx_data.get('vendor')}")
         
         # Recuperar contexto necesario
         agent_id = tx_data.get('agent_id')
@@ -864,7 +900,7 @@ class UniversalEngine:
              
              clean_vendor = self._normalize_domain(vendor)
              if clean_vendor in trusted_vendors:
-                 print(f"✅ [AUTO-LEARN] '{clean_vendor}' ya es de confianza. Aprobando automáticamente.")
+                 logger.success(f"✅ [AUTO-LEARN] '{clean_vendor}' ya es de confianza. Aprobando automáticamente.")
                  self.db.table("transaction_logs").update({
                      "status": "APPROVED",
                      "reason": f"Trusted Vendor (Auto-Learn): {clean_vendor}"
@@ -873,11 +909,10 @@ class UniversalEngine:
                  
              h_resp = self.db.table("transaction_logs").select("created_at, amount, vendor, reason").eq("agent_id", agent_id).order("created_at", desc=True).limit(5).execute()
              history = h_resp.data if h_resp.data else []
-        except: 
+        except Exception as e: 
+             logger.error(f"Error fetching wallet/history data for background audit: {e}")
              agent_role = "Unknown"
              history = []
-             trusted_vendors = {}
-
              trusted_vendors = {}
 
         # 0. OSINT AUDIT (Mente Colmena)
@@ -918,14 +953,14 @@ class UniversalEngine:
             # Si el riesgo es crítico, quemamos el dominio en la red global
             if "CRITICAL" in str(risk_assessment).upper() or osint_report.get('score', 100) < 30:
                  try:
-                     print(f"☣️ [HIVE MIND] Agregando {vendor} a la LISTA NEGRA GLOBAL.")
+                     logger.warning(f"☣️ [HIVE MIND] Agregando {vendor} a la LISTA NEGRA GLOBAL.")
                      self.db.table("global_blacklist").upsert({
                          "vendor": self._normalize_domain(vendor),
                          "reason": f"Automated Ban by AI Guard: {reason_text}",
                          "severity": "CRITICAL"
                      }).execute()
                  except Exception as bl_err:
-                     print(f"⚠️ Error actualizando Blacklist Global: {bl_err}")
+                     logger.error(f"⚠️ Error actualizando Blacklist Global: {bl_err}")
 
             # 2. BANEO: Actualizar el estado del agente a BANNED
             self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", agent_id).execute()
@@ -956,7 +991,7 @@ class UniversalEngine:
                     approval_link="#",
                     reason=f"🚨 BANEO AUTOMÁTICO: {verdict}"
                 )
-                print(f"📢 Alerta Slack enviada para {agent_id}")
+                logger.info(f"📢 Alerta Slack enviada para {agent_id}")
             
             # 6. ALERTA EMAIL AL CLIENTE: Notificar al dueño si tiene email configurado
             if owner_email:
@@ -969,25 +1004,26 @@ class UniversalEngine:
                         amount=amount,
                         reason=verdict
                     )
-                    print(f"📧 Alerta de baneo enviada a {owner_email}")
+                    logger.info(f"📧 Alerta de baneo enviada a {owner_email}")
                 except Exception as e:
-                    print(f"⚠️ Fallo al enviar alerta por email al cliente: {e}")
+                    logger.error(f"⚠️ Fallo al enviar alerta por email al cliente: {e}")
             
-            print(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
+            logger.success(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
 
-        # --- ZONA GRIS / APRENDIZAJE ---
         # --- ZONA GRIS / APRENDIZAJE ---
         # Cambia la lógica de "Zona Gris" para que sea más sensible en el mundo real
         # --- ZONA DE DECISIÓN INTELIGENTE (Pillar REAL) ---
         # Solo mandamos email si la IA NO está segura (FLAGGED) o si detecta riesgo
         elif verdict == "FLAGGED" or "LOW RISK" not in verdict:
-            print(f"🤔 [SISTEMA INTELIGENTE] Transacción sospechosa detectada por la IA.")
+            logger.info(f"🤔 [SISTEMA INTELIGENTE] Transacción sospechosa detectada por la IA.")
             
             # Recuperar email si no estaba en rejected block
             try:
                 wr = self.db.table("wallets").select("owner_email").eq("agent_id", agent_id).single().execute()
                 owner_email = wr.data.get('owner_email')
-            except: owner_email = None
+            except Exception as e: 
+                logger.error(f"Error fetching owner email for flagged transaction: {e}")
+                owner_email = None
             
             # Marcamos como pendiente de aprobación solo lo sospechoso
             self.db.table("transaction_logs").update({
@@ -1001,13 +1037,13 @@ class UniversalEngine:
                 tx_id = tx_data.get('id')
                 try:
                     send_approval_email(owner_email, agent_id, vendor, amount, tx_id)
-                    print(f"📧 Solicitud de Aprobación+Aprendizaje enviada a {owner_email}")
+                    logger.info(f"📧 Solicitud de Aprobación+Aprendizaje enviada a {owner_email}")
                 except Exception as e:
-                    print(f"⚠️ Error enviando email approval: {e}")
+                    logger.error(f"⚠️ Error enviando email approval: {e}")
 
         else:
             # CASO: LOW RISK (Confianza Total)
-            print(f"✅ [THE ORACLE] Bajo riesgo detectado. Ejecutando aprendizaje automático para {vendor}.")
+            logger.info(f"✅ [THE ORACLE] Bajo riesgo detectado. Ejecutando aprendizaje automático para {vendor}.")
             
             # 1. Añadir a la whitelist del agente para que no vuelva a pasar por la IA
             self.add_to_trusted_services(agent_id, vendor)
@@ -1073,7 +1109,7 @@ class UniversalEngine:
 
         # --- [NUEVO] FRENO DE MANO UNIVERSAL (Trojan Defense + Amazon Gap) ---
         if self._check_role_vendor_mismatch(agent_role, request.vendor, request.description, request.justification):
-            print(f"⚠️ [GUARD] ALERTA DE TROYANO: Detección semántica de riesgo personal en '{request.vendor}' / '{request.description}'. Forzando auditoría...")
+            logger.critical(f"⚠️ [GUARD] ALERTA DE TROYANO: Detección semántica de riesgo personal en '{request.vendor}' / '{request.description}'. Forzando auditoría...")
             
             # Llamamos a la REALIDAD (Auditoría Síncrona Bloqueante)
             # No importa el monto. No importa el historial.
@@ -1108,17 +1144,17 @@ class UniversalEngine:
 
         # 1.1 FAST-WALL (NUEVO): Filtro de ráfaga síncrono
         from ai_guard import fast_risk_check
-        print(f"🔍 [FAST-WALL] Escaneando: '{request.description}' en '{request.vendor}'...")
+        logger.info(f"🔍 [FAST-WALL] Escaneando: '{request.description}' en '{request.vendor}'...")
         fast_check = fast_risk_check(request.description, request.vendor)
         if fast_check['risk'] == "CRITICAL":
-            print(f"🛑 [FAST-WALL] Bloqueo inmediato: {fast_check['reason']}")
+            logger.critical(f"🛑 [FAST-WALL] Bloqueo inmediato: {fast_check['reason']}")
             
             # === PASO 1: BANEO (Crítico - debe ejecutarse primero) ===
             try:
                 self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", request.agent_id).execute()
-                print(f"✅ [FAST-WALL] Agente {request.agent_id} marcado como BANNED en DB.")
+                logger.success(f"✅ [FAST-WALL] Agente {request.agent_id} marcado como BANNED en DB.")
             except Exception as ban_err:
-                print(f"🔥 [CRITICAL] Error al banear en DB: {ban_err}")
+                logger.critical(f"🔥 [CRITICAL] Error al banear en DB: {ban_err}")
             
             # === PASO 2: LOG (Importante pero no crítico) ===
             try:
@@ -1132,7 +1168,7 @@ class UniversalEngine:
                     "reason": f"Fast-Wall: {fast_check['reason']}"
                 }).execute()
             except Exception as log_err:
-                print(f"⚠️ Error al insertar log: {log_err}")
+                logger.warning(f"⚠️ Error al insertar log: {log_err}")
             
             # === PASO 3: ALERTAS (Opcional - no debe bloquear) ===
             try:
@@ -1151,16 +1187,16 @@ class UniversalEngine:
                             amount=request.amount,
                             reason=f"Fast-Wall: {fast_check['reason']}"
                         )
-                        print(f"📧 Alerta Fast-Wall enviada a {owner_email}")
+                        logger.info(f"📧 Alerta Fast-Wall enviada a {owner_email}")
                     except Exception as mail_err:
-                        print(f"❌ [EMAIL ERROR] No se pudo enviar email: {mail_err}")
+                        logger.error(f"❌ [EMAIL ERROR] No se pudo enviar email: {mail_err}")
                 else:
-                    print(f"ℹ️ [FAST-WALL] No hay owner_email configurado para {request.agent_id}")
+                    logger.info(f"ℹ️ [FAST-WALL] No hay owner_email configurado para {request.agent_id}")
                     
             except Exception as alert_err:
-                print(f"⚠️ Error en sistema de alertas: {alert_err}")
+                logger.warning(f"⚠️ Error en sistema de alertas: {alert_err}")
             
-            print(f"🚫 Protocolo Fast-Wall completado. Agente {request.agent_id} neutralizado.")
+            logger.critical(f"🚫 Protocolo Fast-Wall completado. Agente {request.agent_id} neutralizado.")
             return {"status": "REJECTED", "reason": f"Seguridad: {fast_check['reason']}"}
 
         # 1.2 CIRCUIT BREAKER & PENDING LOCK
@@ -1172,7 +1208,8 @@ class UniversalEngine:
             if self.redis_enabled:
                 if self.redis.get(f"audit_lock:{request.agent_id}"):
                     return {"status": "REJECTED", "reason": "Cuenta bajo revisión de seguridad activa."}
-        except: pass
+        except Exception as e:
+            logger.error(f"Error checking Redis audit lock: {e}")
 
         # 2. Identity Check (Minimal)
         # Asumimos que si tiene ID y saldo en DB, existe.
@@ -1191,10 +1228,10 @@ class UniversalEngine:
                 d_spent = float(w_limits.data.get('daily_spent') or 0.0)
                 
                 if (d_spent + request.amount) > d_limit:
-                    print(f"🛑 [LIMIT EXCEEDED] Agente {request.agent_id} (${d_spent}/${d_limit})")
+                    logger.warning(f"🛑 [LIMIT EXCEEDED] Agente {request.agent_id} (${d_spent}/${d_limit})")
                     return {"status": "REJECTED", "reason": "Excede el límite de gasto diario configurado."}
 
-            print(f"💰 [SECURE] Ejecutando transacción blindada para {request.agent_id}...")
+            logger.info(f"💰 [SECURE] Ejecutando transacción blindada para {request.agent_id}...")
             
             # 1. Deducción Segura (RPC)
             # Nota: Requiere que el usuario haya ejecutado secure_payment.sql en Supabase
@@ -1207,7 +1244,7 @@ class UniversalEngine:
                 return {"status": "REJECTED", "reason": "Saldo insuficiente o error de concurrencia"}
 
             new_balance = float(rpc_res.data[0]['updated_balance'])
-            print(f"✅ Transacción completada. Nuevo saldo: ${new_balance}")
+            logger.success(f"✅ Transacción completada. Nuevo saldo: ${new_balance}")
 
             # 2. LOG MANUAL (Ahora tenemos el control del ID)
             import uuid
@@ -1225,7 +1262,7 @@ class UniversalEngine:
         except Exception as e:
             # Si falla aquí, el dinero se descontó pero no hay log -> Critical consistency issue
             # En producción se requeriría un sistema de reconciliación
-            print(f"CRITICAL ERROR: Money deducted but log failed: {e}")
+            logger.critical(f"CRITICAL ERROR: Money deducted but log failed: {e}")
             return {"status": "REJECTED", "reason": f"Error de Sistema: {e}"}
 
         # 4. Issue Card (Fast) - Necesario para que el pago funcione
@@ -1241,7 +1278,8 @@ class UniversalEngine:
         try:
              if self.redis_enabled and request.amount > 100:
                   self.redis.setex(f"audit_lock:{request.agent_id}", 30, "LOCKED") # Bloqueo de 30s mientras dura el Oracle
-        except: pass
+        except Exception as e:
+            logger.error(f"Error setting Redis audit lock: {e}")
 
         # 6. Return Success with Pending Audit status
         return {
@@ -1268,7 +1306,7 @@ class UniversalEngine:
             connected_account_id = wallet.data[0]['stripe_account_id']
             current_balance = float(wallet.data[0]['balance'])
 
-            print(f"💳 Procesando cobro de tarjeta ({payment_method_id}) para {agent_id}...")
+            logger.info(f"💳 Procesando cobro de tarjeta ({payment_method_id}) para {agent_id}...")
 
             # 2. EJECUTAR EL COBRO REAL (Sin redirección)
             # --- SOPORTE MULTIDIVISA (Pillar 3) ---
@@ -1304,8 +1342,10 @@ class UniversalEngine:
 
         except stripe.error.CardError as e:
             # Error real de tarjeta (fondos insuficientes, denegada, etc.)
+            logger.warning(f"Tarjeta rechazada for {agent_id}: {e.user_message}")
             return {"status": "FAILED", "message": f"Tarjeta rechazada: {e.user_message}"}
         except Exception as e:
+            logger.error(f"Error charging user card for {agent_id}: {e}")
             return {"status": "ERROR", "message": str(e)}
 
     def get_agent_status(self, agent_id):
@@ -1321,6 +1361,7 @@ class UniversalEngine:
                 "config": {"webhook_url": wallet.get('webhook_url'), "owner_email": wallet.get('owner_email')}
             }
         except Exception as e:
+             logger.error(f"Error getting agent status for {agent_id}: {e}")
              return {"status": "ERROR", "message": str(e)}
 
     def get_dashboard_metrics(self, agent_id):
@@ -1332,7 +1373,8 @@ class UniversalEngine:
             total_spent = sum([float(tx.get('amount', 0)) for tx in history if tx.get('status') == 'APPROVED'])
             total_value_generated = sum([float(tx.get('perceived_value', 0) or 0) for tx in history])
             roi_percent = ((total_value_generated - total_spent) / total_spent) * 100 if total_spent > 0 else 0
-        except:
+        except Exception as e:
+            logger.error(f"Error calculating dashboard metrics for {agent_id}: {e}")
             total_spent, total_value_generated, roi_percent = 0, 0, 0
 
         return {
@@ -1345,6 +1387,9 @@ class UniversalEngine:
         tx_res = self.db.table("transaction_logs").select("*").eq("id", transaction_id).execute()
         if tx_res.data:
             self.db.table("transaction_logs").update({"perceived_value": perceived_value_usd}).eq("id", transaction_id).execute()
+            logger.info(f"Value {perceived_value_usd} recorded for transaction {transaction_id}")
+        else:
+            logger.warning(f"Transaction {transaction_id} not found for value reporting.")
         return {"status": "VALUE_RECORDED", "perceived_value": perceived_value_usd}
 
     def _result(self, auth, status, reason, req, bal=None, invoice_url=None, fee=0.0, card_data=None, forensic_url=None, mcc_category=None, intent_hash=None, gl_code=None, deductible=None):
@@ -1369,7 +1414,7 @@ class UniversalEngine:
         try:
             self.db.table("transaction_logs").insert(payload).execute()
         except Exception as e:
-            print(f"⚠️ Error guardando log en Supabase: {e}")
+            logger.error(f"⚠️ Error guardando log en Supabase: {e}")
             # En producción, esto debería ir a un sistema de observabilidad
         
         card_details = None
@@ -1390,20 +1435,24 @@ class UniversalEngine:
         wallet = wallet_resp.data[0]
         cert = self.legal_wrapper.issue_liability_certificate(agent_id, wallet.get('persistent_email', f"{agent_id}@agentpay.ai"), platform_url, forensic_hash=forensic_hash)
         self.db.table("liability_certificates").insert({"certificate_id": cert['certificate_id'], "agent_id": agent_id, "platform_url": platform_url, "signature": cert['signature'], "forensic_hash": forensic_hash}).execute()
+        logger.info(f"Agent {agent_id} signed terms of service.")
         return {"status": "SIGNED", "certificate": cert}
 
     def process_quote_request(self, provider_agent_id, service_type, parameters: dict):
         wallet = self.db.table("wallets").select("*").eq("agent_id", provider_agent_id).execute()
         catalog = wallet.data[0].get('services_catalog', {})
         price = float(catalog.get(service_type.lower(), 10.0))
+        logger.info(f"Quote requested for {service_type} from {provider_agent_id}: ${price}")
         return {"status": "QUOTED", "quote": {"quote_id": f"Q-{uuid.uuid4().hex[:6]}", "price": price, "currency": "USD"}}
 
     def create_escrow_transaction(self, agent_id, vendor, amount, description="Escrow"):
         txn_id = str(uuid.uuid4())
         self.db.table("transaction_logs").insert({"id": txn_id, "agent_id": agent_id, "vendor": vendor, "amount": amount, "status": "ESCROW_LOCKED", "reason": description}).execute()
+        logger.info(f"Escrow transaction {txn_id} created for {agent_id} with {vendor} for ${amount}.")
         return {"status": "ESCROW_CREATED", "transaction_id": txn_id}
 
     def confirm_delivery(self, agent_id, transaction_id):
+        logger.info(f"Delivery confirmed for transaction {transaction_id} by {agent_id}.")
         return {"status": "RELEASED"}
 
     def raise_escrow_dispute(self, agent_id, transaction_id, issue, evidence):
@@ -1414,7 +1463,8 @@ class UniversalEngine:
         try:
             tx_res = self.db.table("transaction_logs").select("*").eq("id", transaction_id).execute()
             tx = tx_res.data[0] if tx_res.data else {}
-        except:
+        except Exception as e:
+            logger.error(f"Error retrieving transaction {transaction_id} for dispute: {e}")
             tx = {}
         
         # 2. Llamar al Tribunal (AutoLawyer)
@@ -1428,7 +1478,7 @@ class UniversalEngine:
                 transaction_context={"tx_id": transaction_id}
             )
         except Exception as e:
-            print(f"❌ Error llamando al Lawyer: {e}")
+            logger.error(f"❌ Error llamando al Lawyer: {e}")
             verdict = None
 
         # 🛡️ DEFENSA DE MOTOR: Si verdict sigue siendo None, creamos uno por defecto
@@ -1450,8 +1500,9 @@ class UniversalEngine:
                 "reason": f"Arbitraje IA: {verdict.get('judicial_opinion')}"
             }).eq("id", transaction_id).execute()
         except Exception as e:
-            print(f"⚠️ Error actualizando DB en disputa: {e}")
+            logger.error(f"⚠️ Error actualizando DB en disputa: {e}")
         
+        logger.info(f"Dispute for {transaction_id} processed. Verdict: {verdict.get('judicial_opinion')}, Action: {action}")
         return {
             "status": status,
             "verdict": verdict,
@@ -1467,13 +1518,14 @@ class UniversalEngine:
         2. Consulta a Stripe qué contiene (Monto y Destinatario).
         3. Ejecuta el pago instantáneo desde el Payer hacia el Receiver.
         """
-        print(f"🤖 [QR VISION] Analizando QR para el agente {payer_agent_id}...")
-        print(f"   🔗 URL Detectada: {qr_url}")
+        logger.info(f"🤖 [QR VISION] Analizando QR para el agente {payer_agent_id}...")
+        logger.info(f"   🔗 URL Detectada: {qr_url}")
 
         try:
             # 1. Extraer el Session ID de la URL
             # Formato típico: https://checkout.stripe.com/c/pay/cs_test_a1b2c3...
             if "cs_test_" not in qr_url and "cs_live_" not in qr_url:
+                logger.warning(f"Formato de QR no válido o desconocido: {qr_url}")
                 return {"status": "ERROR", "message": "Formato de QR no válido o desconocido."}
 
             session_id = qr_url.split("/")[-1].split("#")[0]  # Limpieza básica
@@ -1483,6 +1535,7 @@ class UniversalEngine:
             session = stripe.checkout.Session.retrieve(session_id)
             
             if session.payment_status == 'paid':
+                logger.info(f"QR {session_id} already paid.")
                 return {"status": "ALREADY_PAID", "message": "Este QR ya ha sido pagado."}
 
             # 3. Extraer datos clave
@@ -1490,9 +1543,10 @@ class UniversalEngine:
             receiver_agent_id = session.metadata.get('agent_id')
             
             if not receiver_agent_id:
+                logger.warning(f"QR {session_id} does not contain receiver agent_id metadata.")
                 return {"status": "ERROR", "message": "El QR no contiene metadatos del agente destino."}
 
-            print(f"   🧠 [QR ANALYSIS] Detectado cobro de ${amount_dollars} para {receiver_agent_id}")
+            logger.info(f"   🧠 [QR ANALYSIS] Detectado cobro de ${amount_dollars} para {receiver_agent_id}")
 
             # 4. EJECUTAR EL PAGO (M2M Transfer)
             # Usamos la lógica de cobro directo (pm_card_visa simula la tarjeta del agente pagador)
@@ -1500,6 +1554,7 @@ class UniversalEngine:
             # Recuperar cuenta Stripe del DESTINATARIO para enviarle la plata
             receiver_wallet = self.db.table("wallets").select("stripe_account_id").eq("agent_id", receiver_agent_id).execute()
             if not receiver_wallet.data:
+                 logger.error(f"Receiver {receiver_agent_id} does not have a connected Stripe account.")
                  return {"status": "ERROR", "message": "El destinatario no tiene cuenta conectada."}
             
             dest_acct_id = receiver_wallet.data[0]['stripe_account_id']
@@ -1520,7 +1575,8 @@ class UniversalEngine:
             # 5. Opcional: Expirar la sesión de checkout para que nadie más la pague
             try:
                 stripe.checkout.Session.expire(session_id)
-            except: pass # Si ya expiró o falló, no importa, el pago ya se hizo
+            except Exception as e: 
+                logger.warning(f"Failed to expire Stripe checkout session {session_id}: {e}") # Si ya expiró o falló, no importa, el pago ya se hizo
 
             # 6. Registrar en Base de Datos (Log de Payer y Receiver)
             # Restamos saldo lógico al pagador (si gestionamos saldo interno)
@@ -1528,8 +1584,9 @@ class UniversalEngine:
             try:
                 self.db.rpc("deduct_balance", {"p_agent_id": payer_agent_id, "p_amount": amount_dollars}).execute()
             except Exception as e:
-                print(f"⚠️ Nota: No se pudo descontar saldo interno (quizás usa tarjeta directa): {e}")
+                logger.warning(f"⚠️ Nota: No se pudo descontar saldo interno (quizás usa tarjeta directa): {e}")
 
+            logger.success(f"Pago por QR completado exitosamente. TX ID: {intent.id}")
             return {
                 "status": "SUCCESS",
                 "message": "Pago por QR completado exitosamente.",
@@ -1542,20 +1599,9 @@ class UniversalEngine:
             }
 
         except Exception as e:
-            print(f"❌ Error procesando QR: {e}")
+            logger.error(f"❌ Error procesando QR: {e}")
             return {"status": "ERROR", "message": str(e)}
         
-        # Actualizar DB
-        self.db.table("transaction_logs").update({
-            "status": status, 
-            "reason": f"Arbitraje IA: {verdict.get('short_reason', verdict.get('judicial_opinion'))}"
-        }).eq("id", transaction_id).execute()
-        
-        return {
-            "status": status,
-            "verdict": verdict,
-            "action_taken": verdict.get('suggested_action')
-        }
 
     # --- SECURITY & AUTHENTICATION ---
     def verify_agent_kyc(self, agent_id):
@@ -1565,7 +1611,9 @@ class UniversalEngine:
         try:
             # 1. Recuperar el ID de cuenta de Stripe
             wallet = self.db.table("wallets").select("stripe_account_id").eq("agent_id", agent_id).execute()
-            if not wallet.data: return {"status": "ERROR", "message": "Agente no encontrado"}
+            if not wallet.data: 
+                logger.warning(f"Agent {agent_id} not found for KYC verification.")
+                return {"status": "ERROR", "message": "Agente no encontrado"}
             
             acct_id = wallet.data[0]['stripe_account_id']
             
@@ -1585,12 +1633,14 @@ class UniversalEngine:
             # 4. Actualizar DB
             self.db.table("wallets").update({"kyc_status": status}).eq("agent_id", agent_id).execute()
             
+            logger.info(f"KYC status for {agent_id} is {status}.")
             return {
                 "agent_id": agent_id,
                 "kyc_status": status,
                 "needs_more_info": account.requirements.currently_due
             }
         except Exception as e:
+            logger.error(f"Error verifying agent KYC for {agent_id}: {e}")
             return {"status": "ERROR", "message": str(e)}
 
     def process_stripe_webhook(self, payload, sig_header):
@@ -1601,7 +1651,7 @@ class UniversalEngine:
         except Exception as e:
             # Si falla la firma normal, podría ser un evento de Connect
             # En producción, deberías configurar un webhook secreto separado para Connect
-            print(f"⚠️ Webhook signature error (o evento Connect): {e}")
+            logger.warning(f"⚠️ Webhook signature error (o evento Connect): {e}")
             return {"status": "ignored"}
 
         # 1. RECARGAS (El dinero entra)
@@ -1610,7 +1660,7 @@ class UniversalEngine:
             agent_id = session.get('metadata', {}).get('agent_id')
             # Con Connect, el dinero ya está en SU cuenta, solo registramos el evento
             if agent_id:
-                print(f"💰 Recarga completada para {agent_id}")
+                logger.info(f"💰 Recarga completada para {agent_id}")
                 self.db.table("transaction_logs").insert({
                     "id": session['id'],
                     "agent_id": agent_id,
@@ -1626,7 +1676,7 @@ class UniversalEngine:
             agent_id = auth['metadata'].get('agent_id') # Asegúrate de meter metadata al crear la tarjeta
             
             # Aquí podrías ejecutar ai_guard de nuevo para una "Segunda Opinión" en tiempo real
-            print(f"💳 Intento de cobro: ${auth['amount']/100} en {auth['merchant_data']['name']}")
+            logger.info(f"💳 Intento de cobro: ${auth['amount']/100} en {auth['merchant_data']['name']}")
             
             # Por defecto aprobamos porque ya validamos antes de emitir la tarjeta
             return {"status": "approved"} # Stripe espera un 200 OK
@@ -1651,13 +1701,13 @@ class UniversalEngine:
             resp = self.db.table("wallets").select("agent_id").eq("api_secret_hash", token_hash).execute()
             
             if resp.data and len(resp.data) > 0:
-                print(f"🔐 Acceso Autorizado: {resp.data[0]['agent_id']}")
+                logger.info(f"🔐 Acceso Autorizado: {resp.data[0]['agent_id']}")
                 return resp.data[0]['agent_id']
                 
-            print(f"🛑 Acceso Denegado: Token inválido")
+            logger.warning(f"🛑 Acceso Denegado: Token inválido")
             return None
         except Exception as e:
-            print(f"⚠️ Auth Error: {e}")
+            logger.error(f"⚠️ Auth Error: {e}")
             return None
 
     def register_new_agent(self, client_name, country_code="US"):
@@ -1675,7 +1725,7 @@ class UniversalEngine:
         timestamp = int(time.time())
 
         try:
-            print(f"🥷 Creando Agente Automático: {client_name}...")
+            logger.info(f"🥷 Creando Agente Automático: {client_name}...")
 
             # 1. CREAR CUENTA PRE-ACTIVADA
             account = stripe.Account.create(
@@ -1718,6 +1768,7 @@ class UniversalEngine:
                 "kyc_status": "ACTIVE"
             }).execute()
             
+            logger.success(f"✅ Agente {agent_id} creado y activo con Stripe Account ID: {account.id}")
             return {
                 "status": "CREATED",
                 "agent_id": agent_id,
@@ -1727,7 +1778,7 @@ class UniversalEngine:
             }
 
         except Exception as e:
-            print(f"❌ Error creando agente: {e}")
+            logger.error(f"❌ Error creando agente: {e}")
             return {"status": "ERROR", "message": str(e)}
 
     def update_agent_settings(self, agent_id, webhook_url=None, owner_email=None):
@@ -1735,6 +1786,7 @@ class UniversalEngine:
         if webhook_url: data["webhook_url"] = webhook_url
         if owner_email: data["owner_email"] = owner_email
         self.db.table("wallets").update(data).eq("agent_id", agent_id).execute()
+        logger.info(f"Agent {agent_id} settings updated.")
         return {"status": "UPDATED"}
 
     def update_limits(self, agent_id, max_tx=None, daily_limit=None):
@@ -1742,14 +1794,19 @@ class UniversalEngine:
         if max_tx: data["max_transaction_limit"] = max_tx
         if daily_limit: data["daily_limit"] = daily_limit
         self.db.table("wallets").update(data).eq("agent_id", agent_id).execute()
+        logger.info(f"Limits for agent {agent_id} updated.")
         return {"status": "LIMITS_UPDATED"}
 
     def check_payment_status(self, transaction_id):
         res = self.db.table("transaction_logs").select("*").eq("id", transaction_id).execute()
-        if res.data: return res.data[0]
+        if res.data: 
+            logger.debug(f"Payment status for {transaction_id} checked.")
+            return res.data[0]
+        logger.warning(f"Transaction {transaction_id} not found for status check.")
         return {"error": "Not found"}
 
     def get_invoice_url(self, transaction_id):
+        logger.debug(f"Invoice URL requested for {transaction_id}.")
         return {"invoice_url": f"{self.admin_url}/v1/invoices/{transaction_id}.pdf"}
 
     def dispute_transaction(self, agent_id, transaction_id, reason):
@@ -1757,21 +1814,27 @@ class UniversalEngine:
             "status": "DISPUTED", 
             "reason": f"Disputa iniciada por el agente: {reason}"
         }).eq("id", transaction_id).execute()
+        logger.warning(f"Dispute opened for transaction {transaction_id} by {agent_id}: {reason}")
         return {"status": "DISPUTE_OPENED"}
 
     def get_agent_passport(self, agent_id):
-        return self.legal_wrapper.issue_kyc_passport(agent_id, "Synthetic Entity")
+        passport = self.legal_wrapper.issue_kyc_passport(agent_id, "Synthetic Entity")
+        logger.info(f"Agent passport issued for {agent_id}.")
+        return passport
 
     def process_quote_request(self, provider_id, service_type, parameters: dict):
+        logger.info(f"Quote requested for {service_type} from {provider_id}.")
         return {"quote": 1.50, "currency": "USD", "provider": provider_id, "expires_in": 3600}
 
     def get_service_directory(self, role="ALL"):
+        logger.debug(f"Service directory requested for role: {role}.")
         return {"directory": [
             {"name": "DataScraper_AI", "role": "data_procurement", "price": 0.50},
             {"name": "Translator_Bot", "role": "translation", "price": 0.10}
         ]}
 
     def send_alert(self, agent_id, message):
+        logger.info(f"Alert sent to {agent_id}: {message}")
         return {"success": True, "agent_id": agent_id, "status": "QUEUED"}
 
     def activate_issuing_for_agent(self, agent_id):
@@ -1783,11 +1846,12 @@ class UniversalEngine:
             # 1. Recuperamos el ID de cuenta de Stripe (acct_...)
             wallet = self.db.table("wallets").select("stripe_account_id").eq("agent_id", agent_id).execute()
             if not wallet.data:
+                logger.warning(f"Agent {agent_id} not found for issuing activation.")
                 return {"status": "ERROR", "message": "Agente no encontrado."}
             
             acct_id = wallet.data[0]['stripe_account_id']
             
-            print(f"🚀 Activando Issuing para la cuenta {acct_id}...")
+            logger.info(f"🚀 Activando Issuing para la cuenta {acct_id}...")
 
             # 2. Llamada a la API de Stripe para solicitar la capability
             stripe.Account.modify(
@@ -1797,6 +1861,7 @@ class UniversalEngine:
                 }
             )
 
+            logger.success(f"✅ Solicitud de Issuing enviada a Stripe para {agent_id}.")
             return {
                 "status": "ACTIVATED",
                 "message": "Solicitud de Issuing enviada a Stripe. Si el KYC está ok, se activará en minutos.",
@@ -1805,7 +1870,7 @@ class UniversalEngine:
             }
 
         except Exception as e:
-            print(f"❌ Error activando Issuing: {e}")
+            logger.error(f"❌ Error activando Issuing para {agent_id}: {e}")
             return {"status": "ERROR", "message": str(e)}
 
     # --- PILLAR 3: SELF-LEARNING (Auto-Whitelist) ---
@@ -1830,12 +1895,12 @@ class UniversalEngine:
                  
                  # 3. Guardar en DB
                  self.db.table("wallets").update({"services_catalog": catalog}).eq("agent_id", agent_id).execute()
-                 print(f"🧠 [HIVE MIND] {clean_vendor} ha sido aprendido como SEGURO para {agent_id}.")
+                 logger.info(f"🧠 [HIVE MIND] {clean_vendor} ha sido aprendido como SEGURO para {agent_id}.")
                  return True
              
              return False # Ya estaba
         except Exception as e:
-            print(f"⚠️ Error en Self-Learning: {e}")
+            logger.error(f"⚠️ Error en Self-Learning: {e}")
             return False
 
     # --- INFRAESTRUCTURA INDUSTRIAL (Roadmap 2026) ---

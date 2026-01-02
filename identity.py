@@ -2,6 +2,9 @@ import time
 import os
 import uuid
 import random
+import json
+from loguru import logger
+import openaindom
 from openai import OpenAI
 
 # Intentamos inicializar el cliente de OpenAI
@@ -46,7 +49,7 @@ class IdentityManager:
                     "status": "active_certified"
                 }).execute()
             except Exception as e:
-                print(f"⚠️ Error persistiendo identidad: {e}")
+                logger.error(f"⚠️ Error persistiendo identidad: {e}")
 
         return identity_data
 
@@ -77,7 +80,7 @@ class IdentityManager:
                 return "NO_EMAILS" # Aún no ha llegado nada
             
             last_email = response.data[0]
-            print(f"   📬 [IDENTITY] Email encontrado: {last_email.get('subject')}")
+            logger.debug(f"   📬 [IDENTITY] Email encontrado: {last_email.get('subject')}")
 
             # 3. Usar la IA para leerlo
             extracted_code = self.parse_inbound_email({
@@ -88,7 +91,7 @@ class IdentityManager:
             return extracted_code
 
         except Exception as e:
-            print(f"❌ Error Checking Inbox: {e}")
+            logger.error(f"❌ Error Checking Inbox: {e}")
             return f"ERROR: {str(e)}"
 
     def parse_inbound_email(self, email_content):
@@ -127,7 +130,7 @@ class IdentityManager:
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"Error AI Extracting: {e}")
+            logger.error(f"Error AI Extracting: {e}")
             return "AI_PARSING_ERROR"
 
     # --- AÑADIR DENTRO DE class IdentityManager ---
@@ -147,17 +150,19 @@ class IdentityManager:
                 return "NO_SMS"
             
             last_sms = response.data[0]
-            cuerpo = str(last_sms.get('body', '')) # Forzamos string
-            remitente = last_sms.get('sender', 'Unknown')
+            msg_body = last_sms.get('body', "")
+            remitente = last_sms.get('from_number', "")
+
+            logger.info(f"   📱 [SMS] Mensaje encontrado de {remitente}: {msg_body}")
             
-            print(f"   📱 [SMS] Mensaje encontrado de {remitente}: {cuerpo}")
-
-            # Reutilizamos tu lógica de extracción (IA o Regex)
-            return self._extract_code_with_ai("SMS Verification", cuerpo)
-
+            return {
+                "content": msg_body, 
+                "from": remitente,
+                "timestamp": last_sms['created_at'] 
+            }
         except Exception as e:
-            print(f"❌ Error Checking SMS: {e}")
-            return f"ERROR: {str(e)}"
+            logger.error(f"❌ Error Checking SMS: {e}")
+            return None
 
     # --- INFRAESTRUCTURA DE RED INDUSTRIAL (Pillar 1) ---
     def get_residential_proxy(self, country="US"):

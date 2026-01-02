@@ -1,5 +1,7 @@
 import random
 import datetime
+import math
+from loguru import logger
 
 class CreditBureau:
     """
@@ -33,7 +35,7 @@ class CreditBureau:
              
              return int(total_score / count)
         except Exception as e:
-            print(f"Error calculando Org Score: {e}")
+            logger.error(f"Error calculando Org Score: {e}")
             return 300
 
     def calculate_score(self, agent_id):
@@ -66,7 +68,7 @@ class CreditBureau:
             return final_score
             
         except Exception as e:
-            print(f"Error calculando score: {e}")
+            logger.error(f"Error calculando score: {e}")
             return 300 # Score mínimo por defecto ante error
 
     def check_credit_eligibility(self, agent_id):
@@ -90,7 +92,7 @@ class CreditBureau:
                      score = min(850, score + boost)
                      boost_reason = f" (+{boost} Aval Corporativo '{owner}')"
         except Exception as e:
-            print(f"Error checking owner logic: {e}")
+            logger.error(f"Error checking owner logic: {e}")
 
         
         if score >= 750:

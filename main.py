@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, HTTPException, Depends, Security, Header, 
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
+from loguru import logger
 import os
 import json
 from engine import UniversalEngine
@@ -28,7 +29,7 @@ async def twilio_webhook(From: str = Form(...), Body: str = Form(...), To: str =
     """
     Recibe SMS reales de Twilio y los guarda en Supabase.
     """
-    print(f"📲 [SMS RECIBIDO] De: {From} | Para: {To} | Msj: {Body}")
+    logger.info(f"📲 [SMS RECIBIDO] De: {From} | Para: {To} | Msj: {Body}")
     
     try:
         # Guardar en la tabla que acabamos de crear
@@ -44,7 +45,7 @@ async def twilio_webhook(From: str = Form(...), Body: str = Form(...), To: str =
         
         return {"status": "received"}
     except Exception as e:
-        print(f"❌ Error guardando SMS: {e}")
+        logger.error(f"❌ Error guardando SMS: {e}")
         return {"status": "error", "detail": str(e)}
 
 # --- IMPORTANTE: Endpoint para que tu script de prueba pueda LEER el SMS ---
@@ -189,7 +190,7 @@ async def brevo_inbound_webhook(request: Request):
         
         items = data.get("items", [])
         if not items:
-            print("📩 Webhook hit: No items in payload (Test/Ping)")
+            logger.debug("📩 Webhook hit: No items in payload (Test/Ping)")
             return {"status": "ok", "message": "no items"}
 
         for item in items:
@@ -202,7 +203,7 @@ async def brevo_inbound_webhook(request: Request):
             subject = item.get("Subject", "")
             body = item.get("RawTextBody") or item.get("ExtractedMarkdownMessage", "")
 
-            print(f"📩 Webhook item: From={sender}, To={recipient}, Sub={subject}")
+            logger.info(f"📩 Webhook item: From={sender}, To={recipient}, Sub={subject}")
             
             if not recipient:
                 continue
@@ -214,16 +215,19 @@ async def brevo_inbound_webhook(request: Request):
                 id_lookup = engine.db.table("identities").select("agent_id").eq("email", recipient).execute()
                 if id_lookup.data:
                     real_agent_id = id_lookup.data[0].get("agent_id")
-                    print(f"🔍 Resolved full agent_id: {real_agent_id}")
+                    logger.info(f"🔍 Resolved full agent_id: {real_agent_id}")
             except Exception as lookup_err:
-                print(f"⚠️ Error lookup agent_id: {lookup_err}")
-
-            # 2. Fallback a extracción manual si la DB no tiene el registro o falla
-            if not real_agent_id:
                 user_part = recipient.split("@")[0]
                 extracted = user_part.replace("agent-", "").replace("bot_", "").replace("sk_", "")
                 real_agent_id = f"sk_{extracted}" # Esto será el ID truncado (8 chars)
-                print(f"⚠️ Using truncated fallback agent_id: {real_agent_id}")
+                logger.warning(f"⚠️ Error lookup agent_id, falling back to truncated: {lookup_err}. Truncated ID: {real_agent_id}")
+
+            # 2. Fallback a extracción manual si la DB no tiene el registro o falla (or if lookup failed)
+            if not real_agent_id: # This check is now mostly for cases where the recipient parsing itself failed or was empty
+                user_part = recipient.split("@")[0]
+                extracted = user_part.replace("agent-", "").replace("bot_", "").replace("sk_", "")
+                real_agent_id = f"sk_{extracted}" # Esto será el ID truncado (8 chars)
+                logger.warning(f"⚠️ Using truncated fallback agent_id: {real_agent_id}")
 
             try:
                 engine.db.table("inbound_emails").insert({
@@ -233,13 +237,13 @@ async def brevo_inbound_webhook(request: Request):
                     "subject": subject,
                     "body_text": body
                 }).execute()
-                print(f"✅ Ingested email for {real_agent_id}")
+                logger.success(f"✅ Ingested email for {real_agent_id}")
             except Exception as db_err:
-                print(f"⚠️ Error guardando email: {db_err}")
+                logger.error(f"⚠️ Error guardando email: {db_err}")
         
         return {"status": "ok"}
     except Exception as e:
-        print(f"❌ Webhook Global Error: {e}")
+        logger.critical(f"❌ Webhook Global Error: {e}")
         return {"status": "error", "message": str(e)}
 
 
@@ -470,7 +474,7 @@ async def agent_status(req: dict):
             "status": res.data.get("status", "unknown")
         }
     except Exception as e:
-        print(f"❌ Error getting status: {e}")
+        logger.error(f"❌ Error getting status: {e}")
         return {"error": str(e), "balance": 0.0}
 
 # --- PROFESSIONAL SDK ENDPOINTS ---

@@ -1,6 +1,7 @@
 import os
 import json
 import datetime
+from loguru import logger
 from openai import OpenAI
 
 # Configuración
@@ -18,9 +19,9 @@ class AutoLawyer:
         self.client = None
         if self.ai_enabled:
             try:
-                self.client = OpenAI(api_key=self.api_key)
+                self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             except Exception as e:
-                print(f"⚠️ OpenAI Client Init Error: {e}")
+                logger.error(f"⚠️ OpenAI Client Init Error: {e}")
                 self.ai_enabled = False
 
     def _court_call(self, system_prompt, user_prompt, temperature=0.0):
@@ -44,14 +45,14 @@ class AutoLawyer:
             return json.loads(content)
             
         except Exception as e:
-            print(f"⚖️ [COURT ERROR] {str(e)}")
-            return {} # Retorno de seguridad
+            logger.error(f"⚖️ [COURT ERROR] {str(e)}")
+            return None
 
-    def analyze_case(self, agent_id, vendor, amount, claim_reason, proof_logs, transaction_context={}):
+    def arbitrate_dispute(self, vendor, amount, issue_description, evidence_text):
         """
-        EL PROCESO JUDICIAL: Blindado.
+        JUEZ SUPREMO: Decide quién tiene la razón en un conflicto.
         """
-        print(f"⚖️ [HIGH COURT] Iniciando Arbitraje contra {vendor}...")
+        logger.info(f"⚖️ [HIGH COURT] Iniciando Arbitraje contra {vendor}...")
         
         # 1. Fallback si no hay IA
         if not self.ai_enabled:
@@ -106,7 +107,7 @@ class AutoLawyer:
             return verdict
 
         except Exception as e:
-            print(f"🔥 CRITICAL COURT FAILURE: {e}")
+            logger.critical(f"🔥 CRITICAL COURT FAILURE: {e}")
             # RETORNO DE EMERGENCIA (¡Esto es lo que faltaba!)
             return {
                 "viability": "ERROR",

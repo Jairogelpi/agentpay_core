@@ -1,5 +1,6 @@
 import whois
 from urllib.parse import urlparse
+from loguru import logger
 from datetime import datetime
 
 def extract_domain(url_or_vendor):
@@ -19,43 +20,30 @@ def check_domain_age(vendor):
     """
     🔍 OSINT: Verifica la fecha de nacimiento del dominio.
     Retorna: 
-    - "SAFE": Dominio antiguo (> 30 días).
-    - "DANGEROUS_NEW": Dominio recién nacido (< 30 días).
-    - "UNKNOWN": No se pudo verificar (fallo de red/privacidad).
+    - Diccionario con 'age_days', 'status' ('YOUNG', 'MATURE', 'UNKNOWN_DATE', 'HIDDEN'), y 'registrar'.
     """
     domain = extract_domain(vendor)
-    print(f"📡 OSINT: Investigando nacimiento de '{domain}'...")
-
+    logger.debug(f"📡 OSINT: Investigando nacimiento de '{domain}'...")
     try:
-        # Consultamos la base de datos global
         w = whois.whois(domain)
+        creation = w.creation_date
         
-        # WHOIS es un caos, a veces devuelve listas, a veces strings. Normalizamos:
-        creation_date = w.creation_date
-        
-        if isinstance(creation_date, list):
-            creation_date = creation_date[0] # Cogemos la primera fecha
+        # Whois returns list for multiple registrars
+        if isinstance(creation, list):
+            creation = creation[0]
             
-        if not creation_date:
-            return "UNKNOWN" # El dominio oculta su fecha
-
-        # Cálculo de días de vida (Normalizamos a naive para evitar errores de offset)
-        if creation_date.tzinfo is not None:
-            creation_date = creation_date.replace(tzinfo=None)
+        if not creation:
+            return {"age_days": 0, "status": "UNKNOWN_DATE"}
+            
+        age_days = (datetime.now() - creation).days
+        logger.debug(f"   ↳ Edad del dominio: {age_days} días.")
         
-        now = datetime.now()
-        age_days = (now - creation_date).days
-        
-        print(f"   ↳ Edad del dominio: {age_days} días.")
-
-        if age_days < 30:
-            return "DANGEROUS_NEW"
-        
-        if age_days < 90:
-            return "MEDIUM_RISK"
-        
-        return "SAFE"
-
+        return {
+            "age_days": age_days,
+            "status": "YOUNG" if age_days < 30 else "MATURE",
+            "registrar": w.registrar
+        }
+            
     except Exception as e:
-        print(f"   ↳ Error WHOIS: {e}")
-        return "UNKNOWN"
+        logger.warning(f"   ↳ Error WHOIS: {e}")
+        return {"age_days": 0, "status": "HIDDEN", "error": str(e)}

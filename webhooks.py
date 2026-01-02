@@ -1,4 +1,5 @@
 import requests
+from loguru import logger
 import json
 import time
 
@@ -16,21 +17,21 @@ def send_webhook(url, event_type, data):
         "data": data
     }
     
-    print(f"🔔 WEBHOOK: Enviando '{event_type}' a {url}...")
+    logger.info(f"🔔 WEBHOOK: Enviando '{event_type}' a {url}...")
     
     try:
         # En producción, esto debería ser una tarea en segundo plano (Celery/Redis)
         # para no bloquear, y tener retries automáticos.
         response = requests.post(
             url, 
-            data=json.dumps(payload),
+            json=payload,
             headers={'Content-Type': 'application/json'},
             timeout=5
         )
-        if response.status_code == 200:
-            print("   ✅ Webhook entregado OK.")
+        if response.status_code in [200, 201, 204]:
+            logger.debug("   ✅ Webhook entregado OK.")
         else:
-            print(f"   ⚠️ Fallo al entregar Webhook: {response.status_code}")
+            logger.warning(f"   ⚠️ Fallo al entregar Webhook: {response.status_code}")
             
     except Exception as e:
-        print(f"   ❌ Error de conexión Webhook: {e}")
+        logger.error(f"   ❌ Error de conexión Webhook: {e}")

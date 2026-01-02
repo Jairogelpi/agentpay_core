@@ -1,5 +1,6 @@
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from loguru import logger
 import os
 import datetime
 
@@ -39,5 +40,5 @@ def generate_invoice_pdf(transaction_id, agent_id, vendor, amount, description):
     c.drawString(50, 50, "Generado automáticamente por AgentPay Core System.")
     
     c.save()
-    print(f"📄 FACTURA GENERADA: {path}")
+    logger.info(f"📄 FACTURA GENERADA: {path}")
     return path # En producción devolveríamos una URL S3

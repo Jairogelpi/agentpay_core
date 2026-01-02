@@ -1,5 +1,6 @@
 import os
 import smtplib
+from loguru import logger
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -47,10 +48,10 @@ def send_approval_email(to_email, agent_id, vendor, amount, tx_id):
             server.starttls()
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
-        print(f"✅ [EMAIL APPROVAL] Enviado a {to_email}")
+        logger.info(f"✅ [EMAIL APPROVAL] Enviado a {to_email}")
         return True
     except Exception as e:
-        print(f"❌ [SMTP ERROR] {e}")
+        logger.error(f"❌ [SMTP ERROR] {e}")
         return False
 
 
@@ -62,20 +63,18 @@ def send_security_ban_alert(agent_id, reason, amount=0):
     alert_email = os.environ.get("SECURITY_ALERT_EMAIL")
     
     if not alert_email:
-        print(f"🚨 [SECURITY ALERT - NO EMAIL] Agent {agent_id} BANNED: {reason}")
+        logger.warning(f"🚨 [SECURITY ALERT - NO EMAIL] Agent {agent_id} BANNED: {reason}")
         return False
     
-    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = os.getenv("SMTP_PORT")
     smtp_user = os.environ.get("SMTP_USER")
     smtp_pass = os.environ.get("SMTP_PASS")
     
-    if not all([smtp_host, smtp_user, smtp_pass]):
-        print(f"🚨 [SECURITY ALERT - NO SMTP] Agent {agent_id} BANNED: {reason}")
+    if not smtp_host or not smtp_port:
+        logger.warning(f"🚨 [SECURITY ALERT - NO SMTP] Agent {agent_id} BANNED: {reason}")
         return False
     
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
     from datetime import datetime
     
     subject = f"🚨 SECURITY BAN: {agent_id}"
@@ -98,23 +97,17 @@ def send_security_ban_alert(agent_id, reason, amount=0):
     msg.attach(MIMEText(body, 'html'))
     
     try:
-        smtp_port = int(os.environ.get("SMTP_PORT", 587))
-        print(f"🔌 [SMTP] Conectando a {smtp_host}:{smtp_port}...")
+        logger.info(f"🔌 [SMTP] Conectando a {smtp_host}:{smtp_port}...")
         
-        if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15)
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
+        with smtplib.SMTP(smtp_host, int(smtp_port), timeout=15) as server:
             server.starttls()
-        
-        with server:
             server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-        
-        print(f"🚨 [SECURITY ALERT SENT] Ban alert for {agent_id} -> {alert_email}")
+            server.sendmail(smtp_user, alert_email, msg.as_string())
+            
+        logger.success(f"🚨 [SECURITY ALERT SENT] Ban alert for {agent_id} -> {alert_email}")
         return True
     except Exception as e:
-        print(f"❌ [ALERT EMAIL ERROR] {e}")
+        logger.error(f"❌ [ALERT EMAIL ERROR] {e}")
         return False
 
 def send_ban_alert_to_owner(to_email, agent_id, vendor, amount, reason):
@@ -123,16 +116,14 @@ def send_ban_alert_to_owner(to_email, agent_id, vendor, amount, reason):
     Email con diseño alarmante para máxima visibilidad.
     """
     smtp_host = os.environ.get("SMTP_HOST")
+    smtp_port = os.environ.get("SMTP_PORT")
     smtp_user = os.environ.get("SMTP_USER")
     smtp_pass = os.environ.get("SMTP_PASS")
     
-    if not all([smtp_host, smtp_user, smtp_pass, to_email]):
-        print(f"⚠️ [BAN EMAIL] No se puede enviar - Configuración incompleta")
+    if not smtp_host or not smtp_port:
+        logger.warning(f"⚠️ [BAN EMAIL] No se puede enviar - Configuración incompleta")
         return False
     
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
     from datetime import datetime
     
     subject = f"🚨 BLOQUEO CRÍTICO DE SEGURIDAD - {agent_id}"
@@ -177,21 +168,15 @@ def send_ban_alert_to_owner(to_email, agent_id, vendor, amount, reason):
     
     try:
         smtp_port = int(os.environ.get("SMTP_PORT", 2525))  # Puerto 2525 para Brevo
-        print(f"🔌 [SMTP] Conectando a {smtp_host}:{smtp_port} para enviar a {to_email}...")
+        logger.info(f"🔌 [SMTP] Conectando a {smtp_host}:{smtp_port} para enviar a {to_email}...")
         
-        if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15)
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
-            server.starttls()
-        
-        with server:
+        with smtplib.SMTP(smtp_host, int(smtp_port), timeout=15) as server:
+            server.starttls() 
             server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-        
-        print(f"📧 [BAN ALERT SENT] Alerta crítica enviada a {to_email}")
+            server.sendmail(smtp_user, to_email, msg.as_string())
+            
+        logger.success(f"📧 [BAN ALERT SENT] Alerta crítica enviada a {to_email}")
         return True
     except Exception as e:
-        print(f"❌ [BAN EMAIL ERROR] {e}")
+        logger.error(f"❌ [BAN EMAIL ERROR] {e}")
         return False  # No raise - el baneo ya está hecho
-

@@ -1,7 +1,8 @@
-
+```python
 import os
 import json
 from openai import OpenAI
+from loguru import logger
 
 # Juez Supremo IA
 MODELO_JUEZ = "gpt-4o"
@@ -26,7 +27,7 @@ class AIArbiter:
         if not ARBITER_ENABLED:
             return {"verdict": "ERROR", "reason": "Arbiter AI Offline"}
 
-        print(f"⚖️ [AI ARBITER] Juzgando caso: {transaction.get('agent_id')} vs {transaction.get('vendor')}")
+        logger.info(f"⚖️ [AI ARBITER] Juzgando caso: {transaction.get('agent_id')} vs {transaction.get('vendor')}")
 
         prompt = f"""
         Eres el JUEZ SUPREMO de Comercio Agéntico (AI Arbiter).
@@ -73,5 +74,5 @@ class AIArbiter:
             return judgment
             
         except Exception as e:
-            print(f"⚠️ Error en Juicio IA: {e}")
+            logger.error(f"⚠️ Error en Juicio IA: {e}")
             return {"verdict": "MANUAL_REVIEW", "reason": f"AI Error: {str(e)}"}

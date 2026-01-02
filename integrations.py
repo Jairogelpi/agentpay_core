@@ -1,4 +1,5 @@
 import requests
+from loguru import logger
 import json
 
 def send_slack_approval(webhook_url, agent_id, amount, vendor, approval_link, reason="Transacción requiere aprobación"):
@@ -46,8 +47,12 @@ def send_slack_approval(webhook_url, agent_id, amount, vendor, approval_link, re
                 }
             ]
         }
-        r = requests.post(webhook_url, json=payload)
-        return r.status_code == 200
+        response = requests.post(webhook_url, json=payload)
+        if response.status_code != 200:
+            logger.warning(f"⚠️ Slack Webhook Falló: {response.text}")
+            return False
+        return True
+
     except Exception as e:
-        print(f"⚠️ Error enviando Slack: {e}")
+        logger.error(f"⚠️ Error enviando Slack: {e}")
         return False

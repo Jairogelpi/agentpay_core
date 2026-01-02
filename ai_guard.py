@@ -1,5 +1,7 @@
 import os
 import json
+import time
+from loguru import logger
 import hashlib
 import statistics
 import asyncio
@@ -79,7 +81,7 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     if osint_report:
         osint_context = f"Score: {osint_report.get('score')}/100. Entropy: {osint_report.get('entropy')}. Risks: {', '.join(osint_report.get('risk_factors', []))}"
 
-    print(f"👁️ [THE ORACLE v4] Universal Audit for ${amount} at {vendor} (Z-Score: {z_score:.2f})...")
+    logger.info(f"👁️ [THE ORACLE v4] Universal Audit for ${amount} at {vendor} (Z-Score: {z_score:.2f})...")
 
     # --- STAGE 1: THE PROPONENT (Strategic Business Consultant) ---
     proponent_prompt = f"""
@@ -187,5 +189,5 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         return final_verdict
 
     except Exception as e:
-        print(f"❌ Oracle Failure: {e}")
+        logger.error(f"❌ Oracle Failure: {e}")
         return {"decision": "REJECTED", "reason": f"Oracle Internal Conflict: {str(e)}"}
