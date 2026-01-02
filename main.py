@@ -536,6 +536,20 @@ async def legal_sign_tos(req: dict):
     """Firma de TyC con Certificado de Responsabilidad"""
     return engine.sign_terms_of_service(req.get("agent_id"), req.get("platform_url"), req.get("forensic_hash", "N/A"))
 
+@app.post("/v1/legal/issue-certificate")
+async def issue_cert(req: dict):
+    """
+    Emite un Certificado de Responsabilidad Civil real.
+    """
+    # Se vincula con un Forensic Hash para trazabilidad jurídica
+    return legal_wrapper.issue_liability_certificate(
+        agent_id=req.get("agent_id"),
+        identity_email=req.get("email"),
+        platform_url=req.get("platform_url"),
+        coverage_amount=10000.00,
+        forensic_hash=req.get("forensic_hash", "PROOF-TRAZABILIDAD-001")
+    )
+
 # --- M2M MARKET API ---
 @app.post("/v1/market/quote")
 async def market_quote(req: dict):
