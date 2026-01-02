@@ -4,7 +4,7 @@ import uuid
 import random
 import json
 from loguru import logger
-import openaindom
+
 from openai import OpenAI
 
 # Intentamos inicializar el cliente de OpenAI
