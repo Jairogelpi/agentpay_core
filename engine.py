@@ -630,6 +630,113 @@ class UniversalEngine:
             print(f"✅ DINERO INGRESADO: ${amount} (Nuevo saldo: ${new_bal})")
             return {"status": "SUCCESS", "new_balance": new_bal, "tx_id": intent.id}
 
+    # --- ASYNC AUDIT HELPERS ---
+    def _reverse_transaction(self, agent_id, amount):
+        print(f"   💸 REVERSING: Devolviendo ${amount} a {agent_id}")
+        try:
+             # Devolución simple (sumar saldo)
+             # En un sistema real usaríamos una tabla 'ledger' con entradas negativas/positivas
+             self.db.rpc("deduct_balance", {"p_agent_id": agent_id, "p_amount": -amount}).execute() # Negativo = Suma
+        except Exception as e:
+            print(f"❌ Error Critical Reversing: {e}")
+
+    def _ban_agent(self, agent_id, reason):
+        print(f"   🚫 BANNING: Agente {agent_id} congelado por: {reason}")
+        try:
+            self.db.table("wallets").update({"status": "FROZEN", "ban_reason": str(reason)}).eq("agent_id", agent_id).execute()
+        except Exception as e:
+             print(f"❌ Error Banning Agent: {e}")
+
+    async def run_background_audit(self, tx_data):
+        """
+        Fase 2: La IA entra en acción (Sin bloquear al usuario).
+        """
+        print(f"🕵️ [BACKGROUND] 'The Oracle' analizando tx de ${tx_data.get('amount')}...")
+        
+        # Recuperar contexto necesario
+        agent_id = tx_data.get('agent_id')
+        vendor = tx_data.get('vendor')
+        amount = tx_data.get('amount')
+        
+        # Simular recuperación de contexto (rol, historial)
+        # Para simplificar el ejemplo, usamos valores por defecto o recuperamos rápido
+        try:
+             w_res = self.db.table("wallets").select("agent_role").eq("agent_id", agent_id).execute()
+             agent_role = w_res.data[0]['agent_role'] if w_res.data else "Unknown"
+             
+             h_resp = self.db.table("transaction_logs").select("created_at, amount, vendor, reason").eq("agent_id", agent_id).order("created_at", desc=True).limit(5).execute()
+             history = h_resp.data if h_resp.data else []
+        except: 
+             agent_role = "Unknown"
+             history = []
+
+        # Llamamos a tu AI Guard COMPLETO
+        # (Import 'audit_transaction' assumed available from module 'ai_guard')
+        risk_assessment = await audit_transaction(
+            vendor=vendor, 
+            amount=amount, 
+            description=tx_data.get('description'), 
+            agent_id=agent_id, 
+            agent_role=agent_role, 
+            history=history, 
+            justification=tx_data.get('justification'),
+            sensitivity="HIGH" # Background audit is always Strict
+        )
+        
+        decision = risk_assessment.get('decision', 'FLAGGED')
+        
+        if decision == "REJECTED":
+            print(f"🚨 [ALERTA] Fraude detectado POST-PAGO. Iniciando Protocolo de Reversión.")
+            self._reverse_transaction(agent_id, amount)
+            self._ban_agent(agent_id, reason=risk_assessment.get('reasoning', 'Fraud Detected'))
+        else:
+            print(f"✅ [AUDIT] Transacción validada y segura ({decision}).")
+
+    async def process_instant_payment(self, request: TransactionRequest):
+        """
+        Fase 1: Aprobación Rápida (Solo Saldo y Reglas Básicas).
+        Retorna en milisegundos.
+        """
+        # 1. Validaciones básicas / Sanity
+        if request.amount <= 0.50:
+             return {"status": "REJECTED", "reason": "Monto inválido (<$0.50)"}
+
+        # 2. Identity Check (Minimal)
+        # Asumimos que si tiene ID y saldo en DB, existe.
+        
+        # 3. Deduct Balance (Atomic RPC)
+        FEE_PERCENT = 0.015 # Tarifa base (sin seguro insurance activo en sync check)
+        fee = round(request.amount * FEE_PERCENT, 2)
+        total_deducted = request.amount + fee
+        
+        try:
+            # Check rápido de saldo y deducción
+            # Usamos el RPC que ya hace 'check and update'
+            self.db.rpc("deduct_balance", {"p_agent_id": request.agent_id, "p_amount": total_deducted}).execute()
+        except Exception as e:
+            return {"status": "REJECTED", "reason": f"Saldo insuficiente o Error: {e}"}
+
+        # 4. Issue Card (Fast) - Necesario para que el pago funcione
+        clean_vendor = self._normalize_domain(request.vendor)
+        card = self._issue_virtual_card(request.agent_id, request.amount, clean_vendor, mcc_category='services')
+        
+        if not card:
+             # Rollback si falla stripe
+             self._reverse_transaction(request.agent_id, total_deducted)
+             return {"status": "ERROR", "reason": "Stripe Issuing Failed"}
+             
+        # 5. Return Success with Pending Audit status
+        return {
+            "success": True,
+            "status": "APPROVED_PENDING_AUDIT",
+            "message": "Pago aprobado (Auditoría en curso)",
+            "transaction_id": card['id'], # Usamos ID de tarjeta como tx id rápido
+            "card": card,
+            "balance": "hidden (async)", # No recalculamos saldo aqui para ir rápido
+            "forensic_url": "PENDING"
+        }
+
+
         except stripe.error.StripeError as e:
             # Si falla por "capabilities", intentamos activarlas forzosamente
             if "capabilities" in str(e):
