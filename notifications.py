@@ -1,63 +1,54 @@
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 def send_approval_email(to_email, agent_id, vendor, amount, link):
     """
-    Simula el envío de un correo electrónico transaccional.
-    En producción, aquí conectaríamos con SendGrid, AWS SES o Resend.
+    Envía alerta de seguridad vía Brevo SMTP.
     """
     if not to_email:
         print("⚠️ [EMAIL] No se envió email porque falta el destinatario.")
-        return
+        return False
 
-    subject = f"⚠️ [ACTION REQUIRED] {agent_id} blocked for ${amount}"
-    
-    # HTML simple para el email
-    body = f"""
-    <h1>Solicitud de Aprobación de Pago</h1>
-    <p>Su Agente <b>{agent_id}</b> intenta realizar un pago detenido por seguridad.</p>
-    <ul>
-        <li><b>Proveedor:</b> {vendor}</li>
-        <li><b>Monto:</b> ${amount}</li>
-    </ul>
-    <p>Si usted reconoce esta operación, haga clic abajo:</p>
-    <a href="{link}" style="background:green; color:white; padding:10px;">APROBAR PAGO</a>
-    <p>Si no lo reconoce, ignore este mensaje.</p>
-    """
-
-    # Real SMTP Implementation
-    # Requiere variables de entorno: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
-    smtp_host = os.environ.get("SMTP_HOST")
-    smtp_port = os.environ.get("SMTP_PORT", 587)
+    # Forzamos la lectura de las variables de Brevo
+    smtp_host = os.environ.get("SMTP_HOST", "smtp-relay.brevo.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", 587))
     smtp_user = os.environ.get("SMTP_USER")
     smtp_pass = os.environ.get("SMTP_PASS")
     
-    if not all([smtp_host, smtp_user, smtp_pass]):
-        print("❌ [EMAIL ERROR] No SMTP credentials configured. Email NOT sent.")
-        # En modo estricto, esto debería ser una excepción, pero para evitar crash total en demo inicial:
-        raise Exception("Strict Mode Error: SMTP Configuration Missing. Cannot send real email.")
-
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
+    if not all([smtp_user, smtp_pass]):
+        print("❌ [EMAIL ERROR] SMTP_USER o SMTP_PASS no configurados en Render.")
+        return False
 
     msg = MIMEMultipart()
     msg['From'] = f"AgentPay Security <{smtp_user}>"
     msg['To'] = to_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'html'))
+    msg['Subject'] = f"🚨 ALERTA DE SEGURIDAD: Agente {agent_id} Bloqueado"
+
+    html = f"""
+    <h2>Actividad Sospechosa Detectada</h2>
+    <p>El agente <b>{agent_id}</b> ha sido bloqueado preventivamente.</p>
+    <ul>
+        <li><b>Comercio:</b> {vendor}</li>
+        <li><b>Monto:</b> ${amount}</li>
+    </ul>
+    <p>Revisa el panel de control para más información.</p>
+    """
+    msg.attach(MIMEText(html, 'html'))
 
     try:
-        server = smtplib.SMTP(smtp_host, int(smtp_port))
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        text = msg.as_string()
-        server.sendmail(smtp_user, to_email, text)
-        server.quit()
-        print(f"✅ [EMAIL SENT] Enviado real vía {smtp_host} a {to_email}")
+        print(f"🔌 [SMTP] Conectando a {smtp_host}:{smtp_port} para enviar a {to_email}...")
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        print(f"✅ [EMAIL SENT] Alerta enviada con éxito a {to_email}")
         return True
     except Exception as e:
-        print(f"❌ [SMTP ERROR] Fallo al enviar: {str(e)}")
-        raise e
+        print(f"❌ [SMTP ERROR] No se pudo enviar el correo: {str(e)}")
+        return False
+
 
 def send_security_ban_alert(agent_id, reason, amount=0):
     """
@@ -103,7 +94,7 @@ def send_security_ban_alert(agent_id, reason, amount=0):
     msg.attach(MIMEText(body, 'html'))
     
     try:
-        server = smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", 587)))
+        server = smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", 587)), timeout=10)
         server.starttls()
         server.login(smtp_user, smtp_pass)
         server.sendmail(smtp_user, alert_email, msg.as_string())
@@ -173,7 +164,7 @@ def send_ban_alert_to_owner(to_email, agent_id, vendor, amount, reason):
     msg.attach(MIMEText(body, 'html'))
     
     try:
-        server = smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", 587)))
+        server = smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", 587)), timeout=10)
         server.starttls()
         server.login(smtp_user, smtp_pass)
         server.sendmail(smtp_user, to_email, msg.as_string())
@@ -182,4 +173,4 @@ def send_ban_alert_to_owner(to_email, agent_id, vendor, amount, reason):
         return True
     except Exception as e:
         print(f"❌ [BAN EMAIL ERROR] {e}")
-        raise e
+        return False  # No raise - el baneo ya está hecho
