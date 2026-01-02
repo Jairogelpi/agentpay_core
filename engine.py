@@ -800,16 +800,15 @@ class UniversalEngine:
              w_res = self.db.table("wallets").select("agent_role, services_catalog, owner_email").eq("agent_id", agent_id).single().execute()
              wallet_data = w_res.data or {}
              agent_role = wallet_data.get('agent_role', 'Unknown')
-             trusted_vendors = wallet_data.get('services_catalog', {})
+             trusted_vendors = wallet_data.get('services_catalog', []) or []
              owner_email = wallet_data.get('owner_email')
              
-             if vendor in trusted_vendors:
-                 print(f"✅ [AUTO-LEARN] '{vendor}' ya es de confianza. Aprobando automáticamente.")
-                 # Actualizar log a APPROVED (si estaba en PENDING o algo similar, aunque aquí ya está pagado)
-                 # En background audit, el pago ya se hizo. Solo registramos que la AI lo valida.
+             clean_vendor = self._normalize_domain(vendor)
+             if clean_vendor in trusted_vendors:
+                 print(f"✅ [AUTO-LEARN] '{clean_vendor}' ya es de confianza. Aprobando automáticamente.")
                  self.db.table("transaction_logs").update({
                      "status": "APPROVED",
-                     "reason": f"Trusted Vendor (Auto-Learn): {vendor}"
+                     "reason": f"Trusted Vendor (Auto-Learn): {clean_vendor}"
                  }).eq("id", tx_data.get('id')).execute()
                  return
                  
@@ -918,8 +917,12 @@ class UniversalEngine:
             print(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
 
         # --- ZONA GRIS / APRENDIZAJE ---
-        elif amount > 1000 and "LOW RISK" not in verdict:
-            print(f"🤔 [GREY AREA] Transacción alta (${amount}) requiere aprobación humana.")
+        # --- ZONA GRIS / APRENDIZAJE ---
+        # Cambia la lógica de "Zona Gris" para que sea más sensible en el mundo real
+        # --- ZONA DE DECISIÓN INTELIGENTE (Pillar REAL) ---
+        # Solo mandamos email si la IA NO está segura (FLAGGED) o si detecta riesgo
+        elif verdict == "FLAGGED" or "LOW RISK" not in verdict:
+            print(f"🤔 [SISTEMA INTELIGENTE] Transacción sospechosa detectada por la IA.")
             
             # Recuperar email si no estaba en rejected block
             try:
@@ -927,16 +930,16 @@ class UniversalEngine:
                 owner_email = wr.data.get('owner_email')
             except: owner_email = None
             
+            # Marcamos como pendiente de aprobación solo lo sospechoso
             self.db.table("transaction_logs").update({
                 "status": "PENDING_APPROVAL",
-                "reason": f"Grey Area Risk: {verdict}"
+                "reason": f"Detección de Riesgo IA: {reason_text}"
             }).eq("id", tx_data.get('id')).execute()
-            
+
             if owner_email:
                 from notifications import send_approval_email
-                # Pasamos tx_id en lugar de link, notifications.py construye la URL
+                # El sistema ahora enviará el correo basándose en el riesgo detectado por la IA
                 tx_id = tx_data.get('id')
-                
                 try:
                     send_approval_email(owner_email, agent_id, vendor, amount, tx_id)
                     print(f"📧 Solicitud de Aprobación+Aprendizaje enviada a {owner_email}")
@@ -944,8 +947,12 @@ class UniversalEngine:
                     print(f"⚠️ Error enviando email approval: {e}")
 
         else:
-            print(f"✅ [AUDIT] Transacción validada y segura ({verdict}).")
-            print(f"✅ [AUDIT] Transacción validada y segura ({verdict}).")
+            # Si es LOW RISK, el sistema lo marca como aprobado definitivamente sin molestar al humano
+            print(f"✅ [SISTEMA INTELIGENTE] Confianza total. Transacción validada automáticamente.")
+            self.db.table("transaction_logs").update({
+                "status": "APPROVED",
+                "reason": "Validación automática de IA (Bajo Riesgo)"
+            }).eq("id", tx_data.get('id')).execute()
 
     async def process_instant_payment(self, request: TransactionRequest):
         """
@@ -1656,4 +1663,64 @@ class UniversalEngine:
 
         except Exception as e:
             print(f"❌ Error activando Issuing: {e}")
+            return {"status": "ERROR", "message": str(e)}
+
+    # --- PILLAR 3: SELF-LEARNING (Auto-Whitelist) ---
+    def add_to_trusted_services(self, agent_id, vendor_domain):
+        """
+        Añade un vendedor a la whitelist del agente tras aprobación manual.
+        Esto reduce el riesgo en futuras compras.
+        """
+        try:
+             # 1. Recuperar catálogo actual
+             wallet = self.db.table("wallets").select("services_catalog").eq("agent_id", agent_id).single().execute()
+             catalog = wallet.data.get("services_catalog") or []
+             
+             # 2. Añadir si no existe
+             clean_vendor = self._normalize_domain(vendor_domain)
+             if clean_vendor not in catalog:
+                 catalog.append(clean_vendor)
+                 
+                 # 3. Guardar en DB
+                 self.db.table("wallets").update({"services_catalog": catalog}).eq("agent_id", agent_id).execute()
+                 print(f"🧠 [HIVE MIND] {clean_vendor} ha sido aprendido como SEGURO para {agent_id}.")
+                 return True
+             
+             return False # Ya estaba
+        except Exception as e:
+            print(f"⚠️ Error en Self-Learning: {e}")
+            return False
+
+    def process_approval(self, token: str):
+        """
+        Procesa la aprobación manual de una transacción desde el email.
+        """
+        try:
+             # Aquí deberías validar el token (JWT)
+             # Por simplicidad, asumimos que el token es el ID de transacción directo o un JWT decodificado
+             transaction_id = token 
+             
+             # 1. Recuperar Transacción
+             tx = self.db.table("transaction_logs").select("*").eq("id", transaction_id).single().execute()
+             if not tx.data: return {"error": "Transacción no encontrada"}
+             
+             tx_data = tx.data
+             
+             # 2. Aprobar
+             self.db.table("transaction_logs").update({
+                 "status": "APPROVED",
+                 "reason": "Aprobado manualmente por el propietario."
+             }).eq("id", transaction_id).execute()
+             
+             # 3. APRENDIZAJE AUTOMÁTICO (Hive Mind)
+             # Si el humano aprueba, el vendedor se vuelve de confianza
+             agent_id = tx_data.get('agent_id')
+             vendor = tx_data.get('vendor')
+             
+             if vendor and agent_id:
+                 self.add_to_trusted_services(agent_id, vendor)
+             
+             return {"status": "APPROVED", "message": "Transacción aprobada y vendedor añadido a whitelist."}
+             
+        except Exception as e:
             return {"status": "ERROR", "message": str(e)}

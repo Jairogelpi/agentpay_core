@@ -3,8 +3,8 @@ import time
 import json
 
 # Configuración - Asegúrate de que tu servidor en Render/Local esté activo
-BASE_URL = "http://localhost:8000" # O tu URL de Render
-MI_EMAIL = "tu-email@ejemplo.com" # Cambia esto por tu email real
+BASE_URL = "https://agentpay-core.onrender.com" # O tu URL de Render
+MI_EMAIL = "jairogelpi@gmail.com" # Cambia esto por tu email real
 
 def run_real_world_test():
     print("🌍 --- INICIANDO ESCENARIO DE VIDA REAL: AgentPay Core ---")
