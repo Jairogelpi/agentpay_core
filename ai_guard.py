@@ -15,7 +15,12 @@ try:
 except:
     AI_ENABLED = False
 
-BLACK_LIST_KEYWORDS = ["plutonio", "nuke", "weapon", "drugs", "illegal", "armas", "explosivo", "plutonium", "uranium", "toxic"]
+BLACK_LIST_KEYWORDS = [
+    "plutonio", "nuke", "weapon", "drugs", "illegal", "armas", "explosivo", 
+    "plutonium", "uranium", "toxic", "extorsion", "extorsión", "ransomware", 
+    "hack", "hacking", "robo", "crimina", "mercenario", "sicario", "asesino",
+    "lavado", "blanqueo", "fraude", "estafa", "malware", "phishing", "dark web"
+]
 
 def fast_risk_check(description: str, vendor: str) -> dict:
     """
@@ -68,10 +73,12 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     if not AI_ENABLED:
         return {"decision": "FLAGGED", "reason": "Oracle Offline (Forensic Warning)"}
         
-    # LÓGICA DE VELOCIDAD/COSTO:
-    # < $50 -> gpt-4o-mini (Rápido/Barato)
-    # >= $50 -> gpt-4o (Inteligente/Caro)
-    if amount < 50:
+    # LÓGICA DE MODELO:
+    # Sensibilidad ALTA -> siempre gpt-4o (máxima inteligencia)
+    # Sensibilidad NORMAL -> gpt-4o-mini para < $50 (ahorro de costes)
+    if sensitivity == "HIGH":
+        model_to_use = "gpt-4o"
+    elif amount < 50:
         model_to_use = "gpt-4o-mini"
     else:
         model_to_use = "gpt-4o"
