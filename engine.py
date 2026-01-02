@@ -763,11 +763,23 @@ class UniversalEngine:
         total_deducted = request.amount + fee
         
         try:
-            # Check rápido de saldo y deducción
-            # Usamos el RPC que ya hace 'check and update'
-            self.db.rpc("deduct_balance", {"p_agent_id": request.agent_id, "p_amount": total_deducted}).execute()
+            print(f"💰 [ATOMIC] Ejecutando transacción blindada para {request.agent_id}...")
+            
+            # Llamamos a la función atómica que resta saldo e inserta log en UN SOLO PASO
+            rpc_res = self.db.rpc("process_atomic_payment", {
+                "p_agent_id": request.agent_id,
+                "p_vendor": request.vendor,
+                "p_amount": total_deducted,
+                "p_description": request.description,
+                "p_status": "APPROVED",
+                "p_reason": "Transacción Atómica Verificada"
+            }).execute()
+            
+            new_balance = float(rpc_res.data)
+            print(f"✅ Transacción completada. Nuevo saldo: ${new_balance}")
+
         except Exception as e:
-            return {"status": "REJECTED", "reason": f"Saldo insuficiente o Error: {e}"}
+            return {"status": "REJECTED", "reason": f"Error de Integridad: {e}"}
 
         # 4. Issue Card (Fast) - Necesario para que el pago funcione
         clean_vendor = self._normalize_domain(request.vendor)
