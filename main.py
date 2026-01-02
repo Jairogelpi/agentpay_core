@@ -234,50 +234,35 @@ async def brevo_inbound_webhook(request: Request):
 
 
 @app.get("/v1/approve")
-async def approve_and_learn(tx: str, learn: bool = False):
+async def approve_transaction(tx_id: str, agent_id: str, vendor: str):
     """
-    Aprueba una transacción pendiente y opcionalmente aprende del vendor.
+    Aprueba una transacción pendiente y aprende del vendor (Grey Area Logic).
     """
     try:
-        # 1. Recuperar la transacción
-        tx_record = engine.db.table("transaction_logs").select("*").eq("id", tx).single().execute()
-        if not tx_record.data:
-            return {"error": "Transacción no encontrada"}
-            
-        current_status = tx_record.data.get('status')
-        if current_status == 'APPROVED':
-            return {"message": "Ya estaba aprobada."}
-            
-        # 2. Aprobar (actualizar estado)
-        engine.db.table("transaction_logs").update({
-            "status": "APPROVED",
-            "reason": "Aprobación Humana Manual (Auto-Learn)"
-        }).eq("id", tx).execute()
+        # 1. Marcamos la transacción como aprobada en los logs
+        # Verificamos primero si existe para evitar errores mudos, aunque la actualización directa es válida
+        tx_check = engine.db.table("transaction_logs").select("status").eq("id", tx_id).single().execute()
+        if not tx_check.data:
+             return {"error": "Transaction not found"}
         
-        # 3. Learning Logic (si learn=True)
-        message = "Transacción aprobada."
-        if learn:
-            agent_id = tx_record.data['agent_id']
-            vendor = tx_record.data['vendor']
-            
-            # Obtener catálogo actual
-            res = engine.db.table("wallets").select("services_catalog").eq("agent_id", agent_id).single().execute()
-            current_catalog = res.data.get('services_catalog') or {}
-            
-            # Actualizar catálogo
-            current_catalog[vendor] = {
-                "status": "trusted",
-                "added_at": "now", # timestamp real sería mejor pero esto sirve
-                "reason": "Human Approval"
-            }
-            
-            engine.db.table("wallets").update({"services_catalog": current_catalog}).eq("agent_id", agent_id).execute()
-            message += f" Y '{vendor}' añadido a la lista de confianza."
-            
-        return {"status": "SUCCESS", "message": message}
-            
+        engine.db.table("transaction_logs").update({"status": "APPROVED", "reason": "Manual Approval (Training)"}).eq("id", tx_id).execute()
+        
+        # 2. LECCIÓN: Guardamos al vendedor en la "Lista de Confianza" del agente
+        # Obtenemos el catálogo actual
+        res = engine.db.table("wallets").select("services_catalog").eq("agent_id", agent_id).single().execute()
+        catalog = res.data.get('services_catalog') or {}
+        
+        # Añadimos el nuevo aprendizaje
+        catalog[vendor] = "trusted"
+        
+        # Guardamos de vuelta en Supabase
+        engine.db.table("wallets").update({"services_catalog": catalog}).eq("agent_id", agent_id).execute()
+        
+        return {
+            "message": f"¡Éxito! Pago aprobado y {vendor} añadido a la lista de confianza del agente."
+        }
     except Exception as e:
-        return {"status": "ERROR", "message": str(e)}
+        return {"status": "ERROR", "message": f"Error: {str(e)}"}
 
 @app.get("/admin/approve", response_class=HTMLResponse)
 async def approve_endpoint(token: str):

@@ -790,12 +790,11 @@ class UniversalEngine:
             
             if owner_email:
                 from notifications import send_approval_email
-                # Link apunta a nuestro nuevo endpoint con learn=true
-                base_url = "https://agentpay-core.onrender.com"
-                approval_link = f"{base_url}/v1/approve?tx={tx_data.get('id')}&learn=true"
+                # Pasamos tx_id en lugar de link, notifications.py construye la URL
+                tx_id = tx_data.get('id')
                 
                 try:
-                    send_approval_email(owner_email, agent_id, vendor, amount, approval_link)
+                    send_approval_email(owner_email, agent_id, vendor, amount, tx_id)
                     print(f"📧 Solicitud de Aprobación+Aprendizaje enviada a {owner_email}")
                 except Exception as e:
                     print(f"⚠️ Error enviando email approval: {e}")

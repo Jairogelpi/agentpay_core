@@ -6,54 +6,48 @@ from email.mime.multipart import MIMEMultipart
 # Email remitente verificado en Brevo (debe estar en el panel de Senders)
 BREVO_VERIFIED_SENDER = os.environ.get("BREVO_SENDER_EMAIL", "gelpierreape@gmail.com")
 
-def send_approval_email(to_email, agent_id, vendor, amount, link):
+def send_approval_email(to_email, agent_id, vendor, amount, tx_id):
     """
-    Envía alerta de seguridad vía Brevo SMTP.
-    Puerto 2525 para evitar bloqueos de proveedores cloud.
+    Envía solicitud de aprobación de aprendizaje.
     """
-    if not to_email:
-        print("⚠️ [EMAIL] No se envió email porque falta el destinatario.")
-        return False
-
-    # Brevo SMTP config
+    # ... (tu configuración SMTP de Brevo puerto 2525) ...
     smtp_host = "smtp-relay.brevo.com"
     smtp_port = 2525
     smtp_user = os.environ.get("SMTP_USER")
     smtp_pass = os.environ.get("SMTP_PASS")
-    
-    if not all([smtp_user, smtp_pass]):
-        print("❌ [EMAIL ERROR] SMTP_USER o SMTP_PASS no configurados en Render.")
-        return False
 
     msg = MIMEMultipart()
-    # REQUISITO BREVO: Este email debe estar verificado en el panel de Senders
     msg['From'] = BREVO_VERIFIED_SENDER
     msg['To'] = to_email
-    msg['Subject'] = f"⚠️ Acción Requerida: Autorizar Pago Agente {agent_id}"
+    msg['Subject'] = f"⚠️ ¿Autorizas este pago?: {vendor}"
+    
+    # Enlace que apunta a tu servidor de Render
+    # IMPORTANTE: codificar vendor si tiene espacios
+    from urllib.parse import quote
+    vendor_safe = quote(vendor)
+    url_aprobacion = f"https://agentpay-core.onrender.com/v1/approve?tx_id={tx_id}&agent_id={agent_id}&vendor={vendor_safe}"
 
     body = f"""
-    <h2>Solicitud de Aprobación (Grey Area)</h2>
-    <p>El agente <b>{agent_id}</b> quiere realizar un pago inusual.</p>
-    <ul>
-        <li><b>Comercio:</b> {vendor}</li>
-        <li><b>Monto:</b> ${amount}</li>
-    </ul>
-    <p>Si apruebas, este comercio se añadirá a la lista de confianza (Auto-Learn).</p>
-    <br>
-    <a href="{link}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">
-        ✅ APROBAR Y CONFIAR
-    </a>
-    <p style="font-size: 12px; color: grey; margin-top: 20px;">Si no reconoces esta operación, no hagas nada. Quedará en pendiente.</p>
+    <html>
+        <body>
+            <h2>¿Autorizas este pago inusual?</h2>
+            <p>El agente <b>{agent_id}</b> quiere pagar <b>${amount}</b> a <b>{vendor}</b>.</p>
+            <p>Si apruebas, la IA aprenderá que este vendedor es confiable para el futuro.</p>
+            <br>
+            <a href="{url_aprobacion}" style="background-color: #2ecc71; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+                APROBAR Y ENSEÑAR A LA IA
+            </a>
+        </body>
+    </html>
     """
     msg.attach(MIMEText(body, 'html'))
-
+    
     try:
-        print(f"🔌 [SMTP] Conectando a Brevo vía {smtp_host}:{smtp_port}...")
         with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
             server.starttls()
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
-        print(f"✅ [EMAIL SUCCESS] Enviado desde {BREVO_VERIFIED_SENDER} a {to_email}")
+        print(f"✅ [EMAIL APPROVAL] Enviado a {to_email}")
         return True
     except Exception as e:
         print(f"❌ [SMTP ERROR] {e}")
