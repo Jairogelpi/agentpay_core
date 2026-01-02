@@ -447,17 +447,17 @@ async def agent_status(req: dict):
     
     try:
         # Robust query handling None
-        res = engine.db.table("wallets").select("balance, status").eq("agent_id", agent_id).execute()
+        res = engine.db.table("wallets").select("balance, status").eq("agent_id", agent_id).single().execute()
         
         if not res.data:
             return {"error": "Agente no encontrado", "balance": 0.0, "status": "UNKNOWN"}
         
         # Forzamos que siempre devuelva un número, nunca un None
-        balance = res.data[0].get("balance")
+        balance = res.data.get("balance")
         return {
             "agent_id": agent_id,
             "balance": float(balance) if balance is not None else 0.0,
-            "status": res.data[0].get("status")
+            "status": res.data.get("status", "unknown")
         }
     except Exception as e:
         print(f"❌ Error getting status: {e}")
