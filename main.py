@@ -281,17 +281,18 @@ async def check_kyc_status(agent_id: str):
 from fastapi import Request, Header, BackgroundTasks # <--- Importar Header y BackgroundTasks
 
 @app.post("/v1/pay")
-async def pay(req: dict, background_tasks: BackgroundTasks, agent_id: str = Depends(verify_api_key)):
-    # 🛡️ VERIFICACIÓN PRE-PAGO: Bloqueo inmediato si está baneado
+async def pay(
+    req: dict, 
+    background_tasks: BackgroundTasks,
+    agent_id: str = Depends(verify_api_key)
+):
+    # 🛡️ ESCUDO DE SEGURIDAD: Verificar baneo antes de procesar
     agent_check = engine.db.table("wallets").select("status").eq("agent_id", agent_id).single().execute()
     
     if agent_check.data and agent_check.data.get("status") == "BANNED":
-        return {"status": "REJECTED", "message": "Cuenta suspendida por riesgo de seguridad."}
+        return {"status": "REJECTED", "message": "Acceso denegado: Cuenta suspendida."}
 
-    # Inyectamos el ID autenticado para asegurar consistencia
-    req["agent_id"] = agent_id
-
-    # Si está activo, procedemos con el pago rápido
+    # Proceder con el pago rápido si el agente está activo
     real_req = TransactionRequest(**req)
     result = await engine.process_instant_payment(real_req)
     

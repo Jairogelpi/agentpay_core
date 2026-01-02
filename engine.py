@@ -701,24 +701,18 @@ class UniversalEngine:
             agent_id = tx_data['agent_id']
             amount = float(tx_data['amount'])
             
-            print(f"🚨 [ALERTA] Fraude detectado. Ejecutando protocolo de contención en {agent_id}...")
-
-            # 1. REVERSIÓN (Devolver el dinero inmediatamente)
-            # Sumamos el monto usando el RPC deduct_balance (negativo = suma)
+            # 1. REVERSIÓN: Devolver el dinero (monto negativo suma al saldo)
             self.db.rpc("deduct_balance", {"p_agent_id": agent_id, "p_amount": -amount}).execute()
 
-            # 2. BANEO REAL: Actualizamos la columna 'status' a 'BANNED'
+            # 2. BANEO: Actualizar el estado del agente a BANNED
             self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", agent_id).execute()
 
-            # 3. LOG DE SEGURIDAD (CSI-Ready)
-            import uuid
+            # 3. LOG: Registrar la expulsión por seguridad
             self.db.table("transaction_logs").insert({
-                "id": str(uuid.uuid4()),
                 "agent_id": agent_id,
                 "vendor": "SYSTEM_SECURITY",
-                "amount": 0.0,
                 "status": "SECURITY_BAN",
-                "reason": f"IA detectó contenido prohibido: {verdict}"
+                "reason": f"Fraude detectado por IA: {verdict}"
             }).execute()
             
             print(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
