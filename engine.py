@@ -630,6 +630,19 @@ class UniversalEngine:
             print(f"✅ DINERO INGRESADO: ${amount} (Nuevo saldo: ${new_bal})")
             return {"status": "SUCCESS", "new_balance": new_bal, "tx_id": intent.id}
 
+
+        except stripe.error.StripeError as e:
+            # Si falla por "capabilities", intentamos activarlas forzosamente
+            if "capabilities" in str(e):
+                print(f"⚠️ Intentando reparar cuenta {connected_account_id}...")
+                try:
+                    stripe.Account.modify(connected_account_id, capabilities={"transfers": {"requested": True}})
+                    return {"status": "RETRY_NEEDED", "message": "Cuenta reparada. Intenta de nuevo en 5 segundos."}
+                except: pass
+            return {"status": "ERROR", "message": str(e)}
+        except Exception as e:
+            return {"status": "ERROR", "message": str(e)}
+
     # --- ASYNC AUDIT HELPERS ---
     def _reverse_transaction(self, agent_id, amount):
         print(f"   💸 REVERSING: Devolviendo ${amount} a {agent_id}")
@@ -735,19 +748,6 @@ class UniversalEngine:
             "balance": "hidden (async)", # No recalculamos saldo aqui para ir rápido
             "forensic_url": "PENDING"
         }
-
-
-        except stripe.error.StripeError as e:
-            # Si falla por "capabilities", intentamos activarlas forzosamente
-            if "capabilities" in str(e):
-                print(f"⚠️ Intentando reparar cuenta {connected_account_id}...")
-                try:
-                    stripe.Account.modify(connected_account_id, capabilities={"transfers": {"requested": True}})
-                    return {"status": "RETRY_NEEDED", "message": "Cuenta reparada. Intenta de nuevo en 5 segundos."}
-                except: pass
-            return {"status": "ERROR", "message": str(e)}
-        except Exception as e:
-            return {"status": "ERROR", "message": str(e)}
 
     def charge_user_card(self, agent_id, amount, payment_method_id):
         """
