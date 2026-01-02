@@ -1648,7 +1648,7 @@ class UniversalEngine:
             logger.error(f"Error verifying agent KYC for {agent_id}: {e}")
             return {"status": "ERROR", "message": str(e)}
 
-    def process_stripe_webhook(self, payload, sig_header):
+    def _deprecated_duplicate_webhook(self, payload, sig_header):
         try:
             event = stripe.Webhook.construct_event(
                 payload, sig_header, self.webhook_secret
