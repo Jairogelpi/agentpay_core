@@ -32,12 +32,12 @@ def calculate_statistical_risk(amount, history):
     z_score = (amount - mean) / stdev
     return z_score, f"Stats(m:{mean:.1f}, s:{stdev:.1f})"
 
-async def _oracle_call(system_prompt, user_prompt, temperature=0.0):
+async def _oracle_call(system_prompt, user_prompt, temperature=0.0, model="gpt-4o"):
     """
     Internal helper for high-precision Async Oracle calls.
     """
     response = await client.chat.completions.create(
-        model=ORACLE_MODEL,
+        model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -54,11 +54,19 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     """
     if not AI_ENABLED:
         return {"decision": "FLAGGED", "reason": "Oracle Offline (Forensic Warning)"}
+        
+    # LÓGICA DE VELOCIDAD/COSTO:
+    # < $50 -> gpt-4o-mini (Rápido/Barato)
+    # >= $50 -> gpt-4o (Inteligente/Caro)
+    if amount < 50:
+        model_to_use = "gpt-4o-mini"
+    else:
+        model_to_use = "gpt-4o"
 
     z_score, stats_desc = calculate_statistical_risk(amount, history)
     history_md = "\n".join([f"- {h['vendor']} (${h['amount']}): {h.get('reason', 'N/A')}" for h in history[-5:]])
 
-    print(f"👁️ [THE ORACLE] Commencing 3-Stage Elite Audit for ${amount} at {vendor}...")
+    print(f"👁️ [THE ORACLE] Commencing 3-Stage Elite Audit for ${amount} at {vendor} using {model_to_use}...")
 
     # --- STAGE 1: THE EXPERT PANEL ---
     panel_prompt = f"""
@@ -96,7 +104,7 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     
     try:
         # Step 1: Experts weigh in (awaiting)
-        stage1 = await _oracle_call("You are the Elite Panel of AgentPay Experts.", panel_prompt)
+        stage1 = await _oracle_call("You are the Elite Panel of AgentPay Experts.", panel_prompt, model=model_to_use)
         
         # --- STAGE 2: ADVERSARIAL REVIEW (DEVIL'S ADVOCATE) ---
         adversary_prompt = f"""
@@ -112,7 +120,7 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
             "final_warning": "string"
         }}
         """
-        stage2 = await _oracle_call("Act as a ruthless Adversarial Security Auditor.", adversary_prompt, temperature=0.3)
+        stage2 = await _oracle_call("Act as a ruthless Adversarial Security Auditor.", adversary_prompt, temperature=0.3, model=model_to_use)
         
         # --- STAGE 3: THE ARBITER CONSENSUS ---
         final_risk = min(100, stage1['preliminary_risk'] * stage2['adversarial_risk_multiplier'])
@@ -135,7 +143,7 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
             "metadata": {{ "z_score": {z_score}, "adversary_active": true }}
         }}
         """
-        final_verdict = await _oracle_call("You are The Arbiter. Your decision is final and legally binding.", arbiter_prompt)
+        final_verdict = await _oracle_call("You are The Arbiter. Your decision is final and legally binding.", arbiter_prompt, model=model_to_use)
         
         # --- FORENSIC SIGNING ---
         forensic_data = f"ORACLE|{agent_id}|{vendor}|{amount}|{final_verdict['reasoning']}|{final_risk}"
