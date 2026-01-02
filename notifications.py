@@ -29,16 +29,21 @@ def send_approval_email(to_email, agent_id, vendor, amount, link):
     # REQUISITO BREVO: Este email debe estar verificado en el panel de Senders
     msg['From'] = BREVO_VERIFIED_SENDER
     msg['To'] = to_email
-    msg['Subject'] = f"🚨 BLOQUEO CRÍTICO: Agente {agent_id}"
+    msg['Subject'] = f"⚠️ Acción Requerida: Autorizar Pago Agente {agent_id}"
 
     body = f"""
-    <h2>Alerta de Seguridad AgentPay</h2>
-    <p>El agente <b>{agent_id}</b> ha sido bloqueado tras intentar una compra sospechosa.</p>
+    <h2>Solicitud de Aprobación (Grey Area)</h2>
+    <p>El agente <b>{agent_id}</b> quiere realizar un pago inusual.</p>
     <ul>
         <li><b>Comercio:</b> {vendor}</li>
         <li><b>Monto:</b> ${amount}</li>
     </ul>
-    <p>El estado en el sistema ha cambiado a: <b>BANNED</b></p>
+    <p>Si apruebas, este comercio se añadirá a la lista de confianza (Auto-Learn).</p>
+    <br>
+    <a href="{link}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+        ✅ APROBAR Y CONFIAR
+    </a>
+    <p style="font-size: 12px; color: grey; margin-top: 20px;">Si no reconoces esta operación, no hagas nada. Quedará en pendiente.</p>
     """
     msg.attach(MIMEText(body, 'html'))
 

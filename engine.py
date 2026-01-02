@@ -671,16 +671,30 @@ class UniversalEngine:
         vendor = tx_data.get('vendor')
         amount = tx_data.get('amount')
         
-        # Simular recuperación de contexto (rol, historial)
+        # 0. AUTO-LEARN CHECK (Lista Blanca)
         try:
-             w_res = self.db.table("wallets").select("agent_role").eq("agent_id", agent_id).execute()
-             agent_role = w_res.data[0]['agent_role'] if w_res.data else "Unknown"
+             w_res = self.db.table("wallets").select("agent_role, services_catalog, owner_email").eq("agent_id", agent_id).single().execute()
+             wallet_data = w_res.data or {}
+             agent_role = wallet_data.get('agent_role', 'Unknown')
+             trusted_vendors = wallet_data.get('services_catalog', {})
+             owner_email = wallet_data.get('owner_email')
              
+             if vendor in trusted_vendors:
+                 print(f"✅ [AUTO-LEARN] '{vendor}' ya es de confianza. Aprobando automáticamente.")
+                 # Actualizar log a APPROVED (si estaba en PENDING o algo similar, aunque aquí ya está pagado)
+                 # En background audit, el pago ya se hizo. Solo registramos que la AI lo valida.
+                 self.db.table("transaction_logs").update({
+                     "status": "APPROVED",
+                     "reason": f"Trusted Vendor (Auto-Learn): {vendor}"
+                 }).eq("id", tx_data.get('id')).execute()
+                 return
+                 
              h_resp = self.db.table("transaction_logs").select("created_at, amount, vendor, reason").eq("agent_id", agent_id).order("created_at", desc=True).limit(5).execute()
              history = h_resp.data if h_resp.data else []
         except: 
              agent_role = "Unknown"
              history = []
+             trusted_vendors = {}
 
         # Llamamos a tu AI Guard COMPLETO
         risk_assessment = await audit_transaction(
@@ -758,7 +772,36 @@ class UniversalEngine:
                     print(f"⚠️ Fallo al enviar alerta por email al cliente: {e}")
             
             print(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
+
+        # --- ZONA GRIS / APRENDIZAJE ---
+        elif amount > 1000 and "LOW RISK" not in verdict:
+            print(f"🤔 [GREY AREA] Transacción alta (${amount}) requiere aprobación humana.")
+            
+            # Recuperar email si no estaba en rejected block
+            try:
+                wr = self.db.table("wallets").select("owner_email").eq("agent_id", agent_id).single().execute()
+                owner_email = wr.data.get('owner_email')
+            except: owner_email = None
+            
+            self.db.table("transaction_logs").update({
+                "status": "PENDING_APPROVAL",
+                "reason": f"Grey Area Risk: {verdict}"
+            }).eq("id", tx_data.get('id')).execute()
+            
+            if owner_email:
+                from notifications import send_approval_email
+                # Link apunta a nuestro nuevo endpoint con learn=true
+                base_url = "https://agentpay-core.onrender.com"
+                approval_link = f"{base_url}/v1/approve?tx={tx_data.get('id')}&learn=true"
+                
+                try:
+                    send_approval_email(owner_email, agent_id, vendor, amount, approval_link)
+                    print(f"📧 Solicitud de Aprobación+Aprendizaje enviada a {owner_email}")
+                except Exception as e:
+                    print(f"⚠️ Error enviando email approval: {e}")
+
         else:
+            print(f"✅ [AUDIT] Transacción validada y segura ({verdict}).")
             print(f"✅ [AUDIT] Transacción validada y segura ({verdict}).")
 
     async def process_instant_payment(self, request: TransactionRequest):

@@ -233,9 +233,55 @@ async def brevo_inbound_webhook(request: Request):
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/v1/approve")
+async def approve_and_learn(tx: str, learn: bool = False):
+    """
+    Aprueba una transacción pendiente y opcionalmente aprende del vendor.
+    """
+    try:
+        # 1. Recuperar la transacción
+        tx_record = engine.db.table("transaction_logs").select("*").eq("id", tx).single().execute()
+        if not tx_record.data:
+            return {"error": "Transacción no encontrada"}
+            
+        current_status = tx_record.data.get('status')
+        if current_status == 'APPROVED':
+            return {"message": "Ya estaba aprobada."}
+            
+        # 2. Aprobar (actualizar estado)
+        engine.db.table("transaction_logs").update({
+            "status": "APPROVED",
+            "reason": "Aprobación Humana Manual (Auto-Learn)"
+        }).eq("id", tx).execute()
+        
+        # 3. Learning Logic (si learn=True)
+        message = "Transacción aprobada."
+        if learn:
+            agent_id = tx_record.data['agent_id']
+            vendor = tx_record.data['vendor']
+            
+            # Obtener catálogo actual
+            res = engine.db.table("wallets").select("services_catalog").eq("agent_id", agent_id).single().execute()
+            current_catalog = res.data.get('services_catalog') or {}
+            
+            # Actualizar catálogo
+            current_catalog[vendor] = {
+                "status": "trusted",
+                "added_at": "now", # timestamp real sería mejor pero esto sirve
+                "reason": "Human Approval"
+            }
+            
+            engine.db.table("wallets").update({"services_catalog": current_catalog}).eq("agent_id", agent_id).execute()
+            message += f" Y '{vendor}' añadido a la lista de confianza."
+            
+        return {"status": "SUCCESS", "message": message}
+            
+    except Exception as e:
+        return {"status": "ERROR", "message": str(e)}
+
 @app.get("/admin/approve", response_class=HTMLResponse)
 async def approve_endpoint(token: str):
-    """El Magic Link que pulsa el humano para aprobar"""
+    """(Legacy) El Magic Link que pulsa el humano para aprobar"""
     result = engine.process_approval(token)
     
     color = "green" if result.get("status") == "APPROVED" else "red"
