@@ -39,10 +39,18 @@ def send_approval_email(to_email, agent_id, vendor, amount, link):
 
     try:
         print(f"🔌 [SMTP] Conectando a {smtp_host}:{smtp_port} para enviar a {to_email}...")
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+        
+        # Puerto 465 usa SSL directo, 587 usa STARTTLS
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
             server.starttls()
+        
+        with server:
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
+        
         print(f"✅ [EMAIL SENT] Alerta enviada con éxito a {to_email}")
         return True
     except Exception as e:
@@ -94,11 +102,19 @@ def send_security_ban_alert(agent_id, reason, amount=0):
     msg.attach(MIMEText(body, 'html'))
     
     try:
-        server = smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", 587)), timeout=10)
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(smtp_user, alert_email, msg.as_string())
-        server.quit()
+        smtp_port = int(os.environ.get("SMTP_PORT", 587))
+        print(f"🔌 [SMTP] Conectando a {smtp_host}:{smtp_port}...")
+        
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
+            server.starttls()
+        
+        with server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        
         print(f"🚨 [SECURITY ALERT SENT] Ban alert for {agent_id} -> {alert_email}")
         return True
     except Exception as e:
@@ -164,13 +180,22 @@ def send_ban_alert_to_owner(to_email, agent_id, vendor, amount, reason):
     msg.attach(MIMEText(body, 'html'))
     
     try:
-        server = smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", 587)), timeout=10)
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(smtp_user, to_email, msg.as_string())
-        server.quit()
+        smtp_port = int(os.environ.get("SMTP_PORT", 587))
+        print(f"🔌 [SMTP] Conectando a {smtp_host}:{smtp_port} para enviar a {to_email}...")
+        
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
+            server.starttls()
+        
+        with server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        
         print(f"📧 [BAN ALERT SENT] Alerta crítica enviada a {to_email}")
         return True
     except Exception as e:
         print(f"❌ [BAN EMAIL ERROR] {e}")
         return False  # No raise - el baneo ya está hecho
+
