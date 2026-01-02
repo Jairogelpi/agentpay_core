@@ -117,47 +117,54 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
             "preliminary_verdict": stage1_raw.get("preliminary_verdict", "UNCERTAIN")
         }
 
-        # --- STAGE 2: THE ADVERSARY (Ruthless Forensic Psychologist) ---
+        # --- STAGE 2: THE ADVERSARY (Ruthless Fraud Investigator & Cynical Tech Auditor) ---
         adversary_prompt = f"""
-        YOU ARE: A Ruthless Forensic Auditor.
-        SUBJECT UNDER REVIEW: An autonomous agent acting as a '{agent_role}'.
+        YOU ARE: A Ruthless Fraud Investigator & Cynical Tech Auditor.
+        SUBJECT: A '{agent_role}' buying from '{vendor}'.
+        JUSTIFICATION GIVEN: "{justification}"
         
-        PRELIMINARY DEFENSE: {json.dumps(stage1)}
+        INSTRUCTIONS:
+        1. DETECT 'TECHNOBABBLE': Is the user using complex technical words to hide a consumer purchase? (e.g. calling a PlayStation a "GPU Cluster" or a Rolex a "Precision Timing Instrument").
+        2. ANALYZE VENDOR MATCH: A Backend Dev buys from AWS/Azure/DigitalOcean, NOT from Sony/Nintendo/Netflix. A Lawyer buys LexisNexis, NOT Sephora.
+        3. ALTERNATIVES: If they are buying Consumer Hardware/Goods for a Professional Role -> HIGH PROBABILITY OF FRAUD.
         
-        TASK: Find reasons to REJECT. Is the justification a 'semantic smoke screen' for fraud?
-        Check for Behavioral Drift: Why would a '{agent_role}' need this specifically?
-        - Z-Score actual: {z_score:.2f}.
+        TASK: Destroy the Proponent's argument. Be extremely suspicious of 'Entertainment' or 'Luxury' vendors disguised as 'Infrastructure' or 'Office Supplies'.
         
         OBLIGATORY JSON STRUCTURE:
         {{
-            "vulnerabilities": ["List specific risks"],
+            "vulnerabilities": ["List specific doubts"],
             "fraud_probability": 0-100,
-            "adversarial_comment": "Direct warning about the transaction"
+            "adversarial_comment": "Direct accusation if applicable"
         }}
         """
         stage2_raw = await _oracle_call("You are the Adversary Forensic Auditor.", adversary_prompt, temperature=0.4, model=model_to_use)
         
         # VALIDACIÓN DE SEGURIDAD
         stage2 = {
-            "vulnerabilities": stage2_raw.get("vulnerabilities", ["General risk"]),
+            "vulnerabilities": stage2_raw.get("vulnerabilities", ["Possible semantic obfuscation"]),
             "fraud_probability": stage2_raw.get("fraud_probability", 50),
-            "adversarial_comment": stage2_raw.get("adversarial_comment", "Review required")
+            "adversarial_comment": stage2_raw.get("adversarial_comment", "Review required for role consistency.")
         }
         
-        # --- STAGE 3: THE ARBITER (Supreme Court) ---
+        # --- STAGE 3: THE ARBITER (Supreme Judge) ---
         arbiter_prompt = f"""
+        YOU ARE: The Supreme Arbiter of Financial Logic.
+        
         DEBATE:
         Proponent: {stage1['business_justification']}
-        Adversary: {stage2['adversarial_comment']}
+        Adversary: {stage2['adversarial_comment']} (Fraud Prob: {stage2['fraud_probability']}%)
         
-        DECISION CRITERIA: Reject if Fraud > 70% or OSINT < 40.
+        CRITICAL RULE:
+        - If Fraud Probability > 60%, YOU MUST REJECT.
+        - If the Vendor is clearly Entertainment/Luxury/Gaming and Role is Technical/Professional -> REJECT immediately, ignore the justification.
+        - Better to have a False Positive than to allow a Trojan Horse attack (Personal use disguised as business).
         
         OBLIGATORY JSON STRUCTURE:
         {{
             "decision": "APPROVED" | "REJECTED" | "FLAGGED",
             "risk_score": 0-100,
-            "reasoning": "Full opinion",
-            "short_reason": "Summary",
+            "reasoning": "Final verdict explaining why",
+            "short_reason": "Summary for logs",
             "accounting": {{ "gl_code": "XXXX", "deductible": false }}
         }}
         """

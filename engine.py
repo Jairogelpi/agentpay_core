@@ -1018,11 +1018,82 @@ class UniversalEngine:
                 "reason": "Auto-Validated (Low Risk) - Added to Trusted Services"
             }).eq("id", tx_data.get('id')).execute()
 
+    def _check_role_vendor_mismatch(self, agent_role, vendor):
+        """
+        HEURÍSTICA UNIVERSAL DE "CABALLO DE TROYANO":
+        Detecta si un Agente Profesional está intentando comprar bienes de CONSUMO PERSONAL
+        disfrazados de gastos corporativos.
+        """
+        r = agent_role.lower()
+        v = vendor.lower()
+        
+        # 1. Categorías de Riesgo Universal (Consumo Personal)
+        # Si un agente B2B compra aquí, SIEMPRE es sospechoso (salvo que sea whitelist).
+        personal_consumption_triggers = [
+            # Gaming & Entertainment
+            'game', 'steam', 'playstation', 'xbox', 'nintendo', 'sony', 'twitch', 'discord', 'netflix', 'spotify', 'hbo', 'disney',
+            # Luxury & Fashion
+            'gucci', 'rolex', 'lv', 'prada', 'balenciaga', 'nike', 'adidas', 'zara', 'fashion', 'luxury', 'jewel',
+            # Vice & Dating
+            'casino', 'bet', 'poker', 'dating', 'tinder', 'bumble', 'onlyfans', 'porn', 'adult',
+            # Travel & Leisure (Susceptible de fraude personal)
+            'airbnb', 'booking', 'expedia', 'resort', 'cruise', 'holiday'
+        ]
+        
+        # 2. Excepciones Lógicas (Roles que SÍ pueden gastar en esto)
+        # Ejemplo: Un "Travel Agent" puede usar Airbnb. Un "Game Tester" puede usar Steam.
+        # Pero por defecto, asumimos que NO.
+        
+        is_personal_risk = any(trigger in v for trigger in personal_consumption_triggers)
+        
+        if is_personal_risk:
+            # Check de Coherencia: ¿El rol justifica el riesgo?
+            # Si es 'Game Developer' y compra en 'Steam', puede ser válido -> Auditoría Síncrona requerida de todos modos por seguridad.
+            # La heurística aquí es: "Ante la duda, FRENA".
+            return True
+            
+        return False
+
     async def process_instant_payment(self, request: TransactionRequest):
-        """
-        Fase 1: Aprobación Rápida (Solo Saldo y Reglas Básicas).
-        Retorna en milisegundos.
-        """
+        # ... (Validaciones iniciales de monto y sanity check existentes) ...
+
+        # --- 0. RECUPERAR DATOS DEL AGENTE ---
+        resp = self.db.table("wallets").select("agent_role, kyc_status").eq("agent_id", request.agent_id).single().execute()
+        wallet_data = resp.data or {}
+        agent_role = wallet_data.get('agent_role', 'Unknown')
+        kyc_level = wallet_data.get('kyc_status', 'UNVERIFIED') # Se usará después
+
+        # --- [NUEVO] FRENO DE MANO UNIVERSAL (Trojan Defense) ---
+        if self._check_role_vendor_mismatch(agent_role, request.vendor):
+            print(f"⚠️ [GUARD] ALERTA DE TROYANO: '{agent_role}' comprando en sitio de alto riesgo '{request.vendor}'. Forzando auditoría...")
+            
+            # Llamamos a la REALIDAD (Auditoría Síncrona Bloqueante)
+            # No importa el monto. No importa el historial.
+            audit_result = await audit_transaction(
+                vendor=request.vendor,
+                amount=request.amount,
+                description=request.description,
+                agent_id=request.agent_id,
+                agent_role=agent_role,
+                justification=request.justification,
+                history=[], # No necesitamos historia para ver la contradicción semántica
+                sensitivity="CRITICAL" # Máxima paranoia
+            )
+            
+            # Si la IA dice NO (o duda), bloqueamos.
+            if audit_result['decision'] in ['REJECTED', 'FLAGGED']:
+                import uuid
+                self.db.table("transaction_logs").insert({
+                    "id": str(uuid.uuid4()),
+                    "agent_id": request.agent_id,
+                    "vendor": request.vendor,
+                    "amount": request.amount,
+                    "status": "REJECTED",
+                    "reason": f"Defensa Troyana: {audit_result.get('reasoning')}"
+                }).execute()
+                
+                return {"status": "REJECTED", "reason": audit_result.get('reasoning')}
+        
         # 1. Validaciones básicas / Sanity
         if request.amount <= 0.50:
              return {"status": "REJECTED", "reason": "Monto inválido (<$0.50)"}
