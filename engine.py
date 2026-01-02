@@ -1,4 +1,5 @@
 import os
+import math
 import stripe
 import base64
 import uuid
@@ -59,13 +60,17 @@ class UniversalEngine:
              self.transaction_velocity = {} 
 
     async def _perform_osint_scan(self, vendor_url: str):
-        """Investigación en tiempo real del comercio antes del pago (Mente Colmena)."""
-        if not vendor_url: return {"score": 50, "risk_factors": ["No URL provided"]}
+        """
+        ANALISIS DE ADN DE DOMINIO: OSINT en tiempo real.
+        Investiga si el dominio es falso, nuevo o peligroso.
+        """
+        if not vendor_url: return {"score": 100, "risk_factors": []}
         
-        # 0. Limpieza
-        if not vendor_url.startswith("http"): vendor_url = f"https://{vendor_url}"
-        domain = urlparse(vendor_url).netloc or vendor_url
-        print(f"🔍 [OSINT] Investigando: {domain}")
+        domain = self._normalize_domain(vendor_url)
+        
+        # 0. ANALISIS DE ENTROPIA (DGA Detection)
+        entropy = self.calculate_domain_entropy(domain)
+        print(f"🔍 [OSINT] DNA Analysis for {domain} (Entropy: {entropy:.2f})")
 
         # 1. CONSULTAR CACHÉ (Mente Colmena)
         try:
@@ -74,14 +79,19 @@ class UniversalEngine:
                 # Comprobar si el scan es reciente (< 7 días)
                 last_scan = datetime.fromisoformat(cached.data['last_scan'].replace('Z', '+00:00'))
                 if (datetime.now(last_scan.tzinfo) - last_scan).days < 7:
-                    print(f"🧠 [HIVE MIND] Usando reputación conocida para {domain}")
                     return {
                         "score": cached.data['score'],
-                        "risk_factors": cached.data['risk_factors']
+                        "risk_factors": cached.data['risk_factors'],
+                        "entropy": entropy
                     }
         except: pass
 
-        results = {"score": 100, "risk_factors": []}
+        results = {"score": 100, "risk_factors": [], "entropy": entropy}
+        
+        # SANCION POR ENTROPIA ALTA (Nombres aleatorios sospechosos)
+        if entropy > 3.8:
+            results["score"] -= 40
+            results["risk_factors"].append(f"ALTA ENTROPIA ({entropy:.2f}): Dominio sospechosamente aleatorio (Posible DGA)")
         
         try:
             # 1. Antigüedad del dominio (WHOIS)
@@ -92,7 +102,10 @@ class UniversalEngine:
                 
                 if creation_date:
                     days_old = (datetime.now() - creation_date).days
-                    if days_old < 30:
+                    if days_old < 15:
+                        results["score"] -= 80
+                        results["risk_factors"].append("DOMINIO RECIEN CREADO (< 15 DIAS) - RIESGO EXTREMO")
+                    elif days_old < 30:
                         results["score"] -= 60
                         results["risk_factors"].append("DOMINIO EXTREMADAMENTE NUEVO (ALTO RIESGO)")
                     elif days_old < 180:
@@ -121,12 +134,17 @@ class UniversalEngine:
                 pass # Fallo silencioso si ya detectamos no-https
 
             # 4. GUARDAR EN MENTE COLMENA (Global Cache)
-            self.db.table("global_reputation_cache").upsert({
-                "domain": domain,
-                "score": results["score"],
                 "risk_factors": results["risk_factors"],
-                "last_scan": datetime.now().isoformat()
+                "last_scan": datetime.now().isoformat(),
+                "tld": domain.split('.')[-1]
             }).execute()
+
+            # 4. PATRONES POR TLD (Ataque de Mente Colmena)
+            # Si un TLD tiene muchos reportes, bajamos el score base preventivamente.
+            suspicious_tlds = [".top", ".xyz", ".bid", ".club", ".online", ".store"]
+            if any(domain.endswith(tld) for tld in suspicious_tlds):
+                results["score"] -= 15
+                results["risk_factors"].append(f"TLD Sospechoso ({domain.split('.')[-1]}): Elevando sensibilidad de IA.")
             
         except Exception as e:
             print(f"⚠️ OSINT Scan error: {e}")
@@ -591,6 +609,15 @@ class UniversalEngine:
             print(f"❌ [ISSUING PLATFORM ERROR] {e}")
             return None
 
+    def calculate_domain_entropy(self, domain):
+        """
+        Shannon Entropy para detectar algoritmos de generación de dominios (DGA).
+        """
+        if not domain: return 0
+        prob = [float(domain.count(c)) / len(domain) for c in dict.fromkeys(list(domain))]
+        entropy = - sum([p * math.log(p) / math.log(2.0) for p in prob])
+        return entropy
+
     def _normalize_domain(self, vendor_str: str) -> str:
         vendor_str = vendor_str.lower().strip()
         if not vendor_str.startswith(('http://', 'https://')):
@@ -602,21 +629,29 @@ class UniversalEngine:
 
     def report_fraud(self, agent_id, vendor, reason):
         """
-        Mente Colmena: Registra un fraude y evita duplicados.
+        MENTE COLMENA: Registra un fraude y sincroniza la reputación global al instante.
         """
         clean_vendor = self._normalize_domain(vendor)
         try:
-            # Verificar duplicado
-            existing = self.db.table("global_blacklist").select("*").eq("vendor", clean_vendor).execute()
-            if existing.data:
-                return {"success": False, "message": f"El dominio {clean_vendor} ya está en la Lista Negra Global."}
-            
-            self.db.table("global_blacklist").insert({
+            # 1. Lista Negra Global (Persistencia)
+            self.db.table("global_blacklist").upsert({
                 "vendor": clean_vendor,
-                "reason": f"Reportado por {agent_id}: {reason}"
+                "reason": f"Fraud reported by {agent_id}: {reason}"
             }).execute()
-            return {"success": True, "message": f"Proveedor {clean_vendor} reportado con éxito."}
+            
+            # 2. Hive Mind: Sincronización inmediata de reputación
+            # Bajamos el score a 0 para que todos los agentes lo bloqueen al instante.
+            self.db.table("global_reputation_cache").upsert({
+                "domain": clean_vendor,
+                "score": 0,
+                "risk_factors": [f"FRAUD REPORTED (Hive Mind): {reason}"],
+                "last_scan": datetime.now().isoformat()
+            }).execute()
+
+            print(f"🚨 [HIVE MIND] Global Reputation Poisoned for {clean_vendor}. All agents protected.")
+            return {"success": True, "message": f"Proveedor {clean_vendor} bloqueado globalmente."}
         except Exception as e:
+            print(f"⚠️ Error en Hive Mind Update: {e}")
             return {"success": False, "message": str(e)}
 
     def process_procurement(self, agent_id, vendor, amount, items, description="B2B Order"):
@@ -661,16 +696,7 @@ class UniversalEngine:
             approval_link=magic_link
         )
 
-    def report_fraud(self, agent_id, vendor, reason):
-        clean_vendor = self._normalize_domain(vendor)
-        try:
-            self.db.table("global_blacklist").insert({
-                "vendor": clean_vendor,
-                "reason": f"Reportado por agente: {reason}"
-            }).execute()
-            return {"success": True, "message": "Proveedor añadido a la lista negra global."}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
+    # Eliminado el duplicado de report_fraud para mantener consistencia
 
     def process_approval(self, token):
         try:
