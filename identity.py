@@ -159,10 +159,43 @@ class IdentityManager:
             print(f"❌ Error Checking SMS: {e}")
             return f"ERROR: {str(e)}"
 
-    # --- RESTO DE FUNCIONES (Proxy, Captcha, Session) ---
-    def get_residential_proxy(self, region="US"):
-        return {"status": "MOCK_PROXY", "ip": "1.2.3.4", "region": region}
+    # --- INFRAESTRUCTURA DE RED INDUSTRIAL (Pillar 1) ---
+    def get_residential_proxy(self, country="US"):
+        """
+        Configuración para proveedores industriales como Bright Data u Oxylabs.
+        Permite que el tráfico del agente salga desde una IP doméstica real.
+        """
+        proxy_user = os.getenv("PROXY_USER")
+        proxy_pass = os.getenv("PROXY_PASS")
+        # Default a endpoint común de Bright Data/Oxylabs si no hay ENV
+        proxy_host = os.getenv("PROXY_HOST", "zproxy.lum-superproxy.io:22225")
+        
+        # Formato industrial estándar
+        proxy_url = f"http://{proxy_user}-country-{country}:{proxy_pass}@{proxy_host}"
+        
+        return {
+            "http": proxy_url, 
+            "https": proxy_url
+        }
 
+    def generate_browser_fingerprint(self):
+        """
+        Genera metadatos de navegación realistas para evitar detección de bots.
+        """
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
+        ]
+        return {
+            "user_agent": random.choice(user_agents),
+            "viewport": {"width": 1920, "height": 1080},
+            "device_memory": 8,
+            "hardware_concurrency": 4,
+            "webgl_vendor": "Google Inc. (NVIDIA)",
+            "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3090 Direct3D11 vs_5_0 ps_5_0, D3D11)"
+        }
+
+    # --- MEMORIA Y SESIONES ---
     def solve_captcha(self, image_url):
         return {"status": "SOLVED", "solution": "MOCK_SOLUTION_123"}
         

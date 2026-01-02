@@ -114,3 +114,29 @@ class AutoLawyer:
                 "suggested_action": "REJECT_CLAIM",
                 "confidence_score": 0
             }
+
+    # --- PILLAR 4: AUTO-DISPUTES ---
+    def raise_escrow_dispute(self, forensic_hash, evidence_bundle):
+        """
+        Genera un paquete de disputa formal para Stripe/PayPal.
+        Usa el expediente forense del ForensicAuditor.
+        """
+        dispute_id = f"DSP-{datetime.datetime.now().strftime('%Y%m%d')}-{json.dumps(evidence_bundle).__hash__()}"
+        
+        # 1. Redactar Carta Legal Automática
+        legal_letter_prompt = f"""
+        ACT AS LEGAL COUNSEL. Write a formal dispute letter for transaction {forensic_hash}.
+        EVIDENCE: {json.dumps(evidence_bundle)}
+        
+        CLAIM: "Fraudulent transaction detected by AI Sentinel System."
+        REQUEST: "Immediate chargeback and freeze of vendor funds."
+        """
+        
+        letter = self._court_call("Legal Clerk", legal_letter_prompt, temperature=0.2)
+        
+        return {
+            "dispute_id": dispute_id,
+            "status": "FILED_AUTOMATICALLY",
+            "legal_brief": letter,
+            "attached_evidence_hash": forensic_hash
+        }

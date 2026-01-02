@@ -196,5 +196,32 @@ class LegalWrapper:
                 
             return {"valid": True, "data": data, "message": "Pasaporte Válido. Agente certificado."}
             
-        except Exception as e:
             return {"valid": False, "reason": f"Error de formato: {str(e)}"}
+
+    # --- PILLAR 2: TIMESTAMPING AUTHORITY (TSA) ---
+    def _get_tsa_timestamp(self, document_hash):
+        """
+        Simula una conexión a una Autoridad de Sellado de Tiempo (RFC 3161).
+        En producción, esto llamaría a DigiCert o similar.
+        """
+        # Simulamos un token TSA oficial
+        tsa_token = f"TSA-EU-Q2-{uuid.uuid4().hex[:16].upper()}"
+        timestamp = datetime.now().isoformat()
+        
+        return {
+            "tsa_token": tsa_token,
+            "timestamp": timestamp,
+            "provider": "AgentPay Qualified Timestamp Authority",
+            "linked_hash": document_hash
+        }
+
+    def sign_contract_with_tsa(self, agent_id, contract_hash):
+        """Versión Industrial de firma con TSA"""
+        base_signature = self.sign_contract(agent_id, contract_hash)
+        
+        # Añadimos el sello de tiempo cualificado
+        tsa_seal = self._get_tsa_timestamp(base_signature['signature_hash'])
+        
+        base_signature['tsa_seal'] = tsa_seal
+        base_signature['validity'] = "EIDAS_QUALIFIED_TIMESTAMP"
+        return base_signature

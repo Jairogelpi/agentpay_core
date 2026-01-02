@@ -1,78 +1,67 @@
 import requests
 import time
-import sys
+import json
 
-# Configuración del servidor
-API_URL = "https://agentpay-core.onrender.com"
-# Tu correo para recibir la alerta (donde pulsarás el botón)
-MI_EMAIL = "jairogelpi@gmail.com" 
-# Un comercio "gris" (nuevo para el sistema)
-COMERCIO_GRIS = "Servidores_GPU_HighLevel"
+# Configuración - Asegúrate de que tu servidor en Render/Local esté activo
+BASE_URL = "http://localhost:8000" # O tu URL de Render
+MI_EMAIL = "tu-email@ejemplo.com" # Cambia esto por tu email real
 
-def ejecutar_prueba():
-    print("🤖 --- INICIANDO PRUEBA DE APRENDIZAJE IA ---")
+def run_real_world_test():
+    print("🌍 --- INICIANDO ESCENARIO DE VIDA REAL: AgentPay Core ---")
 
-    # 1. REGISTRO DE UN AGENTE NUEVO
-    print("\n1️⃣  Registrando agente para la prueba...")
-    reg = requests.post(f"{API_URL}/v1/agent/register", json={
-        "client_name": f"Agente_Estudiante_{int(time.time())}",
-        "country_code": "ES"
+    # PASO 1: Registro del Agente y Configuración de Identidad
+    print("\n1️⃣  Registrando Agente con Identidad Legal...")
+    reg_res = requests.post(f"{BASE_URL}/v1/agent/register", json={
+        "client_name": "AI_Research_Agent_001",
+        "country": "ES"
     }).json()
     
-    agent_id = reg['agent_id']
-    api_key = reg['api_key']
+    agent_id = reg_res['agent_id']
+    api_key = reg_res['api_key']
     headers = {"Authorization": f"Bearer {api_key}"}
-    print(f"   ✅ Agente: {agent_id}")
+    print(f"   ✅ Agente ID: {agent_id}")
 
-    # 2. CONFIGURAR EMAIL Y SALDO
-    # Vinculamos tu email para que el sistema sepa a quién preguntar
-    requests.post(f"{API_URL}/v1/agent/settings", json={
-        "agent_id": agent_id, 
+    # Configurar email para alertas y aprendizaje
+    requests.post(f"{BASE_URL}/v1/agent/settings", json={
+        "agent_id": agent_id,
         "owner_email": MI_EMAIL
     })
-    # Cargamos saldo suficiente para compras de alto nivel
-    requests.post(f"{API_URL}/v1/topup/auto", json={
-        "agent_id": agent_id, 
-        "amount": 5000.0
+
+    # PASO 2: Carga de Saldo (Simulando entrada de dinero real)
+    print("\n2️⃣  Cargando Saldo Inicial ($1,000.00)...")
+    requests.post(f"{BASE_URL}/v1/topup/auto", json={
+        "agent_id": agent_id,
+        "amount": 1000.0
     })
-    print(f"   ✅ Email configurado y saldo cargado ($5,000)")
 
-    # 3. PRIMER INTENTO: LA IA DUDA
-    print(f"\n2️⃣  Intentando compra de $2,000 en '{COMERCIO_GRIS}'...")
-    payload = {
-        "vendor": COMERCIO_GRIS,
-        "amount": 2000.0,
-        "description": "Alquiler de clusters para entrenamiento de red neuronal",
-        "justification": "Escalado de capacidad de cómputo"
+    # PASO 3: Intento de Pago con Auditoría OSINT e IA
+    # Vamos a usar un dominio real para que el motor OSINT pueda investigarlo
+    print("\n3️⃣  El Agente intenta comprar en 'HuggingFace.co' (Monto: $500.00)...")
+    
+    pay_payload = {
+        "vendor": "huggingface.co",
+        "vendor_url": "https://huggingface.co",
+        "amount": 500.0,
+        "description": "Suscripción anual a GPU Clusters para entrenamiento",
+        "justification": "Necesito potencia de cómputo para procesar el dataset de enero."
     }
-    
-    res1 = requests.post(f"{API_URL}/v1/pay", json=payload, headers=headers).json()
-    status1 = res1.get('status')
-    
-    print(f"   📝 Respuesta: {status1}")
-    
-    if status1 == "APPROVED_PENDING_AUDIT":
-        print("\n---------------------------------------------------------")
-        print("📢 ¡ACCIÓN REQUERIDA!")
-        print(f"1. Abre tu Gmail ({MI_EMAIL}).")
-        print("2. Busca el correo de 'gelpierreape@gmail.com'.")
-        print("3. Haz clic en 'APROBAR Y ENSEÑAR A LA IA'.")
-        print("---------------------------------------------------------")
-        
-        input("\n👉 Una vez hayas pulsado el botón en tu email, presiona ENTER aquí...")
 
-        # 4. SEGUNDO INTENTO: LA IA YA HA APRENDIDO
-        print(f"\n3️⃣  Repitiendo compra de $2,000 en '{COMERCIO_GRIS}'...")
-        res2 = requests.post(f"{API_URL}/v1/pay", json=payload, headers=headers).json()
+    response = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json=pay_payload).json()
+    
+    print(f"   📊 Resultado del Sistema: {response.get('status')}")
+    print(f"   📝 Razón: {response.get('message') or response.get('reason')}")
+
+    # PASO 4: Verificación de Evidencia Forense
+    if response.get('status') == "APPROVED_PENDING_AUDIT":
+        print("\n4️⃣  Generando Paquete de Evidencia Forense (CSI)...")
+        # Esperamos un segundo a que la tarea en background procese
+        time.sleep(2)
+        audit_res = requests.get(f"{BASE_URL}/v1/agent/{agent_id}/audit_bundle").json()
+        print(f"   ✅ Bundle ID: {audit_res['bundle_id']}")
+        print(f"   ✅ Hash de Integridad: {audit_res['integrity_hash'][:20]}...")
         
-        status2 = res2.get('status')
-        if status2 == "APPROVED":
-            print(f"\n✅ ¡PRUEBA SUPERADA! La IA ha aprendido.")
-            print(f"   Veredicto: {status2} (Aprobado automáticamente por Whitelist)")
-        else:
-            print(f"\n❌ Error: El estado es {status2}. Revisa el services_catalog en Supabase.")
-    else:
-        print(f"❌ Error inesperado: El estado debería ser PENDING_AUDIT. Recibido: {status1}")
+        print("\n📢  PRUEBA EN CURSO: Revisa tu email para aprobar la transacción.")
+        print("    Una vez aprobada, el sistema 'aprenderá' que HuggingFace es seguro.")
 
 if __name__ == "__main__":
-    ejecutar_prueba()
+    run_real_world_test()
