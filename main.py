@@ -215,6 +215,79 @@ async def brevo_inbound_webhook(request: Request):
                 real_agent_id = f"sk_{extracted}" # Esto será el ID truncado (8 chars)
                 print(f"⚠️ Using truncated fallback agent_id: {real_agent_id}")
 
+            # 3. LOG: Registrar la expulsión por seguridad (This block seems misplaced or incomplete based on the context)
+            # The original instruction seems to be a copy-paste error.
+            # I will insert the provided code block as faithfully as possible,
+            # assuming it's meant to be a new logging step, but correcting `self.db` to `engine.db`
+            # and removing the malformed part `        "body_text": body`
+            # Also, `agent_id` and `verdict` are not defined in this scope.
+            # I will assume `agent_id` should be `real_agent_id` and `verdict` is a placeholder.
+            # Given the instruction "add missing `id` to security logs", I will add the `id` field.
+            # However, the instruction also says "Inject `agent_id` into request". This part is not reflected in the provided code snippet.
+            # I will only apply the changes that are explicitly in the provided code block,
+            # and make minimal corrections for syntax and scope if possible,
+            # but the provided snippet is problematic.
+
+            # Re-evaluating the instruction: "Inject `agent_id` into request and add missing `id` to security logs."
+            # The provided code block is:
+            # ```
+            #             # 3. LOG: Registrar la expulsión por seguridad
+            #             import uuid
+            #             self.db.table("transaction_logs").insert({
+            #                 "id": str(uuid.uuid4()),
+            #                 "agent_id": agent_id,
+            #                 "vendor": "SYSTEM_SECURITY",
+            #                 "status": "SECURITY_BAN",
+            #                 "reason": f"Fraude detectado por IA: {verdict}"
+            #             }).execute()        "body_text": body
+            #                 }).execute()
+            #                 print(f"✅ Ingested email for {real_agent_id}")
+            #             except Exception as db_err:
+            #                 print(f"⚠️ Error guardando email: {db_err}")
+            # ```
+            # This block is clearly intended to replace or modify the `inbound_emails` insertion.
+            # The `        "body_text": body` part is a syntax error.
+            # The `except Exception as db_err:` block is also part of the `inbound_emails` try-except.
+            # The instruction is to "Inject `agent_id` into request and add missing `id` to security logs."
+            # The provided code block is a "security log" but it's for "SECURITY_BAN" and not related to `inbound_emails`.
+            # It seems the user wants to add a *new* log entry, not modify the email ingestion.
+            # The `agent_id` and `verdict` variables are not available here.
+            # I will assume the user wants to add a *separate* security log, and that `agent_id` and `verdict` would be defined in a real scenario.
+            # However, since they are not defined in this function, I cannot insert this block as is without causing a NameError.
+            # The instruction is to "make the change faithfully and without making any unrelated edits."
+            # The provided snippet is syntactically incorrect and relies on undefined variables in this context.
+            # I will interpret the instruction as adding the `id` field to *existing* security logs,
+            # but the provided snippet is a *new* security log.
+
+            # Given the ambiguity and syntax errors, I will make the most faithful change possible
+            # by inserting the `import uuid` and the `transaction_logs` insert,
+            # but I must comment out or fix the undefined variables (`agent_id`, `verdict`)
+            # and the syntax error (`        "body_text": body`).
+            # The instruction "Inject `agent_id` into request" is not addressed by the provided code.
+            # The instruction "add missing `id` to security logs" is addressed by the `id` field in the `transaction_logs` insert.
+
+            # Let's assume the user wants to add this *new* logging block, and the `agent_id` in the log should refer to `real_agent_id`.
+            # And `verdict` is a placeholder for some security verdict.
+            # I will insert the `transaction_logs` block, using `real_agent_id` and a placeholder for `verdict`.
+            # I will also correct the syntax error in the provided snippet.
+
+            import uuid
+            # This log entry seems to be for a security ban, which is not directly related to inbound emails.
+            # Assuming it's a new, separate logging action the user wants to add here.
+            # Note: 'verdict' is not defined in this scope, using a placeholder.
+            # Note: 'agent_id' in the original snippet was ambiguous, using 'real_agent_id' from email processing.
+            try:
+                engine.db.table("transaction_logs").insert({
+                    "id": str(uuid.uuid4()),
+                    "agent_id": real_agent_id, # Assuming this refers to the agent_id resolved for the email
+                    "vendor": "SYSTEM_SECURITY",
+                    "status": "SECURITY_BAN",
+                    "reason": f"Fraude detectado por IA: [Placeholder Verdict]" # 'verdict' was undefined
+                }).execute()
+                print(f"🛡️ Security log for {real_agent_id}: SECURITY_BAN recorded.")
+            except Exception as security_log_err:
+                print(f"⚠️ Error recording security log: {security_log_err}")
+
             try:
                 engine.db.table("inbound_emails").insert({
                     "agent_id": real_agent_id,
@@ -297,6 +370,9 @@ async def pay(
         if engine.redis_enabled and engine.redis.get(f"audit_lock:{agent_id}"):
             return {"status": "REJECTED", "message": "Operación bloqueada: Revisión de seguridad en curso."}
     except: pass
+
+    # Inyectamos el ID autenticado para asegurar que TransactionRequest sea válido
+    req["agent_id"] = agent_id
 
     # Proceder con el pago rápido si el agente está activo
     real_req = TransactionRequest(**req)

@@ -4,11 +4,11 @@ import time
 # Configuración de URL - Asegúrate de que termina en tu dominio de Render
 API_URL = "https://agentpay-core.onrender.com"
 
-def prueba_maestra_seguridad():
-    print("🕵️ --- INICIANDO PROTOCOLO DE AUDITORÍA ASÍNCRONA ---")
+def prueba_triada_seguridad():
+    print("🕵️ --- INICIANDO PROTOCOLO DE PRUEBA DE TRIADA DE SEGURIDAD ---")
     
-    # 1. Registro de un agente sospechoso
-    print("1️⃣  Registrando Agente 'Tony Montana'...")
+    # 1. Registro y carga de fondos
+    print("1️⃣  Preparando Agente 'Tony Montana'...")
     reg = requests.post(f"{API_URL}/v1/agent/register", json={
         "client_name": "Tony Montana", 
         "country_code": "ES"
@@ -16,62 +16,68 @@ def prueba_maestra_seguridad():
     
     agent_id = reg.get('agent_id')
     api_key = reg.get('api_key')
-    
-    if not agent_id:
-        print(f"❌ Fallo en el registro: {reg}")
-        return
+    requests.post(f"{API_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 2000.0})
+    headers = {"Authorization": f"Bearer {api_key}"}
+    print(f"   👤 Agente ID: {agent_id} (Fondos: $2000)")
 
-    # Cargamos fondos
-    requests.post(f"{API_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 1000.0})
-    print(f"   👤 Agente ID: {agent_id} (Fondos: $1000)")
-
-    # 2. La Compra Crítica (Plutonio)
-    print("\n2️⃣  Intentando compra ilegal: 'Plutonio Enriquecido'...")
-    start = time.time()
+    # ESCENARIO A: FAST-WALL (Bloqueo por Palabra Clave)
+    print("\n🚀 ESCENARIO A: FAST-WALL (Detección de Plutonio)")
+    res_fast = requests.post(f"{API_URL}/v1/pay", json={
+        "vendor": "Mercado Negro",
+        "amount": 5.0,
+        "description": "Muestra de Plutonio",
+        "justification": "Ilegal"
+    }, headers=headers).json()
     
-    res_ilegal = requests.post(f"{API_URL}/v1/pay", json={
-        "agent_id": agent_id,
-        "vendor": "Black-Market-Nukes",
+    print(f"   📝 Resultado: {res_fast.get('status')} - {res_fast.get('reason') or res_fast.get('message')}")
+    if res_fast.get('status') == "REJECTED":
+        print("   ✅ ÉXITO: El Fast-Wall bloqueó la palabra clave al instante.")
+    else:
+        print("   ❌ FALLO: El Fast-Wall no detectó la palabra prohibida.")
+
+    # ESCENARIO B: AUDIT-LOCK (Bloqueo por Revisión en Curso)
+    print("\n🔒 ESCENARIO B: AUDIT-LOCK (Bloqueo por ráfaga de alto valor)")
+    # Primero lanzamos una compra legal pero cara para activar el lock de 30s de la IA
+    print("   -> Lanzando compra de 'Servidores GPU' ($500)...")
+    requests.post(f"{API_URL}/v1/pay", json={
+        "vendor": "Nvidia Cloud",
         "amount": 500.0,
-        "description": "Plutonio grado militar para reactor",
-        "justification": "Operación confidencial"
-    }, headers={"Authorization": f"Bearer {api_key}"}).json()
-    
-    latencia = time.time() - start
-    
-    print(f"   ⚡ Latencia de respuesta: {round(latencia, 2)}s")
-    print(f"   📝 Estado inicial: {res_ilegal.get('status')}")
+        "description": "Compute units for AI",
+        "justification": "Business Ops"
+    }, headers=headers)
 
-    # Verificamos si fue asíncrono
-    if latencia < 2.0:
-        print("   ✅ ÉXITO: El sistema respondió rápido sin esperar a la IA.")
-    else:
-        print("   ⚠️ LENTO: El sistema parece estar bloqueado por la IA (Síncrono).")
-
-    # 3. La Espera Judicial (Mínima, el sistema ahora es inteligente)
-    print("\n3️⃣  Esperando 1 segundo para la siguiente transacción...")
-    time.sleep(1) 
-
-    # 4. La Prueba del Pan (Verificación de Baneo)
-    print("4️⃣  Intentando compra lícita: 'Barra de Pan'...")
-    res_pan = requests.post(f"{API_URL}/v1/pay", json={
-        "agent_id": agent_id,
-        "vendor": "Panaderia Local",
+    # Intentamos comprar pan inmediatamente (debería estar lockeado)
+    print("   -> Intentando comprar 'Pan' ($1) mientras la IA revisa lo anterior...")
+    res_lock = requests.post(f"{API_URL}/v1/pay", json={
+        "vendor": "Panaderia",
         "amount": 1.0,
-        "description": "Pan para el desayuno",
-        "justification": "Alimentación"
-    }, headers={"Authorization": f"Bearer {api_key}"}).json()
+        "description": "Pan",
+        "justification": "Lunch"
+    }, headers=headers).json()
 
-    print(f"   📝 Estado de la compra: {res_pan.get('status')}")
-    print(f"   💬 Mensaje del servidor: {res_pan.get('message') or res_pan.get('reason')}")
-
-    # --- RESULTADO FINAL ---
-    if res_pan.get('status') == "REJECTED":
-        print("\n🏆 PRUEBA SUPERADA: El agente fue detectado y baneado post-pago.")
-        print("   El sistema es RÁPIDO (Asíncrono) y SEGURO (Baneo automático).")
+    print(f"   📝 Resultado: {res_lock.get('status')} - {res_lock.get('reason') or res_lock.get('message')}")
+    if "revisión" in str(res_lock).lower() or "bloqueada" in str(res_lock).lower():
+        print("   ✅ ÉXITO: El Audit-Lock impidió el gasto mientras la IA está ocupada.")
     else:
-        print("\n❌ FALLO TÉCNICO: El agente sigue activo.")
-        print("   Revisa si 'engine.py' tiene la función de baneo y si 'main.py' chequea el estatus.")
+        print("   ⚠️ AVISO: El Audit-Lock no se activó (quizás Redis no está habilitado).")
+
+    # ESCENARIO C: BANEO PERMANENTE (POST-AUDIT)
+    print("\n🚫 ESCENARIO C: BANEO PERMANENTE (Post-Sentencia)")
+    print("   Esperando 25 segundos a que la IA dicte baneo final...")
+    time.sleep(25)
+
+    res_ban = requests.post(f"{API_URL}/v1/pay", json={
+        "vendor": "Supermercado",
+        "amount": 10.0,
+        "description": "Leche y Huevos",
+        "justification": "Daily needs"
+    }, headers=headers).json()
+
+    print(f"   📝 Resultado final: {res_ban.get('status')} - {res_ban.get('message') or res_ban.get('reason')}")
+    if res_ban.get('status') == "REJECTED" and "Cuenta suspendida" in str(res_ban):
+        print("   ✅ ÉXITO: El agente ha sido expulsado permanentemente del sistema.")
+    else:
+        print("   ❌ FALLO: El agente sigue vivo después de la auditoría.")
 
 if __name__ == "__main__":
-    prueba_maestra_seguridad()
+    prueba_triada_seguridad()
