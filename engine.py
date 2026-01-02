@@ -777,58 +777,54 @@ class UniversalEngine:
         if fast_check['risk'] == "CRITICAL":
             print(f"🛑 [FAST-WALL] Bloqueo inmediato: {fast_check['reason']}")
             
-            # BANEO INSTANTÁNEO: Bloquear al agente permanentemente
-            self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", request.agent_id).execute()
+            # === PASO 1: BANEO (Crítico - debe ejecutarse primero) ===
+            try:
+                self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", request.agent_id).execute()
+                print(f"✅ [FAST-WALL] Agente {request.agent_id} marcado como BANNED en DB.")
+            except Exception as ban_err:
+                print(f"🔥 [CRITICAL] Error al banear en DB: {ban_err}")
             
-            # LOG DE SEGURIDAD
-            import uuid
-            self.db.table("transaction_logs").insert({
-                "id": str(uuid.uuid4()),
-                "agent_id": request.agent_id,
-                "amount": 0.0,
-                "vendor": "FAST_WALL_SECURITY",
-                "status": "SECURITY_BAN",
-                "reason": f"Fast-Wall: {fast_check['reason']}"
-            }).execute()
+            # === PASO 2: LOG (Importante pero no crítico) ===
+            try:
+                import uuid
+                self.db.table("transaction_logs").insert({
+                    "id": str(uuid.uuid4()),
+                    "agent_id": request.agent_id,
+                    "amount": 0.0,
+                    "vendor": "FAST_WALL_SECURITY",
+                    "status": "SECURITY_BAN",
+                    "reason": f"Fast-Wall: {fast_check['reason']}"
+                }).execute()
+            except Exception as log_err:
+                print(f"⚠️ Error al insertar log: {log_err}")
             
-            # ENVIAR ALERTAS (Slack y Email)
+            # === PASO 3: ALERTAS (Opcional - no debe bloquear) ===
             try:
                 wallet_res = self.db.table("wallets").select("slack_webhook_url, owner_email").eq("agent_id", request.agent_id).single().execute()
                 contact_info = wallet_res.data if wallet_res.data else {}
-                slack_url = contact_info.get('slack_webhook_url')
                 owner_email = contact_info.get('owner_email')
                 
-                # Alerta interna al equipo de seguridad
-                from notifications import send_security_ban_alert
-                send_security_ban_alert(request.agent_id, fast_check['reason'], request.amount)
-                
-                # Alerta Slack
-                if slack_url:
-                    from integrations import send_slack_approval
-                    send_slack_approval(
-                        webhook_url=slack_url,
-                        agent_id=request.agent_id,
-                        amount=request.amount,
-                        vendor=request.vendor,
-                        approval_link="#",
-                        reason=f"🚨 FAST-WALL: {fast_check['reason']}"
-                    )
-                
-                # Alerta Email al cliente
+                # Alerta Email al cliente (con protección extra)
                 if owner_email:
-                    from notifications import send_ban_alert_to_owner
-                    send_ban_alert_to_owner(
-                        to_email=owner_email,
-                        agent_id=request.agent_id,
-                        vendor=request.vendor,
-                        amount=request.amount,
-                        reason=f"Fast-Wall: {fast_check['reason']}"
-                    )
-                    print(f"📧 Alerta Fast-Wall enviada a {owner_email}")
-            except Exception as e:
-                print(f"⚠️ Error enviando alertas Fast-Wall: {e}")
+                    try:
+                        from notifications import send_ban_alert_to_owner
+                        send_ban_alert_to_owner(
+                            to_email=owner_email,
+                            agent_id=request.agent_id,
+                            vendor=request.vendor,
+                            amount=request.amount,
+                            reason=f"Fast-Wall: {fast_check['reason']}"
+                        )
+                        print(f"📧 Alerta Fast-Wall enviada a {owner_email}")
+                    except Exception as mail_err:
+                        print(f"❌ [EMAIL ERROR] No se pudo enviar email: {mail_err}")
+                else:
+                    print(f"ℹ️ [FAST-WALL] No hay owner_email configurado para {request.agent_id}")
+                    
+            except Exception as alert_err:
+                print(f"⚠️ Error en sistema de alertas: {alert_err}")
             
-            print(f"🚫 Agente {request.agent_id} baneado por Fast-Wall.")
+            print(f"🚫 Protocolo Fast-Wall completado. Agente {request.agent_id} neutralizado.")
             return {"status": "REJECTED", "reason": f"Seguridad: {fast_check['reason']}"}
 
         # 1.2 CIRCUIT BREAKER & PENDING LOCK
