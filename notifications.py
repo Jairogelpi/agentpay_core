@@ -3,6 +3,9 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# Email remitente verificado en Brevo (debe estar en el panel de Senders)
+BREVO_VERIFIED_SENDER = os.environ.get("BREVO_SENDER_EMAIL", "gelpierreape@gmail.com")
+
 def send_approval_email(to_email, agent_id, vendor, amount, link):
     """
     Envía alerta de seguridad vía Brevo SMTP.
@@ -12,9 +15,9 @@ def send_approval_email(to_email, agent_id, vendor, amount, link):
         print("⚠️ [EMAIL] No se envió email porque falta el destinatario.")
         return False
 
-    # Brevo SMTP config - Puerto 2525 evita bloqueos de Render/cloud
-    smtp_host = os.environ.get("SMTP_HOST", "smtp-relay.brevo.com")
-    smtp_port = int(os.environ.get("SMTP_PORT", 2525))  # Puerto alternativo
+    # Brevo SMTP config
+    smtp_host = "smtp-relay.brevo.com"
+    smtp_port = 2525
     smtp_user = os.environ.get("SMTP_USER")
     smtp_pass = os.environ.get("SMTP_PASS")
     
@@ -23,32 +26,32 @@ def send_approval_email(to_email, agent_id, vendor, amount, link):
         return False
 
     msg = MIMEMultipart()
-    # IMPORTANTE: From debe ser el mismo que SMTP_USER para Brevo
-    msg['From'] = smtp_user
+    # REQUISITO BREVO: Este email debe estar verificado en el panel de Senders
+    msg['From'] = BREVO_VERIFIED_SENDER
     msg['To'] = to_email
-    msg['Subject'] = f"🚨 BLOQUEO AGENTE: {agent_id}"
+    msg['Subject'] = f"🚨 BLOQUEO CRÍTICO: Agente {agent_id}"
 
-    body = f"Alerta de seguridad. Agente {agent_id} bloqueado por transaccionar en {vendor} por ${amount}."
-    msg.attach(MIMEText(body, 'plain'))
+    body = f"""
+    <h2>Alerta de Seguridad AgentPay</h2>
+    <p>El agente <b>{agent_id}</b> ha sido bloqueado tras intentar una compra sospechosa.</p>
+    <ul>
+        <li><b>Comercio:</b> {vendor}</li>
+        <li><b>Monto:</b> ${amount}</li>
+    </ul>
+    <p>El estado en el sistema ha cambiado a: <b>BANNED</b></p>
+    """
+    msg.attach(MIMEText(body, 'html'))
 
     try:
         print(f"🔌 [SMTP] Conectando a Brevo vía {smtp_host}:{smtp_port}...")
-        
-        # Puerto 465 = SSL directo, otros puertos = STARTTLS
-        if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20)
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=20)
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
             server.starttls()
-        
-        with server:
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
-        
-        print(f"✅ [BREVO SUCCESS] Email enviado a {to_email}")
+        print(f"✅ [EMAIL SUCCESS] Enviado desde {BREVO_VERIFIED_SENDER} a {to_email}")
         return True
     except Exception as e:
-        print(f"❌ [SMTP FATAL ERROR] No se pudo contactar con Brevo: {str(e)}")
+        print(f"❌ [SMTP ERROR] {e}")
         return False
 
 
@@ -90,7 +93,7 @@ def send_security_ban_alert(agent_id, reason, amount=0):
     """
     
     msg = MIMEMultipart()
-    msg['From'] = f"AgentPay Security <{smtp_user}>"
+    msg['From'] = BREVO_VERIFIED_SENDER
     msg['To'] = alert_email
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'html'))
@@ -168,7 +171,7 @@ def send_ban_alert_to_owner(to_email, agent_id, vendor, amount, reason):
     """
     
     msg = MIMEMultipart()
-    msg['From'] = f"AgentPay Security <{smtp_user}>"
+    msg['From'] = BREVO_VERIFIED_SENDER
     msg['To'] = to_email
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'html'))
