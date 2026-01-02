@@ -6,14 +6,15 @@ from email.mime.multipart import MIMEMultipart
 def send_approval_email(to_email, agent_id, vendor, amount, link):
     """
     Envía alerta de seguridad vía Brevo SMTP.
+    Puerto 2525 para evitar bloqueos de proveedores cloud.
     """
     if not to_email:
         print("⚠️ [EMAIL] No se envió email porque falta el destinatario.")
         return False
 
-    # Forzamos la lectura de las variables de Brevo
+    # Brevo SMTP config - Puerto 2525 evita bloqueos de Render/cloud
     smtp_host = os.environ.get("SMTP_HOST", "smtp-relay.brevo.com")
-    smtp_port = int(os.environ.get("SMTP_PORT", 587))
+    smtp_port = int(os.environ.get("SMTP_PORT", 2525))  # Puerto alternativo
     smtp_user = os.environ.get("SMTP_USER")
     smtp_pass = os.environ.get("SMTP_PASS")
     
@@ -22,39 +23,32 @@ def send_approval_email(to_email, agent_id, vendor, amount, link):
         return False
 
     msg = MIMEMultipart()
-    msg['From'] = f"AgentPay Security <{smtp_user}>"
+    # IMPORTANTE: From debe ser el mismo que SMTP_USER para Brevo
+    msg['From'] = smtp_user
     msg['To'] = to_email
-    msg['Subject'] = f"🚨 ALERTA DE SEGURIDAD: Agente {agent_id} Bloqueado"
+    msg['Subject'] = f"🚨 BLOQUEO AGENTE: {agent_id}"
 
-    html = f"""
-    <h2>Actividad Sospechosa Detectada</h2>
-    <p>El agente <b>{agent_id}</b> ha sido bloqueado preventivamente.</p>
-    <ul>
-        <li><b>Comercio:</b> {vendor}</li>
-        <li><b>Monto:</b> ${amount}</li>
-    </ul>
-    <p>Revisa el panel de control para más información.</p>
-    """
-    msg.attach(MIMEText(html, 'html'))
+    body = f"Alerta de seguridad. Agente {agent_id} bloqueado por transaccionar en {vendor} por ${amount}."
+    msg.attach(MIMEText(body, 'plain'))
 
     try:
-        print(f"🔌 [SMTP] Conectando a {smtp_host}:{smtp_port} para enviar a {to_email}...")
+        print(f"🔌 [SMTP] Conectando a Brevo vía {smtp_host}:{smtp_port}...")
         
-        # Puerto 465 usa SSL directo, 587 usa STARTTLS
+        # Puerto 465 = SSL directo, otros puertos = STARTTLS
         if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15)
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20)
         else:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=20)
             server.starttls()
         
         with server:
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
         
-        print(f"✅ [EMAIL SENT] Alerta enviada con éxito a {to_email}")
+        print(f"✅ [BREVO SUCCESS] Email enviado a {to_email}")
         return True
     except Exception as e:
-        print(f"❌ [SMTP ERROR] No se pudo enviar el correo: {str(e)}")
+        print(f"❌ [SMTP FATAL ERROR] No se pudo contactar con Brevo: {str(e)}")
         return False
 
 
