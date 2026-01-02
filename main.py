@@ -282,13 +282,16 @@ from fastapi import Request, Header, BackgroundTasks # <--- Importar Header y Ba
 
 @app.post("/v1/pay")
 async def pay(req: dict, background_tasks: BackgroundTasks, agent_id: str = Depends(verify_api_key)):
-    # 🛡️ ESCUDO DE SEGURIDAD: Verificar baneo antes de gastar recursos
+    # 🛡️ VERIFICACIÓN PRE-PAGO: Bloqueo inmediato si está baneado
     agent_check = engine.db.table("wallets").select("status").eq("agent_id", agent_id).single().execute()
     
     if agent_check.data and agent_check.data.get("status") == "BANNED":
         return {"status": "REJECTED", "message": "Cuenta suspendida por riesgo de seguridad."}
 
-    # Si está limpio, procedemos con el pago rápido
+    # Inyectamos el ID autenticado para asegurar consistencia
+    req["agent_id"] = agent_id
+
+    # Si está activo, procedemos con el pago rápido
     real_req = TransactionRequest(**req)
     result = await engine.process_instant_payment(real_req)
     

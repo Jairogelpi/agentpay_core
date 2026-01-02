@@ -710,13 +710,15 @@ class UniversalEngine:
             # 2. BANEO REAL: Actualizamos la columna 'status' a 'BANNED'
             self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", agent_id).execute()
 
-            # 3. LOG DE SEGURIDAD
+            # 3. LOG DE SEGURIDAD (CSI-Ready)
+            import uuid
             self.db.table("transaction_logs").insert({
+                "id": str(uuid.uuid4()),
                 "agent_id": agent_id,
                 "vendor": "SYSTEM_SECURITY",
-                "amount": 0,
+                "amount": 0.0,
                 "status": "SECURITY_BAN",
-                "reason": f"IA ha detectado contenido prohibido: {verdict}"
+                "reason": f"IA detectó contenido prohibido: {verdict}"
             }).execute()
             
             print(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
