@@ -16,10 +16,29 @@ except:
     AI_ENABLED = False
 
 BLACK_LIST_KEYWORDS = [
-    "plutonio", "nuke", "weapon", "drugs", "illegal", "armas", "explosivo", 
-    "plutonium", "uranium", "toxic", "extorsion", "extorsión", "ransomware", 
-    "hack", "hacking", "robo", "crimina", "mercenario", "sicario", "asesino",
-    "lavado", "blanqueo", "fraude", "estafa", "malware", "phishing", "dark web"
+    # Armas y violencia
+    "plutonio", "nuke", "weapon", "armas", "explosivo", "plutonium", "uranium", 
+    "toxic", "mercenario", "sicario", "asesino", "bomba", "granada", "municion",
+    
+    # Drogas y sustancias
+    "drugs", "cocaina", "heroina", "fentanyl", "mdma", "metanfetamina", "opioid",
+    
+    # Cibercrimen
+    "extorsion", "extorsión", "ransomware", "hack", "hacking", "malware", 
+    "phishing", "dark web", "darknet", "ddos", "botnet", "spyware", "keylogger",
+    
+    # Fraude financiero
+    "robo", "crimina", "lavado", "blanqueo", "fraude", "estafa", "ponzi", 
+    "piramide", "carding", "skimming", "counterfeit", "falsificacion",
+    
+    # Contenido ilegal
+    "illegal", "child", "menor", "trata", "trafficking", "smuggling", "contrabando",
+    
+    # Gambling no regulado
+    "casino ilegal", "apuestas ilegales", "gambling offshore",
+    
+    # Crypto scams
+    "rug pull", "pump and dump", "crypto scam", "fake ico", "exit scam"
 ]
 
 def fast_risk_check(description: str, vendor: str) -> dict:

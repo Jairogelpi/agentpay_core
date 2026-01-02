@@ -718,6 +718,10 @@ class UniversalEngine:
                 "reason": f"Fraude detectado por IA: {verdict}"
             }).execute()
             
+            # 4. ALERTA: Notificar al equipo de seguridad
+            from notifications import send_security_ban_alert
+            send_security_ban_alert(agent_id, reason_text, amount)
+            
             print(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
         else:
             print(f"✅ [AUDIT] Transacción validada y segura ({verdict}).")

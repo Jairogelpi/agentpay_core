@@ -535,6 +535,56 @@ async def upgrade_agent_issuing(req: dict):
         
     return engine.activate_issuing_for_agent(agent_id)
 
+@app.get("/admin/security/review")
+async def review_security_logs(limit: int = 50):
+    """
+    Endpoint para revisar los veredictos de seguridad de la IA.
+    Muestra los últimos baneos y transacciones flaggeadas.
+    """
+    try:
+        # Obtener logs de seguridad
+        security_logs = engine.db.table("transaction_logs").select(
+            "id", "agent_id", "vendor", "amount", "status", "reason", "created_at"
+        ).in_("status", ["SECURITY_BAN", "FLAGGED", "REJECTED"]).order(
+            "created_at", desc=True
+        ).limit(limit).execute()
+        
+        # Obtener lista de agentes baneados
+        banned_agents = engine.db.table("wallets").select(
+            "agent_id", "owner_name", "status"
+        ).eq("status", "BANNED").execute()
+        
+        return {
+            "security_events": security_logs.data,
+            "banned_agents": banned_agents.data,
+            "total_bans": len(banned_agents.data) if banned_agents.data else 0
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/admin/security/agent/{agent_id}")
+async def get_agent_security_history(agent_id: str):
+    """
+    Obtiene el historial de seguridad completo de un agente específico.
+    """
+    try:
+        # Estado actual del agente
+        wallet = engine.db.table("wallets").select(
+            "agent_id", "owner_name", "status", "balance"
+        ).eq("agent_id", agent_id).single().execute()
+        
+        # Historial de transacciones
+        history = engine.db.table("transaction_logs").select(
+            "*"
+        ).eq("agent_id", agent_id).order("created_at", desc=True).limit(100).execute()
+        
+        return {
+            "agent": wallet.data,
+            "transaction_history": history.data
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 if __name__ == "__main__":
     # Para correr local: python main.py
     port = int(os.environ.get("PORT", 8000))
