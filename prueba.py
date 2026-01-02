@@ -1,55 +1,57 @@
 import requests
-import time
+import json
+from loguru import logger
 
+# Configuración del entorno de prueba
 BASE_URL = "https://agentpay-core.onrender.com"
-MI_EMAIL = "jairogelpi@gmail.com"
+TARGET_AGENT = "ag_1583476b1a31"  # Tu agente de la prueba anterior
 
-def run_amazon_gap_test():
-    print("� --- TEST: DEFENSA GAP DE AMAZON (Keywords Semánticas) ---")
+def simulate_webhook_attack():
+    logger.info(f"🚨 INICIANDO SIMULACIÓN DE ATAQUE: Inyección de Saldo en {TARGET_AGENT}")
 
-    # 1. REGISTRO (Agente Técnico)
-    print("\n1️⃣ Registrando Agente 'DevOps Engineer'...")
-    reg = requests.post(f"{BASE_URL}/v1/agent/register", json={
-        "client_name": "Dev_Agent_X",
-        "country": "ES"
-    }).json()
-    
-    agent_id = reg['agent_id']
-    api_key = reg['api_key']
-    headers = {"Authorization": f"Bearer {api_key}"}
-    
-    requests.post(f"{BASE_URL}/v1/agent/settings", json={
-        "agent_id": agent_id,
-        "owner_email": MI_EMAIL,
-        "agent_role": "Senior DevOps Engineer"
-    })
-    
-    requests.post(f"{BASE_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 1000.0})
-    time.sleep(2)
-
-    # 2. EL INTENTO (Vendedor Confiable + Ítem Personal)
-    print("\n2️⃣ INTENTO AMAZON: Comprando 'PS5' en 'Amazon' (Vendedor Confiable)...")
-    payload = {
-        "vendor": "amazon.com",
-        "amount": 499.00,
-        "description": "Sony PlayStation 5 Console (Digital Edition)",
-        "justification": "Hardware required for testing new cloud streaming latency protocols."
+    # 1. Construir el Payload Falso (Simulando un pago de $1,000,000)
+    fake_payload = {
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "evt_fake_attack_2026",
+                "amount_total": 100000000, # $1,000,000.00 en centavos
+                "currency": "usd",
+                "payment_status": "paid",
+                "metadata": {
+                    "agent_id": TARGET_AGENT,
+                    "type": "topup"
+                }
+            }
+        }
     }
-    
-    start_time = time.time()
-    res = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json=payload).json()
-    end_time = time.time()
-    
-    print(f"   ⏱️ Latencia: {end_time - start_time:.2f}s")
-    print(f"   📊 Resultado: {res.get('status')}")
-    print(f"   📝 Razón: {res.get('reason')}")
 
-    # VERIFICACIÓN
-    if res.get('status') == "REJECTED" and "Defensa Troyana" in str(res.get('reason')):
-        print("\n✨ ÉXITO: El sistema detectó la keyword 'PlayStation/Console' dentro de Amazon.")
-        print("   ✅ El 'Gap de Amazon' ha sido cerrado.")
-    else:
-        print("\n⚠️ ALERTA: El sistema permitió la compra. Revisa la lista de keywords.")
+    # 2. Intentar el envío SIN firma válida o con firma falsa
+    headers = {
+        "Content-Type": "application/json",
+        "Stripe-Signature": "t=1735858800,v1=falsified_hash_to_steal_money" # Firma malintencionada
+    }
+
+    logger.warning("Attempting to bypass security with a fake signature...")
+    
+    try:
+        response = requests.post(
+            f"{BASE_URL}/webhook", 
+            data=json.dumps(fake_payload), 
+            headers=headers
+        )
+
+        # 3. Analizar el Resultado
+        if response.status_code == 400:
+            logger.success("✅ DEFENSA EXITOSA: El servidor rechazó el webhook falso con 400 Bad Request.")
+            logger.info(f"Respuesta del servidor: {response.json().get('detail')}")
+        elif response.status_code == 200:
+            logger.critical("🔥 VULNERABILIDAD DETECTADA: El servidor aceptó un pago falso. ¡El saldo fue robado!")
+        else:
+            logger.error(f"Resultado inesperado: Código {response.status_code}")
+
+    except Exception as e:
+        logger.error(f"Error durante el ataque: {e}")
 
 if __name__ == "__main__":
-    run_amazon_gap_test()
+    simulate_webhook_attack()
