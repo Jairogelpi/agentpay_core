@@ -84,7 +84,6 @@ class UniversalEngine:
         results = {"score": 100, "risk_factors": []}
         
         try:
-        try:
             # 1. Antigüedad del dominio (WHOIS)
             try:
                 w = whois.whois(domain)
