@@ -708,8 +708,11 @@ class UniversalEngine:
             self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", agent_id).execute()
 
             # 3. LOG: Registrar la expulsión por seguridad
+            import uuid
             self.db.table("transaction_logs").insert({
+                "id": str(uuid.uuid4()),
                 "agent_id": agent_id,
+                "amount": 0.0,
                 "vendor": "SYSTEM_SECURITY",
                 "status": "SECURITY_BAN",
                 "reason": f"Fraude detectado por IA: {verdict}"
