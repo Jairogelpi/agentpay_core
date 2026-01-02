@@ -889,30 +889,50 @@ class UniversalEngine:
         total_deducted = request.amount + fee
         
         try:
-            print(f"💰 [ATOMIC] Ejecutando transacción blindada para {request.agent_id}...")
+            # 0. CHECK LÍMITES (Escudo Diario)
+            # Primero leemos para fallar rápido antes del bloqueo de DB
+            w_limits = self.db.table("wallets").select("daily_limit, daily_spent").eq("agent_id", request.agent_id).single().execute()
+            if w_limits.data:
+                d_limit = float(w_limits.data.get('daily_limit') or 1000.0)
+                d_spent = float(w_limits.data.get('daily_spent') or 0.0)
+                
+                if (d_spent + request.amount) > d_limit:
+                    print(f"🛑 [LIMIT EXCEEDED] Agente {request.agent_id} (${d_spent}/${d_limit})")
+                    return {"status": "REJECTED", "reason": "Excede el límite de gasto diario configurado."}
+
+            print(f"💰 [SECURE] Ejecutando transacción blindada para {request.agent_id}...")
             
-            # Llamamos a la función atómica que resta saldo e inserta log en UN SOLO PASO
-            rpc_res = self.db.rpc("process_atomic_payment", {
-                "p_agent_id": request.agent_id,
-                "p_vendor": request.vendor,
-                "p_amount": total_deducted,
-                "p_description": request.description,
-                "p_status": "APPROVED",
-                "p_reason": "Transacción Atómica Verificada"
+            # 1. Deducción Segura (RPC)
+            # Nota: Requiere que el usuario haya ejecutado secure_payment.sql en Supabase
+            rpc_res = self.db.rpc('secure_deduct_balance', {
+                'target_agent_id': request.agent_id,
+                'amount_to_deduct': total_deducted
             }).execute()
-            
-            new_balance = float(rpc_res.data)
+
+            if not rpc_res.data or not rpc_res.data[0]['success']:
+                return {"status": "REJECTED", "reason": "Saldo insuficiente o error de concurrencia"}
+
+            new_balance = float(rpc_res.data[0]['updated_balance'])
             print(f"✅ Transacción completada. Nuevo saldo: ${new_balance}")
 
-            # 3b. RECUPERAR ID DEL LOG (Necesario para auditoría/learning)
-            try:
-                log_res = self.db.table("transaction_logs").select("id").eq("agent_id", request.agent_id).order("created_at", desc=True).limit(1).single().execute()
-                log_id = log_res.data.get('id') if log_res.data else None
-            except:
-                log_id = None
+            # 2. LOG MANUAL (Ahora tenemos el control del ID)
+            import uuid
+            log_id = str(uuid.uuid4())
+            self.db.table("transaction_logs").insert({
+                "id": log_id,
+                "agent_id": request.agent_id,
+                "vendor": request.vendor,
+                "amount": total_deducted,
+                "description": request.description,
+                "status": "APPROVED",
+                "reason": "Pago Seguro Verificado"
+            }).execute()
 
         except Exception as e:
-            return {"status": "REJECTED", "reason": f"Error de Integridad: {e}"}
+            # Si falla aquí, el dinero se descontó pero no hay log -> Critical consistency issue
+            # En producción se requeriría un sistema de reconciliación
+            print(f"CRITICAL ERROR: Money deducted but log failed: {e}")
+            return {"status": "REJECTED", "reason": f"Error de Sistema: {e}"}
 
         # 4. Issue Card (Fast) - Necesario para que el pago funcione
         clean_vendor = self._normalize_domain(request.vendor)

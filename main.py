@@ -441,8 +441,27 @@ async def update_settings(req: dict):
 
 @app.post("/v1/agent/status")
 async def agent_status(req: dict):
-    """Panel de Control: Saldo, Crédito y Configuración"""
-    return engine.get_agent_status(req.get("agent_id"))
+    """Panel de Control: Saldo, Crédito y Configuración (Robust Version)"""
+    agent_id = req.get("agent_id")
+    if not agent_id: return {"error": "Missing agent_id"}
+    
+    try:
+        # Robust query handling None
+        res = engine.db.table("wallets").select("balance, status").eq("agent_id", agent_id).execute()
+        
+        if not res.data:
+            return {"error": "Agente no encontrado", "balance": 0.0, "status": "UNKNOWN"}
+        
+        # Forzamos que siempre devuelva un número, nunca un None
+        balance = res.data[0].get("balance")
+        return {
+            "agent_id": agent_id,
+            "balance": float(balance) if balance is not None else 0.0,
+            "status": res.data[0].get("status")
+        }
+    except Exception as e:
+        print(f"❌ Error getting status: {e}")
+        return {"error": str(e), "balance": 0.0}
 
 # --- PROFESSIONAL SDK ENDPOINTS ---
 
