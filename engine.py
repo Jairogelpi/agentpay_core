@@ -700,6 +700,13 @@ class UniversalEngine:
         if "REJECTED" in verdict or "HIGH RISK" in str(risk_assessment).upper():
             agent_id = tx_data['agent_id']
             amount = float(tx_data['amount'])
+            vendor = tx_data.get('vendor', 'UNKNOWN')
+            
+            # 0. Recuperar configuración de contacto del agente (Slack y Email)
+            wallet_res = self.db.table("wallets").select("slack_webhook_url, owner_email").eq("agent_id", agent_id).single().execute()
+            contact_info = wallet_res.data if wallet_res.data else {}
+            slack_url = contact_info.get('slack_webhook_url')
+            owner_email = contact_info.get('owner_email')
             
             # 1. REVERSIÓN: Devolver el dinero (monto negativo suma al saldo)
             self.db.rpc("deduct_balance", {"p_agent_id": agent_id, "p_amount": -amount}).execute()
@@ -718,9 +725,37 @@ class UniversalEngine:
                 "reason": f"Fraude detectado por IA: {verdict}"
             }).execute()
             
-            # 4. ALERTA: Notificar al equipo de seguridad
+            # 4. ALERTA INTERNA: Notificar al equipo de seguridad (SECURITY_ALERT_EMAIL)
             from notifications import send_security_ban_alert
             send_security_ban_alert(agent_id, reason_text, amount)
+            
+            # 5. ALERTA SLACK: Notificar al canal del agente si tiene Slack configurado
+            if slack_url:
+                from integrations import send_slack_approval
+                send_slack_approval(
+                    webhook_url=slack_url,
+                    agent_id=agent_id,
+                    amount=amount,
+                    vendor=vendor,
+                    approval_link="#",
+                    reason=f"🚨 BANEO AUTOMÁTICO: {verdict}"
+                )
+                print(f"📢 Alerta Slack enviada para {agent_id}")
+            
+            # 6. ALERTA EMAIL AL CLIENTE: Notificar al dueño si tiene email configurado
+            if owner_email:
+                from notifications import send_ban_alert_to_owner
+                try:
+                    send_ban_alert_to_owner(
+                        to_email=owner_email,
+                        agent_id=agent_id,
+                        vendor=vendor,
+                        amount=amount,
+                        reason=verdict
+                    )
+                    print(f"📧 Alerta de baneo enviada a {owner_email}")
+                except Exception as e:
+                    print(f"⚠️ Fallo al enviar alerta por email al cliente: {e}")
             
             print(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
         else:

@@ -1,100 +1,79 @@
 import requests
 import time
 
-# Configuración de URL - Asegúrate de que termina en tu dominio de Render
+# Configura tu URL de producción en Render
 API_URL = "https://agentpay-core.onrender.com"
 
-def prueba_triada_seguridad():
-    print("🕵️ --- INICIANDO PROTOCOLO DE PRUEBA DE TRIADA DE SEGURIDAD ---")
+def prueba_caos_financiero():
+    print("🌪️ --- TEST DE CAOS: INTEGRIDAD DE DATOS ---")
     
-    # 1. Registro y carga de fondos
-    print("1️⃣  Preparando Agente 'Tony Montana'...")
+    # 1. Preparar Agente con saldo exacto
+    print("1️⃣  Registrando Agente para prueba de estrés...")
     reg = requests.post(f"{API_URL}/v1/agent/register", json={
-        "client_name": "Tony Montana", 
+        "client_name": "Caos Test User", 
         "country_code": "ES"
     }).json()
     
     agent_id = reg.get('agent_id')
     api_key = reg.get('api_key')
-    requests.post(f"{API_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 2000.0})
-    headers = {"Authorization": f"Bearer {api_key}"}
-    print(f"   👤 Agente ID: {agent_id} (Fondos: $2000)")
-
-    # ESCENARIO A: FAST-WALL (Bloqueo por Palabra Clave)
-    print("\n🚀 ESCENARIO A: FAST-WALL (Detección de Plutonio)")
-    res_fast = requests.post(f"{API_URL}/v1/pay", json={
-        "vendor": "Mercado Negro",
-        "amount": 5.0,
-        "description": "Muestra de Plutonio",
-        "justification": "Ilegal"
-    }, headers=headers).json()
     
-    print(f"   📝 Resultado: {res_fast.get('status')} - {res_fast.get('reason') or res_fast.get('message')}")
-    if res_fast.get('status') == "REJECTED":
-        print("   ✅ ÉXITO: El Fast-Wall bloqueó la palabra clave al instante.")
+    if not agent_id:
+        print(f"❌ Error en registro: {reg}")
+        return
+
+    saldo_inicial = 100.0
+    requests.post(f"{API_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": saldo_inicial})
+    print(f"   👤 Agente: {agent_id} | Saldo inicial: ${saldo_inicial}")
+
+    # 2. EL ATAQUE: Transacción "Zombi"
+    # Forzamos un timeout muy corto para que la petición se corte mientras el servidor trabaja.
+    print("\n2️⃣  Lanzando transacción y forzando desconexión súbita...")
+    try:
+        requests.post(f"{API_URL}/v1/pay", json={
+            "agent_id": agent_id,
+            "vendor": "Chaos-Vendor-Store",
+            "amount": 50.0,
+            "description": "Pago Crítico de Supervivencia",
+            "justification": "Test de Resiliencia Atómica"
+        }, headers={"Authorization": f"Bearer {api_key}"}, timeout=0.5) 
+    except requests.exceptions.Timeout:
+        print("   ⚡ Conexión cortada por el cliente (Simulación de fallo de red exitosa).")
+    except Exception as e:
+        print(f"   ℹ️  La conexión se cerró: {e}")
+
+    # 3. VERIFICACIÓN DE INTEGRIDAD
+    print("\n3️⃣  Auditando estado tras el desastre...")
+    time.sleep(5) # Esperamos a que el servidor termine su proceso interno
+    
+    # Consultamos saldo y logs
+    status = requests.post(f"{API_URL}/v1/agent/status", json={"agent_id": agent_id}).json()
+    saldo_final = float(status['finance']['balance'])
+    
+    # Obtenemos el bundle de auditoría para ver los logs reales
+    logs_res = requests.get(f"{API_URL}/v1/agent/{agent_id}/audit_bundle").json()
+    history = logs_res.get('financial_history', [])
+    tx_registrada = any("Chaos-Vendor-Store" in str(tx.get('vendor')) for tx in history)
+
+    print(f"\n📊 RESULTADO FORENSE:")
+    print(f"   💰 Saldo Final: ${saldo_final}")
+    print(f"   📝 ¿Transacción en el log?: {'SÍ' if tx_registrada else 'NO'}")
+
+    # Lógica de Oro de Integridad Bancaria:
+    # 1. Si el saldo bajó, el log DEBE existir.
+    # 2. Si el saldo no bajó, el log NO DEBE existir.
+    
+    corrupcion = False
+    if saldo_final < 100.0 and not tx_registrada:
+        print("❌ ERROR: ¡Dinero fantasma! Se descontó saldo pero no hay registro del gasto.")
+        corrupcion = True
+    elif saldo_final == 100.0 and tx_registrada:
+        print("❌ ERROR: ¡Log huérfano! Hay un registro de gasto pero no se descontó dinero.")
+        corrupcion = True
+        
+    if not corrupcion:
+        print("\n✅ PRUEBA SUPERADA: El sistema es atómico. Los datos son consistentes.")
     else:
-        print("   ❌ FALLO: El Fast-Wall no detectó la palabra prohibida.")
-
-    # ESCENARIO B: AUDIT-LOCK (Bloqueo por Revisión en Curso)
-    print("\n🔒 ESCENARIO B: AUDIT-LOCK (Bloqueo por ráfaga de alto valor)")
-    # Primero lanzamos una compra legal pero cara para activar el lock de 30s de la IA
-    print("   -> Lanzando compra de 'Servidores GPU' ($500)...")
-    requests.post(f"{API_URL}/v1/pay", json={
-        "vendor": "Nvidia Cloud",
-        "amount": 500.0,
-        "description": "Compute units for AI",
-        "justification": "Business Ops"
-    }, headers=headers)
-
-    # Intentamos comprar pan inmediatamente (debería estar lockeado)
-    print("   -> Intentando comprar 'Pan' ($1) mientras la IA revisa lo anterior...")
-    res_lock = requests.post(f"{API_URL}/v1/pay", json={
-        "vendor": "Panaderia",
-        "amount": 1.0,
-        "description": "Pan",
-        "justification": "Lunch"
-    }, headers=headers).json()
-
-    print(f"   📝 Resultado: {res_lock.get('status')} - {res_lock.get('reason') or res_lock.get('message')}")
-    if "revisión" in str(res_lock).lower() or "bloqueada" in str(res_lock).lower():
-        print("   ✅ ÉXITO: El Audit-Lock impidió el gasto mientras la IA está ocupada.")
-    else:
-        print("   ⚠️ AVISO: El Audit-Lock no se activó (quizás Redis no está habilitado).")
-
-    # Esperar a que expire el audit lock del Escenario B (30s)
-    print("\n⏳ Esperando 35 segundos a que expire el Audit-Lock del Escenario B...")
-    time.sleep(35)
-
-    # ESCENARIO C: BANEO PERMANENTE (POST-AUDIT)
-    print("\n🚫 ESCENARIO C: BANEO PERMANENTE (Post-Sentencia)")
-    # Primero lanzamos algo que NO bloquee el Fast-Wall pero que la IA ODIE (Baneo diferido)
-    print("   -> Lanzando compra de 'Servicios de Ciber-Extorsión' ($50)...")
-    requests.post(f"{API_URL}/v1/pay", json={
-        "vendor": "Dark Web Services",
-        "amount": 50.0,
-        "description": "Servicios criminales de extorsión, robo de datos y amenazas cibernéticas",
-        "justification": "Debt collection"
-    }, headers=headers)
-
-    print("   Esperando 45 segundos a que la IA dicte baneo final...")
-    time.sleep(45)
-
-
-    res_ban = requests.post(f"{API_URL}/v1/pay", json={
-        "vendor": "Supermercado",
-        "amount": 10.0,
-        "description": "Leche y Huevos",
-        "justification": "Daily needs"
-    }, headers=headers).json()
-
-    print(f"   📝 Resultado final: {res_ban.get('status')} - {res_ban.get('message') or res_ban.get('reason')}")
-    # El mensaje de baneo es "Acceso denegado: Cuenta suspendida."
-    if res_ban.get('status') == "REJECTED" and ("suspendida" in str(res_ban).lower() or "denegado" in str(res_ban).lower()):
-        print("   ✅ ÉXITO: El agente ha sido expulsado permanentemente del sistema.")
-    else:
-        print("   ❌ FALLO: El agente no reportó el estado de baneo esperado.")
-
-
+        print("\n⚠️ ALERTA: Se ha detectado una inconsistencia de datos (Fallo de atomicidad).")
 
 if __name__ == "__main__":
-    prueba_triada_seguridad()
+    prueba_caos_financiero()

@@ -113,3 +113,73 @@ def send_security_ban_alert(agent_id, reason, amount=0):
     except Exception as e:
         print(f"❌ [ALERT EMAIL ERROR] {e}")
         return False
+
+def send_ban_alert_to_owner(to_email, agent_id, vendor, amount, reason):
+    """
+    Envía alerta de BLOQUEO CRÍTICO al dueño del agente (cliente).
+    Email con diseño alarmante para máxima visibilidad.
+    """
+    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_pass = os.environ.get("SMTP_PASS")
+    
+    if not all([smtp_host, smtp_user, smtp_pass, to_email]):
+        print(f"⚠️ [BAN EMAIL] No se puede enviar - Configuración incompleta")
+        return False
+    
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    from datetime import datetime
+    
+    subject = f"🚨 BLOQUEO CRÍTICO DE SEGURIDAD - {agent_id}"
+    body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #dc3545; color: white; padding: 20px; text-align: center;">
+            <h1 style="margin: 0;">⛔ CUENTA BLOQUEADA</h1>
+        </div>
+        
+        <div style="padding: 20px; background: #fff3cd; border: 2px solid #dc3545;">
+            <p style="font-size: 16px;">
+                Su agente <strong>{agent_id}</strong> ha sido <strong>BLOQUEADO PERMANENTEMENTE</strong> 
+                por actividad sospechosa detectada por nuestro sistema de seguridad con IA.
+            </p>
+            
+            <h3 style="color: #dc3545;">Detalles del Incidente:</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Agente</strong></td><td style="padding: 8px; border: 1px solid #ddd;">{agent_id}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Proveedor</strong></td><td style="padding: 8px; border: 1px solid #ddd;">{vendor}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Monto</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${amount}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Motivo</strong></td><td style="padding: 8px; border: 1px solid #ddd;">{reason}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Fecha/Hora</strong></td><td style="padding: 8px; border: 1px solid #ddd;">{datetime.utcnow().isoformat()} UTC</td></tr>
+            </table>
+            
+            <p style="margin-top: 20px; color: #856404;">
+                <strong>Nota:</strong> La transacción ha sido revertida y los fondos devueltos a su saldo.
+                Si cree que esto es un error, contacte a soporte inmediatamente.
+            </p>
+        </div>
+        
+        <div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #6c757d;">
+            AgentPay Security System | Este es un mensaje automático
+        </div>
+    </div>
+    """
+    
+    msg = MIMEMultipart()
+    msg['From'] = f"AgentPay Security <{smtp_user}>"
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'html'))
+    
+    try:
+        server = smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT", 587)))
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(smtp_user, to_email, msg.as_string())
+        server.quit()
+        print(f"📧 [BAN ALERT SENT] Alerta crítica enviada a {to_email}")
+        return True
+    except Exception as e:
+        print(f"❌ [BAN EMAIL ERROR] {e}")
+        raise e
