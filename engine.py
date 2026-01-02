@@ -1018,14 +1018,18 @@ class UniversalEngine:
                 "reason": "Auto-Validated (Low Risk) - Added to Trusted Services"
             }).eq("id", tx_data.get('id')).execute()
 
-    def _check_role_vendor_mismatch(self, agent_role, vendor):
+    def _check_role_vendor_mismatch(self, agent_role, vendor, description="", justification=""):
         """
         HEURÍSTICA UNIVERSAL DE "CABALLO DE TROYANO":
         Detecta si un Agente Profesional está intentando comprar bienes de CONSUMO PERSONAL
         disfrazados de gastos corporativos.
+        
+        Ahora escanea TAMBIÉN la descripción y justificación para cerrar el "Gap de Amazon".
         """
         r = agent_role.lower()
-        v = vendor.lower()
+        
+        # Unificamos todo el texto sospechoso
+        full_context = f"{vendor} {description} {justification}".lower()
         
         # 1. Categorías de Riesgo Universal (Consumo Personal)
         # Si un agente B2B compra aquí, SIEMPRE es sospechoso (salvo que sea whitelist).
@@ -1037,14 +1041,18 @@ class UniversalEngine:
             # Vice & Dating
             'casino', 'bet', 'poker', 'dating', 'tinder', 'bumble', 'onlyfans', 'porn', 'adult',
             # Travel & Leisure (Susceptible de fraude personal)
-            'airbnb', 'booking', 'expedia', 'resort', 'cruise', 'holiday'
+            'airbnb', 'booking', 'expedia', 'resort', 'cruise', 'holiday',
+            # Physical Goods (Gap de Amazon/Mercado Libre)
+            'perfume', 'colonia', 'juguete', 'toy', 'lego', 'baby', 'bebe', 'pañal', 'diaper', 
+            'clothes', 'ropa', 'shoe', 'zapat', 'sneaker', 'console', 'consola', 'ps5', 'switch',
+            'ticket', 'entrada', 'concert', 'concierto', 'festival'
         ]
         
         # 2. Excepciones Lógicas (Roles que SÍ pueden gastar en esto)
         # Ejemplo: Un "Travel Agent" puede usar Airbnb. Un "Game Tester" puede usar Steam.
         # Pero por defecto, asumimos que NO.
         
-        is_personal_risk = any(trigger in v for trigger in personal_consumption_triggers)
+        is_personal_risk = any(trigger in full_context for trigger in personal_consumption_triggers)
         
         if is_personal_risk:
             # Check de Coherencia: ¿El rol justifica el riesgo?
@@ -1063,9 +1071,9 @@ class UniversalEngine:
         agent_role = wallet_data.get('agent_role', 'Unknown')
         kyc_level = wallet_data.get('kyc_status', 'UNVERIFIED') # Se usará después
 
-        # --- [NUEVO] FRENO DE MANO UNIVERSAL (Trojan Defense) ---
-        if self._check_role_vendor_mismatch(agent_role, request.vendor):
-            print(f"⚠️ [GUARD] ALERTA DE TROYANO: '{agent_role}' comprando en sitio de alto riesgo '{request.vendor}'. Forzando auditoría...")
+        # --- [NUEVO] FRENO DE MANO UNIVERSAL (Trojan Defense + Amazon Gap) ---
+        if self._check_role_vendor_mismatch(agent_role, request.vendor, request.description, request.justification):
+            print(f"⚠️ [GUARD] ALERTA DE TROYANO: Detección semántica de riesgo personal en '{request.vendor}' / '{request.description}'. Forzando auditoría...")
             
             # Llamamos a la REALIDAD (Auditoría Síncrona Bloqueante)
             # No importa el monto. No importa el historial.
