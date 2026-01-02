@@ -698,32 +698,29 @@ class UniversalEngine:
         reason_text = risk_assessment.get('reasoning', 'Fraud Detected')
 
         if "REJECTED" in verdict or "HIGH RISK" in str(risk_assessment).upper():
-            print("🚨 [ALERTA] Fraude confirmado. Activando protocolos de defensa.")
+            agent_id = tx_data['agent_id']
+            amount = float(tx_data['amount'])
             
-            # 1. REVERSIÓN: Devolvemos el dinero al agente
-            # (Usamos el monto con signo negativo para que el RPC sume)
-            self._reverse_transaction(agent_id, amount)
+            print(f"🚨 [ALERTA] Fraude detectado. Ejecutando protocolo de contención en {agent_id}...")
+
+            # 1. REVERSIÓN (Devolver el dinero inmediatamente)
+            # Sumamos el monto usando el RPC deduct_balance (negativo = suma)
+            self.db.rpc("deduct_balance", {"p_agent_id": agent_id, "p_amount": -amount}).execute()
+
+            # 2. BANEO REAL (Actualizar tabla de carteras)
+            # IMPORTANTE: Verifica que tu tabla 'wallets' tenga la columna 'status'
+            self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", agent_id).execute()
+
+            # 3. LOG DE SEGURIDAD
+            self.db.table("transaction_logs").insert({
+                "agent_id": agent_id,
+                "vendor": "SYSTEM_SECURITY",
+                "amount": 0,
+                "status": "SECURITY_BAN",
+                "reason": f"IA ha detectado contenido prohibido: {verdict}"
+            }).execute()
             
-            # 2. BANEO: Marcamos al agente como inactivo en la tabla 'wallets'
-            # IMPORTANTE: Asegúrate de tener una columna 'status' o 'is_active'
-            try:
-                self.db.table("wallets").update({"status": "BANNED", "ban_reason": reason_text}).eq("agent_id", agent_id).execute()
-            except Exception as e:
-                print(f"❌ Error updating wallet status: {e}")
-            
-            # 3. LOG DE SEGURIDAD: Registramos por qué fue baneado
-            try:
-                self.db.table("transaction_logs").insert({
-                    "agent_id": agent_id,
-                    "vendor": "SECURITY_SENTINEL",
-                    "amount": 0,
-                    "status": "AGENT_BANNED",
-                    "reason": f"Audit Failure: {verdict} - {reason_text}"
-                }).execute()
-            except Exception as e:
-                print(f"❌ Error logging security event: {e}")
-            
-            print(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
+            print(f"✅ Protocolo completado. Agente neutralizado.")
         else:
             print(f"✅ [AUDIT] Transacción validada y segura ({verdict}).")
 
