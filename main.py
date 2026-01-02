@@ -142,6 +142,16 @@ async def handle_sse(request: StarletteRequest):
 async def handle_messages(request: StarletteRequest):
     return await mcp_server.handle_sse_message(request.scope, request.receive, request.send)
 
+@app.get("/v1/security/pulse")
+async def get_security_pulse():
+    """Retorna el estado de salud de seguridad del sistema (Roadmap 2026)."""
+    return await engine.get_security_metrics()
+
+@app.post("/v1/payments/escrow")
+async def create_escrow(request: TransactionRequest):
+    """Crea una transacción con garantía de fondos."""
+    return engine.create_escrow_transaction(request.agent_id, request.vendor, request.amount, request.description)
+
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return """

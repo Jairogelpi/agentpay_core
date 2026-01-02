@@ -178,22 +178,47 @@ class IdentityManager:
             "https": proxy_url
         }
 
-    def generate_browser_fingerprint(self):
+    def generate_browser_fingerprint(self, agent_id):
         """
-        Genera metadatos de navegación realistas para evitar detección de bots.
+        Huella Digital Persistente: Cada agente tiene un navegador único.
+        Asigna metadatos fijos para evitar que Amazon/Google detecten rotación de bots.
         """
+        # 1. Intentar recuperar del DB
+        if self.db:
+            try:
+                res = self.db.table("identities").select("browser_fingerprint").eq("agent_id", agent_id).execute()
+                if res.data and res.data[0].get('browser_fingerprint'):
+                    return res.data[0]['browser_fingerprint']
+            except: pass
+
+        # 2. Generar huella determinista basada en el agent_id o aleatoria estable
+        seed = abs(hash(agent_id))
+        resolutions = [(1920, 1080), (1440, 900), (1366, 768), (1536, 864)]
+        res_choice = resolutions[seed % len(resolutions)]
+        
         user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ]
-        return {
-            "user_agent": random.choice(user_agents),
-            "viewport": {"width": 1920, "height": 1080},
-            "device_memory": 8,
-            "hardware_concurrency": 4,
-            "webgl_vendor": "Google Inc. (NVIDIA)",
-            "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3090 Direct3D11 vs_5_0 ps_5_0, D3D11)"
+        
+        fingerprint = {
+            "user_agent": user_agents[seed % len(user_agents)],
+            "viewport": {"width": res_choice[0], "height": res_choice[1]},
+            "device_memory": 8 if seed % 2 == 0 else 16,
+            "hardware_concurrency": 4 if seed % 2 == 0 else 8,
+            "webgl_vendor": "Google Inc. (NVIDIA)" if seed % 2 == 0 else "Google Inc. (Intel)",
+            "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3090)" if seed % 2 == 0 else "ANGLE (Intel, Intel(R) UHD Graphics 620)",
+            "platform": "Win32" if "Windows" in user_agents[seed % len(user_agents)] else "MacIntel"
         }
+
+        # 3. Guardar en DB para futura consistencia
+        if self.db:
+            try:
+                self.db.table("identities").update({"browser_fingerprint": fingerprint}).eq("agent_id", agent_id).execute()
+            except: pass
+
+        return fingerprint
 
     # --- MEMORIA Y SESIONES ---
     def solve_captcha(self, image_url):

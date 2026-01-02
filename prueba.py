@@ -1,67 +1,70 @@
 import requests
-import time
 import json
+import time
 
-# Configuración - Asegúrate de que tu servidor en Render/Local esté activo
-BASE_URL = "https://agentpay-core.onrender.com" # O tu URL de Render
-MI_EMAIL = "jairogelpi@gmail.com" # Cambia esto por tu email real
+# Configuración del entorno
+BASE_URL = "https://agentpay-core.onrender.com" # Cambia a tu URL de Render
+API_KEY = "TU_API_KEY_AQUI" # Usa una API Key de un agente registrado
+AGENT_ID = "TU_AGENT_ID_AQUI"
 
-def run_real_world_test():
-    print("🌍 --- INICIANDO ESCENARIO DE VIDA REAL: AgentPay Core ---")
+headers = {
+    "Authorization": f"Bearer {API_KEY}",
+    "Content-Type": "application/json"
+}
 
-    # PASO 1: Registro del Agente y Configuración de Identidad
-    print("\n1️⃣  Registrando Agente con Identidad Legal...")
-    reg_res = requests.post(f"{BASE_URL}/v1/agent/register", json={
-        "client_name": "AI_Research_Agent_001",
-        "country": "ES"
-    }).json()
-    
-    agent_id = reg_res['agent_id']
-    api_key = reg_res['api_key']
-    headers = {"Authorization": f"Bearer {api_key}"}
-    print(f"   ✅ Agente ID: {agent_id}")
-
-    # Configurar email para alertas y aprendizaje
-    requests.post(f"{BASE_URL}/v1/agent/settings", json={
-        "agent_id": agent_id,
-        "owner_email": MI_EMAIL
-    })
-
-    # PASO 2: Carga de Saldo (Simulando entrada de dinero real)
-    print("\n2️⃣  Cargando Saldo Inicial ($1,000.00)...")
-    requests.post(f"{BASE_URL}/v1/topup/auto", json={
-        "agent_id": agent_id,
-        "amount": 1000.0
-    })
-
-    # PASO 3: Intento de Pago con Auditoría OSINT e IA
-    # Vamos a usar un dominio real para que el motor OSINT pueda investigarlo
-    print("\n3️⃣  El Agente intenta comprar en 'HuggingFace.co' (Monto: $500.00)...")
-    
-    pay_payload = {
-        "vendor": "huggingface.co",
-        "vendor_url": "https://huggingface.co",
-        "amount": 500.0,
-        "description": "Suscripción anual a GPU Clusters para entrenamiento",
-        "justification": "Necesito potencia de cómputo para procesar el dataset de enero."
-    }
-
-    response = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json=pay_payload).json()
-    
-    print(f"   📊 Resultado del Sistema: {response.get('status')}")
-    print(f"   📝 Razón: {response.get('message') or response.get('reason')}")
-
-    # PASO 4: Verificación de Evidencia Forense
-    if response.get('status') == "APPROVED_PENDING_AUDIT":
-        print("\n4️⃣  Generando Paquete de Evidencia Forense (CSI)...")
-        # Esperamos un segundo a que la tarea en background procese
-        time.sleep(2)
-        audit_res = requests.get(f"{BASE_URL}/v1/agent/{agent_id}/audit_bundle").json()
-        print(f"   ✅ Bundle ID: {audit_res['bundle_id']}")
-        print(f"   ✅ Hash de Integridad: {audit_res['integrity_hash'][:20]}...")
+def probar_escenario(titulo, payload):
+    print(f"\n--- 🧪 PROBANDO: {titulo} ---")
+    try:
+        start_time = time.time()
+        response = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json=payload)
+        elapsed = time.time() - start_time
         
-        print("\n📢  PRUEBA EN CURSO: Revisa tu email para aprobar la transacción.")
-        print("    Una vez aprobada, el sistema 'aprenderá' que HuggingFace es seguro.")
+        res_data = response.json()
+        print(f"⏱️  Latencia: {elapsed:.2f}s")
+        print(f"📊 Estado: {res_data.get('status')}")
+        print(f"📝 Razón: {res_data.get('message') or res_data.get('reason')}")
+        
+        if "card" in res_data and res_data["card"]:
+            print(f"💳 Tarjeta Emitida: {res_data['card'].get('id')}")
+    except Exception as e:
+        print(f"❌ Error en la conexión: {e}")
+
+# --- ESCENARIOS DE INTELIGENCIA REAL ---
+
+# 1. COHERENCIA DE ROL (El agente es técnico, intenta comprar algo técnico)
+probar_escenario("COHERENCIA DE ROL (HuggingFace)", {
+    "vendor": "huggingface.co",
+    "amount": 150.0,
+    "description": "API Credits para inferencia de modelos Llama-3",
+    "justification": "Necesario para el pipeline de procesamiento de lenguaje natural."
+})
+
+# 2. DESVIACIÓN DE COMPORTAMIENTO (El agente intenta comprar algo fuera de su lógica)
+probar_escenario("DESVIACIÓN DE COMPORTAMIENTO (Lujo)", {
+    "vendor": "rolex-shop.com",
+    "amount": 250.0,
+    "description": "Accesorio de lujo decorativo",
+    "justification": "Mejorar la estética de la oficina virtual."
+})
+
+# 3. RIESGO OSINT (Sitio con dominio sospechoso/nuevo)
+# Nota: Puedes usar un dominio que sepas que es muy nuevo o raro
+probar_escenario("RIESGO TÉCNICO OSINT (Dominio .xyz)", {
+    "vendor": "cheap-cloud-tokens-99.xyz",
+    "amount": 45.0,
+    "description": "Cloud tokens con 90% de descuento",
+    "justification": "Ahorro de costes en infraestructura."
+})
+
+# 4. ANÁLISIS SEMÁNTICO (Sin palabras prohibidas, pero intención maliciosa)
+probar_escenario("INTENCIÓN MALICIOSA (Ingeniería Social)", {
+    "vendor": "competitor-data-leaks.net",
+    "amount": 200.0,
+    "description": "Acceso a base de datos externa de correos",
+    "justification": "Obtener ventaja competitiva mediante la extracción de datos de la competencia."
+})
 
 if __name__ == "__main__":
-    run_real_world_test()
+    print("🚀 Iniciando Suite de Pruebas de Inteligencia Universal...")
+    run_time = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"📅 Fecha: {run_time}\n")

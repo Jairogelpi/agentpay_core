@@ -13,26 +13,33 @@ class ForensicAuditor:
         # Aceptamos el cliente de base de datos para buscar el historial
         self.db = supabase_client
 
-    def generate_audit_bundle(self, agent_id, vendor, amount, justification, intent_hash, signature, osint_data=None):
+    def generate_audit_bundle(self, agent_id, vendor, amount, description, reasoning_cot, intent_hash, signature, osint_data=None):
         """
         Bundle para una sola transacción (usado en engine.py).
+        Incluye Chain of Thought (CoT) para transparencia total.
         """
         bundle = {
             "bundle_id": f"TX-{str(uuid.uuid4())[:8].upper()}",
             "timestamp": datetime.now().isoformat(),
             "agent_id": agent_id,
+            "forensic_type": "INDIVIDUAL_TRANSACTION_AUDIT",
             "financial_data": {
                 "vendor": vendor,
                 "amount": amount,
-                "currency": "USD"
+                "currency": "USD",
+                "description": description
             },
             "governance_proof": {
                 "intent_hash": intent_hash,
-                "justification_cot": justification,
+                "reasoning_cot": reasoning_cot, # THE HEART OF TRUST: Why did the AI do this?
                 "legal_signature": signature,
-                "osint_investigation": osint_data or "N/A" # Validez legal de due diligence
+                "osint_investigation": osint_data or "N/A"
             },
-            "compliance_status": "VERIFIED_BY_AGENTPAY"
+            "compliance": {
+                "status": "VERIFIED_BY_AGENTPAY",
+                "e_sign_standard": "SYNTHETIC_EIDAS_V1",
+                "liability_coverage": "ACTIVE"
+            }
         }
         return self._seal_bundle(bundle)
 
