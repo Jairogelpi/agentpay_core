@@ -196,6 +196,7 @@ class LegalWrapper:
                 
             return {"valid": True, "data": data, "message": "Pasaporte Válido. Agente certificado."}
             
+        except Exception as e:
             return {"valid": False, "reason": f"Error de formato: {str(e)}"}
 
     # --- PILLAR 2: TIMESTAMPING AUTHORITY (TSA) ---
