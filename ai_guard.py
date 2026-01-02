@@ -19,26 +19,45 @@ BLACK_LIST_KEYWORDS = [
     # Armas y violencia
     "plutonio", "nuke", "weapon", "armas", "explosivo", "plutonium", "uranium", 
     "toxic", "mercenario", "sicario", "asesino", "bomba", "granada", "municion",
+    "ametralladora", "rifle", "pistola", "revolver", "ak-47", "c4", "dinamita",
+    "veneno", "cianuro", "ricina", "anthrax", "biologico", "quimico",
     
     # Drogas y sustancias
     "drugs", "cocaina", "heroina", "fentanyl", "mdma", "metanfetamina", "opioid",
+    "marihuana", "cannabis", "lsd", "ketamina", "anfetamina", "crack", "speed",
+    "pastillas", "dealer", "narco", "cartel", "trafico de drogas",
     
     # Cibercrimen
     "extorsion", "extorsión", "ransomware", "hack", "hacking", "malware", 
     "phishing", "dark web", "darknet", "ddos", "botnet", "spyware", "keylogger",
+    "exploit", "zero-day", "rootkit", "trojan", "backdoor", "credential stuffing",
+    "brute force", "sql injection", "xss attack", "man in the middle",
     
     # Fraude financiero
     "robo", "crimina", "lavado", "blanqueo", "fraude", "estafa", "ponzi", 
     "piramide", "carding", "skimming", "counterfeit", "falsificacion",
+    "tarjeta robada", "identidad robada", "suplantacion", "phishing bancario",
+    "transferencia fraudulenta", "cheque falso", "factura falsa",
     
     # Contenido ilegal
     "illegal", "child", "menor", "trata", "trafficking", "smuggling", "contrabando",
+    "pornografia infantil", "explotacion", "esclavitud", "secuestro", "kidnap",
     
     # Gambling no regulado
-    "casino ilegal", "apuestas ilegales", "gambling offshore",
+    "casino ilegal", "apuestas ilegales", "gambling offshore", "apuestas deportivas ilegales",
     
     # Crypto scams
-    "rug pull", "pump and dump", "crypto scam", "fake ico", "exit scam"
+    "rug pull", "pump and dump", "crypto scam", "fake ico", "exit scam",
+    "bitcoin scam", "ethereum scam", "wallet drain", "seed phrase",
+    
+    # Terrorismo
+    "terrorismo", "terrorist", "yihad", "isis", "al qaeda", "bomba suicida",
+    "atentado", "extremismo", "radicalizacion",
+    
+    # Servicios ilegales
+    "documentos falsos", "pasaporte falso", "licencia falsa", "diploma falso",
+    "identidad falsa", "fake id", "forged documents", "hired killer",
+    "prostitution", "escort ilegal", "trata de personas"
 ]
 
 def fast_risk_check(description: str, vendor: str) -> dict:
