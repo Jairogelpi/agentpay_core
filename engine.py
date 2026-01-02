@@ -733,6 +733,7 @@ class UniversalEngine:
 
         # 1.1 FAST-WALL (NUEVO): Filtro de ráfaga síncrono
         from ai_guard import fast_risk_check
+        print(f"🔍 [FAST-WALL] Escaneando: '{request.description}' en '{request.vendor}'...")
         fast_check = fast_risk_check(request.description, request.vendor)
         if fast_check['risk'] == "CRITICAL":
              print(f"🛑 [FAST-WALL] Bloqueo inmediato: {fast_check['reason']}")
