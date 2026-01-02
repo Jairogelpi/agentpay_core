@@ -169,49 +169,54 @@ class UniversalEngine:
         Procesa eventos de Stripe (Webhooks) para confirmar recargas de saldo.
         """
         try:
+            # Es vital que 'webhook_secret' sea el correcto para el modo (Test o Live)
             event = stripe.Webhook.construct_event(
                 payload, sig_header, self.webhook_secret
             )
+            logger.info(f"✅ Webhook verificado: {event['type']}")
         except ValueError as e:
-            logger.error(f"Invalid payload: {e}")
+            # Payload inválido
+            logger.error("❌ Payload de webhook inválido")
             raise Exception("Invalid payload")
         except stripe.error.SignatureVerificationError as e:
-            logger.error(f"Invalid signature: {e}")
+            # ATAQUE DETECTADO: La firma no coincide
+            logger.critical(f"🚨 ¡ALERTA DE SEGURIDAD! Intento de falsificación de Webhook detectado.")
+            # Aquí podrías usar tu ForensicAuditor para registrar el intento
             raise Exception("Invalid signature")
 
         # Manejar el evento
         if event['type'] == 'checkout.session.completed':
             session = event['data']['object']
-            
-            # Datos clave
-            agent_id = session.get('metadata', {}).get('agent_id')
-            amount_received = float(session.get('amount_total', 0)) / 100.0
-            
-            if agent_id and amount_received > 0:
-                logger.info(f"💰 [WEBHOOK] Recarga detectada: ${amount_received} para {agent_id}")
+            agent_id = session.get('metadata', {}).get('agent_id') # Asegúrate de que el agent_id se pase en metadata
+            # Con Connect, el dinero ya está en SU cuenta, solo registramos el evento
+            if agent_id:
+                amount_received = float(session.get('amount_total', 0)) / 100.0
+                logger.info(f"💰 Recarga completada para {agent_id}: ${amount_received}")
+                self.db.table("transaction_logs").insert({
+                    "id": session['id'],
+                    "agent_id": agent_id,
+                    "vendor": "Stripe Topup",
+                    "amount": amount_received,
+                    "status": "APPROVED",
+                    "reason": "Recarga de Saldo (Webhook Validado)"
+                }).execute()
                 
                 # Actualizar saldo en DB
                 wallet_resp = self.db.table("wallets").select("*").eq("agent_id", agent_id).execute()
                 if wallet_resp.data:
-                    wallet = wallet_resp.data[0]
-                    new_balance = float(wallet['balance']) + amount_received
-                    
-                    self.db.table("wallets").update({"balance": new_balance}).eq("agent_id", agent_id).execute()
-                    
-                    # --- NUEVO: Sincronización Automática de Fondos (Fintech Orchestration) ---
-                    # Movemos los fondos del pozo de cobro al pozo de gasto (Issuing)
-                    self._automate_issuing_balance_sync(amount_received)
-                    
-                    # Loguear la recarga
-                    self._result(
-                        auth=True,
-                        status="TOPUP", 
-                        reason=f"Recarga mediante Stripe Checkout (Ref: {session.get('id')})",
-                        req=TransactionRequest(agent_id=agent_id, vendor="AgentPay TopUp", amount=amount_received, description="Credit Reload"),
-                        bal=new_balance
-                    )
-                    return {"status": "success", "new_balance": new_balance}
-                    
+                    old_bal = float(wallet_resp.data[0]['balance'])
+                    self.db.table("wallets").update({"balance": old_bal + amount_received}).eq("agent_id", agent_id).execute()
+        
+        elif event['type'] == 'issuing_authorization.request':
+            auth = event['data']['object']
+            agent_id = auth['metadata'].get('agent_id') # Asegúrate de meter metadata al crear la tarjeta
+            
+            # Aquí podrías ejecutar ai_guard de nuevo para una "Segunda Opinión" en tiempo real
+            logger.info(f"💳 Intento de cobro: ${auth['amount']/100} en {auth['merchant_data']['name']}")
+            
+            # Por defecto aprobamos porque ya validamos antes de emitir la tarjeta
+            return {"status": "approved"} # Stripe espera un 200 OK
+
         return {"status": "ignored"}
 
     def _automate_issuing_balance_sync(self, amount_usd):

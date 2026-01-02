@@ -165,22 +165,32 @@ async def home():
             <h1>🛡️ AgentPay Active</h1>
             <p>Financial Security Infrastructure for AI Agents.</p>
             <p>System Status: 🟢 ONLINE</p>
-        </body>
+```
     </html>
     """
 
 @app.post("/webhook")
 async def stripe_webhook(request: Request):
-    """Endpoint para recibir notificaciones de Stripe (Top-Ups)"""
+    """
+    Endpoint CRÍTICO: Recibe notificaciones de Stripe.
+    Debe ser BLINDADO contra ataques de replay o falsificación.
+    """
     payload = await request.body()
     sig_header = request.headers.get('stripe-signature')
     
+    if not sig_header:
+        logger.warning("Attempted webhook access without signature")
+        raise HTTPException(status_code=400, detail="Missing signature")
+
     try:
-        # Pasamos el raw body al engine
+        # El engine ahora lanza excepciones si la firma es falsa
         result = engine.process_stripe_webhook(payload, sig_header)
         return result
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Si la firma falló, devolvemos 400 para que Stripe sepa que no confiamos en el origen
+        # (Y para no revelar detalles internos en un 500)
+        logger.error(f"Webhook processing failed: {str(e)}")
+        raise HTTPException(status_code=400, detail="Webhook verification failed")
 
 @app.post("/v1/identity/webhook")
 async def brevo_inbound_webhook(request: Request):
