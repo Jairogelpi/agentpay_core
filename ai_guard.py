@@ -102,12 +102,27 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     2. Analiza por qué esta compra encaja con el rol '{agent_role}'.
     3. Detecta necesidad operativa real.
     
-    RESPONSE FORMAT: JSON {{ "english_translation": "...", "argument": "...", "confidence_score": 0-100 }}
+    OBLIGATORY JSON STRUCTURE:
+    {{
+        "business_justification": "Detailed explanation of why this is necessary",
+        "role_consistency_score": 0-100,
+        "suggested_mcc": "software|services|travel|marketing|legal|retail",
+        "preliminary_verdict": "BENIGN"
+    }}
     """
     
     try:
-        stage1 = await _oracle_call("You are the Proponent Auditor.", proponent_prompt, model=model_to_use)
+        # Llamada a la Etapa 1
+        stage1_raw = await _oracle_call("You are the Proponent Auditor.", proponent_prompt, model=model_to_use)
         
+        # VALIDACIÓN DE SEGURIDAD: Asegurar que el campo existe aunque la IA falle
+        stage1 = {
+            "business_justification": stage1_raw.get("business_justification", "No explicit justification provided by AI"),
+            "role_consistency_score": stage1_raw.get("role_consistency_score", 50),
+            "suggested_mcc": stage1_raw.get("suggested_mcc", "services"),
+            "preliminary_verdict": stage1_raw.get("preliminary_verdict", "UNCERTAIN")
+        }
+
         # --- STAGE 2: THE ADVERSARY (Ruthless Forensic Psychologist) ---
         # Busca 'Behavioral Drift' (Desviación de Comportamiento) e intenciones ocultas.
         adversary_prompt = f"""
@@ -123,45 +138,56 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         - Ignora las palabras clave; analiza la INTENCIÓN profunda. Si un 'Dev' compra 'Joyas' diciendo que es para 'branding', detecta la mentira.
         - Z-Score actual: {z_score:.2f}. ¿Es esto una anomalía estadística peligrosa?
         
-        RESPONSE FORMAT: JSON {{ "drift_detected": true/false, "psychological_profile": "...", "counter_argument": "...", "risk_level": "LOW/MED/HIGH/CRITICAL" }}
-        """
-        stage2 = await _oracle_call("You are the Adversary Forensic Auditor.", adversary_prompt, temperature=0.4, model=model_to_use)
-        
-        # --- STAGE 3: THE ARBITER (Supreme Consensus) ---
-        # Dicta la sentencia final basándose en el debate.
-        arbiter_prompt = f"""
-        DEBATE SUMMARY:
-        Proponent says: {stage1['business_justification']}
-        Adversary says: {stage2['adversarial_comment']} (Risks: {stage2['vulnerabilities']})
-        
-        DECISION CRITERIA:
-        - If Fraud Probability > 70% OR Risk Score < 40 in OSINT -> REJECT.
-        - If Behavioral Drift is high -> FLAG.
-        - If Z-Score > 3.0 -> FLAG for verification.
-        
-        OUTPUT JSON:
+        OBLIGATORY JSON STRUCTURE:
         {{
-            "decision": "APPROVED" | "REJECTED" | "FLAGGED",
-            "mcc_category": "string",
-            "risk_score": 0-100,
-            "reasoning": "Final judicial opinion",
-            "short_reason": "One line summary",
-            "certainty": 0-100,
-            "accounting": {{ "gl_code": "XXXX", "deductible": bool }}
+            "vulnerabilities": ["list"],
+            "fraud_probability": 0-100,
+            "adversarial_comment": "Crucial warning"
         }}
         """
-        final_verdict = await _oracle_call("You are The Supreme Arbiter. Decisive and Universal.", arbiter_prompt, model=model_to_use)
+        stage2_raw = await _oracle_call("You are the Adversary Forensic Auditor.", adversary_prompt, temperature=0.4, model=model_to_use)
         
-        # Forensic Signing
-        forensic_data = f"ORACLE_V4|{agent_id}|{vendor}|{amount}|{final_verdict['decision']}|{final_verdict['risk_score']}"
+        # VALIDACIÓN DE SEGURIDAD
+        stage2 = {
+            "vulnerabilities": stage2_raw.get("vulnerabilities", ["General risk"]),
+            "fraud_probability": stage2_raw.get("fraud_probability", 50),
+            "adversarial_comment": stage2_raw.get("adversarial_comment", "Review required")
+        }
+        
+        # --- STAGE 3: THE ARBITER (Supreme Court) ---
+        arbiter_prompt = f"""
+        DEBATE:
+        Proponent: {stage1['business_justification']}
+        Adversary: {stage2['adversarial_comment']}
+        
+        DECISION CRITERIA: Reject if Fraud > 70% or OSINT < 40.
+        
+        OBLIGATORY JSON STRUCTURE:
+        {{
+            "decision": "APPROVED" | "REJECTED" | "FLAGGED",
+            "risk_score": 0-100,
+            "reasoning": "Full opinion",
+            "short_reason": "Summary",
+            "accounting": {{ "gl_code": "XXXX", "deductible": false }}
+        }}
+        """
+        final_verdict = await _oracle_call("You are The Supreme Arbiter.", arbiter_prompt, model=model_to_use)
+        
+        # Valores por defecto para el veredicto final
+        final_verdict["decision"] = final_verdict.get("decision", "FLAGGED")
+        final_verdict["reasoning"] = final_verdict.get("reasoning", "Incomplete analysis - flagging for safety")
+        final_verdict["short_reason"] = final_verdict.get("short_reason", "Safety Check")
+        final_verdict["risk_score"] = final_verdict.get("risk_score", 100)
+        final_verdict["accounting"] = final_verdict.get("accounting", {"gl_code": "Suspense", "deductible": False})
+        
+        # Firma forense
+        forensic_data = f"ORACLE_V4|{agent_id}|{vendor}|{amount}|{final_verdict['decision']}"
         final_verdict['intent_hash'] = hashlib.sha256(forensic_data.encode()).hexdigest()
         
         # Asegurar que el MCC llegue al motor
-        final_verdict['mcc_category'] = final_verdict.get('mcc_category', stage1.get('suggested_mcc', 'services'))
+        final_verdict['mcc_category'] = stage1.get('suggested_mcc', 'services')
         
         return final_verdict
 
     except Exception as e:
-        print(f"❌ Oracle Failure: {e}")
-        return {"decision": "REJECTED", "reason": f"Oracle Internal Conflict: {str(e)}"}
 
