@@ -174,7 +174,7 @@ def send_ban_alert_to_owner(to_email, agent_id, vendor, amount, reason):
     msg.attach(MIMEText(body, 'html'))
     
     try:
-        smtp_port = int(os.environ.get("SMTP_PORT", 587))
+        smtp_port = int(os.environ.get("SMTP_PORT", 2525))  # Puerto 2525 para Brevo
         print(f"🔌 [SMTP] Conectando a {smtp_host}:{smtp_port} para enviar a {to_email}...")
         
         if smtp_port == 465:
