@@ -152,6 +152,16 @@ class UniversalEngine:
             return False
 
     async def evaluate(self, request: TransactionRequest, idempotency_key: str = None) -> TransactionResult:
+        # --- CAPA -1: SANITY CHECK (NUEVO) ---
+        # Bloqueamos montos negativos, cero o absurdamente pequeños antes de gastar recursos.
+        if request.amount <= 0.50:  # Mínimo de Stripe suele ser $0.50
+            print(f"🚫 [SANITY] Monto inválido detectado: ${request.amount}")
+            return TransactionResult(
+                authorized=False,
+                status="REJECTED",
+                reason=f"Monto inválido (${request.amount}). El mínimo es $0.50."
+            )
+
         # 0. IDEMPOTENCIA (Evitar cobros dobles)
         if idempotency_key and self.redis_enabled:
             cache_key = f"idempotency:{idempotency_key}"
