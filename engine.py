@@ -866,6 +866,7 @@ class UniversalEngine:
                          "reason": f"Automated Ban by AI Guard: {reason_text}",
                          "severity": "CRITICAL"
                      }).execute()
+                 except Exception as bl_err:
                      print(f"⚠️ Error actualizando Blacklist Global: {bl_err}")
 
             # 2. BANEO: Actualizar el estado del agente a BANNED
