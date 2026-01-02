@@ -337,7 +337,11 @@ async def pay(
     result = await engine.process_instant_payment(real_req)
     
     if result.get("status") == "APPROVED_PENDING_AUDIT":
-        background_tasks.add_task(engine.run_background_audit, real_req.model_dump())
+        # Inyectamos el ID real de la base de datos para que la auditoría pueda actualizar el log
+        task_data = real_req.model_dump()
+        task_data['id'] = result.get('db_log_id')
+        
+        background_tasks.add_task(engine.run_background_audit, task_data)
         
     return result
 

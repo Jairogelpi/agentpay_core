@@ -904,6 +904,13 @@ class UniversalEngine:
             new_balance = float(rpc_res.data)
             print(f"✅ Transacción completada. Nuevo saldo: ${new_balance}")
 
+            # 3b. RECUPERAR ID DEL LOG (Necesario para auditoría/learning)
+            try:
+                log_res = self.db.table("transaction_logs").select("id").eq("agent_id", request.agent_id).order("created_at", desc=True).limit(1).single().execute()
+                log_id = log_res.data.get('id') if log_res.data else None
+            except:
+                log_id = None
+
         except Exception as e:
             return {"status": "REJECTED", "reason": f"Error de Integridad: {e}"}
 
@@ -927,9 +934,10 @@ class UniversalEngine:
             "success": True,
             "status": "APPROVED_PENDING_AUDIT",
             "message": "Pago aprobado (Auditoría en curso)",
-            "transaction_id": card['id'], # Usamos ID de tarjeta como tx id rápido
+            "transaction_id": card['id'], 
+            "db_log_id": log_id, # <--- NUEVO CAMPO CRÍTICO
             "card": card,
-            "balance": "hidden (async)", # No recalculamos saldo aqui para ir rápido
+            "balance": "hidden (async)", 
             "forensic_url": "PENDING"
         }
 

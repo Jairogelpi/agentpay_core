@@ -2,79 +2,62 @@ import requests
 import time
 import sys
 
-# Configuración - Cambia esto por tu URL de Render
+# Configuración
 API_URL = "https://agentpay-core.onrender.com"
-EMAIL_CLIENTE = "jairogelpi@gmail.com"
+EMAIL_ALERTA = "jairogelpi@gmail.com" # Tu correo donde llegará el botón
+VENDOR_GRIS = "Amazon_Web_Services"
 
-def ejecutar_flujo_completo():
-    print("🛡️  --- AGENTPAY: PRUEBA DE FLUJO REAL DE CLIENTE ---")
+def ejecutar_test():
+    print("🤖 --- AGENTPAY: TEST DE APRENDIZAJE EN VIVO ---")
 
-    # 1. REGISTRO DEL AGENTE
-    print("\n1️⃣  Paso 1: Registrando nuevo agente en el sistema...")
-    try:
-        reg_res = requests.post(f"{API_URL}/v1/agent/register", json={
-            "client_name": "Jairo Gelpi Test",
-            "country_code": "ES"
-        })
-        reg_res.raise_for_status()
-        agente = reg_res.json()
-        
-        agent_id = agente.get('agent_id')
-        api_key = agente.get('api_key')
-        
-        print(f"   ✅ Agente Creado: {agent_id}")
-        print(f"   🔑 API Key: {api_key}")
-    except Exception as e:
-        print(f"   ❌ Error en registro: {e}")
-        sys.exit(1)
-
-    # 2. ASOCIACIÓN DE EMAIL DE ALERTAS
-    print(f"\n2️⃣  Paso 2: Asociando email {EMAIL_CLIENTE} para alertas críticas...")
-    try:
-        settings_res = requests.post(f"{API_URL}/v1/agent/settings", json={
-            "agent_id": agent_id,
-            "owner_email": EMAIL_CLIENTE
-        })
-        settings_res.raise_for_status()
-        print("   ✅ Configuración de contacto actualizada en Supabase.")
-    except Exception as e:
-        print(f"   ❌ Error al configurar settings: {e}")
-        sys.exit(1)
-
-    # RECARGA DE SALDO (Necesario para poder pagar)
-    print("\n   💰 Recargando saldo inicial ($100)...")
-    requests.post(f"{API_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 100.0})
-
-    # 3. SIMULACIÓN DE COMPRA PROHIBIDA (BANEO)
-    print("\n3️⃣  Paso 3: Intentando compra de alto riesgo (Plutonio Enriquecido)...")
-    print("   (Esto debería disparar el baneo asíncrono y enviarte un email)")
+    # 1. REGISTRO
+    print("\n1️⃣  Registrando nuevo agente...")
+    reg = requests.post(f"{API_URL}/v1/agent/register", json={
+        "client_name": "Test Aprendizaje Real",
+        "country_code": "ES"
+    }).json()
     
+    agent_id = reg['agent_id']
+    api_key = reg['api_key']
     headers = {"Authorization": f"Bearer {api_key}"}
-    try:
-        pay_res = requests.post(f"{API_URL}/v1/pay", json={
-            "vendor": "nuclear-supply.com",
-            "amount": 75.0,
-            "description": "Plutonio grado militar para reactor casero",
-            "justification": "Experimento de física"
-        }, headers=headers)
-        
-        print(f"   📝 Respuesta inicial del servidor: {pay_res.json().get('status')}")
-        print("   ⏳ Esperando 10 segundos para que la IA procese y envíe el correo...")
-        time.sleep(10)
-        
-        # 4. VERIFICACIÓN FINAL
-        print("\n4️⃣  Paso 4: Verificando si el agente ha sido bloqueado...")
-        status_res = requests.post(f"{API_URL}/v1/agent/status", json={"agent_id": agent_id})
-        current_status = status_res.json().get('status')
-        
-        if current_status == "BANNED" or current_status == "FROZEN":
-            print(f"   ✅ ÉXITO: El agente está {current_status}.")
-            print(f"   📧 REVISA AHORA TU CORREO ({EMAIL_CLIENTE}). Deberías tener la alerta de Brevo.")
-        else:
-            print(f"   ⚠️  AVISO: El agente sigue '{current_status}'. Revisa los logs de Render.")
+    print(f"   ✅ Agente: {agent_id}")
 
-    except Exception as e:
-        print(f"   ❌ Error durante el pago o verificación: {e}")
+    # 2. CONFIGURAR EMAIL Y SALDO
+    print(f"\n2️⃣  Asociando email {EMAIL_ALERTA} y cargando $5,000...")
+    requests.post(f"{API_URL}/v1/agent/settings", json={"agent_id": agent_id, "owner_email": EMAIL_ALERTA})
+    requests.post(f"{API_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 5000.0})
+
+    # 3. PRIMER INTENTO (COMPRA GRIS)
+    print(f"\n3️⃣  Intentando compra 'gris' de $3,500 en {VENDOR_GRIS}...")
+    payload = {
+        "vendor": VENDOR_GRIS,
+        "amount": 3500.0,
+        "description": "Servidores de cómputo GPU",
+        "justification": "Proyecto de IA"
+    }
+    
+    res1 = requests.post(f"{API_URL}/v1/pay", json=payload, headers=headers).json()
+    print(f"   📝 Respuesta servidor: {res1.get('status')}")
+    
+    print("\n---------------------------------------------------------")
+    print("📢 ¡ACCIÓN REQUERIDA EN LA VIDA REAL!")
+    print(f"1. Abre tu Gmail ({EMAIL_ALERTA}).")
+    print(f"2. Busca el correo de gelpierreape@gmail.com.")
+    print("3. Haz clic en el botón 'APROBAR Y ENSEÑAR A LA IA'.")
+    print("---------------------------------------------------------")
+    
+    input("\n👉 Una vez hayas hecho clic en el email, presiona ENTER aquí para verificar el aprendizaje...")
+
+    # 4. SEGUNDO INTENTO (LA IA YA DEBERÍA SABERLO)
+    print(f"\n4️⃣  Repitiendo la misma compra de $3,500...")
+    res2 = requests.post(f"{API_URL}/v1/pay", json=payload, headers=headers).json()
+    
+    final_status = res2.get('status')
+    if final_status == "APPROVED":
+        print(f"\n✅ ¡PRUEBA SUPERADA! La IA aprendió de tu clic.")
+        print(f"   Estado final: {final_status} (Sin intervención humana)")
+    else:
+        print(f"\n❌ Algo falló. El estado es {final_status}. Revisa los logs de Render.")
 
 if __name__ == "__main__":
-    ejecutar_flujo_completo()
+    ejecutar_test()
