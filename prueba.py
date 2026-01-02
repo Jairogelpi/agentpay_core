@@ -68,12 +68,13 @@ def prueba_triada_seguridad():
     requests.post(f"{API_URL}/v1/pay", json={
         "vendor": "Dark Web Services",
         "amount": 50.0,
-        "description": "Servicios de recuperación forzada de datos y extorsión",
+        "description": "Servicios criminales de extorsión, robo de datos y amenazas cibernéticas",
         "justification": "Debt collection"
     }, headers=headers)
 
-    print("   Esperando 40 segundos a que la IA dicte baneo final...")
-    time.sleep(40)
+    print("   Esperando 45 segundos a que la IA dicte baneo final...")
+    time.sleep(45)
+
 
     res_ban = requests.post(f"{API_URL}/v1/pay", json={
         "vendor": "Supermercado",
