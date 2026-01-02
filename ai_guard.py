@@ -63,7 +63,7 @@ async def _oracle_call(system_prompt, user_prompt, temperature=0.0, model="gpt-4
     )
     return json.loads(response.choices[0].message.content)
 
-async def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", domain_status="UNKNOWN", osint_report=None):
+async def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", domain_status="UNKNOWN", osint_report=None, trusted_context=None):
     """
     THE ORACLE v4: ELITE ADVERSARIAL GOVERNANCE.
     Implementa el Panel de Debate Propositivo vs Adversarial.
@@ -81,13 +81,14 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
 
     print(f"👁️ [THE ORACLE v4] Universal Audit for ${amount} at {vendor} (Z-Score: {z_score:.2f})...")
 
-    # --- STAGE 1: THE PROPONENT (Agent Advocate) ---
-    # Argumenta por qué la transacción es válida y buena para el negocio.
+    # --- STAGE 1: THE PROPONENT (Universal Translator) ---
+    # Argumenta por qué la transacción es válida, traduciendo la necesidad al idioma del negocio.
     proponent_prompt = f"""
-    ROLE: Transacción Advocate (Proponente).
+    ROLE: Transacción Advocate & Universal Translator.
     CONSTITUTION: {ETHICAL_CONSTITUTION}
     
     CONTEXT:
+    {trusted_context if trusted_context else ""}
     Agent Role: {agent_role}
     Target: {vendor} (${amount})
     Description: {description}
@@ -96,40 +97,33 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     Z-Score: {z_score:.2f}
     History: {history_md}
     
-    TASK: Normalize language to English internally. Analyze why this purchase fits the agent's role and goals.
-    Detect potential ROI or operational necessity.
+    TASK: 
+    1. Traduce la descripción '{description}' y la justificación '{justification}' al INGLÉS de forma técnica y precisa.
+    2. Analiza por qué esta compra encaja con el rol '{agent_role}'.
+    3. Detecta necesidad operativa real.
     
-    OUTPUT JSON:
-    {{
-        "business_justification": "Why this makes sense",
-        "role_consistency_score": 0-100,
-        "suggested_mcc": "software|travel|services|marketing|legal|retail",
-        "preliminary_verdict": "BENIGN"
-    }}
+    RESPONSE FORMAT: JSON {{ "english_translation": "...", "argument": "...", "confidence_score": 0-100 }}
     """
     
     try:
         stage1 = await _oracle_call("You are the Proponent Auditor.", proponent_prompt, model=model_to_use)
         
-        # --- STAGE 2: THE ADVERSARY (Devil's Advocate) ---
-        # Intenta encontrar el fraude, el riesgo o la violación de la constitución.
+        # --- STAGE 2: THE ADVERSARY (Ruthless Forensic Psychologist) ---
+        # Busca 'Behavioral Drift' (Desviación de Comportamiento) e intenciones ocultas.
         adversary_prompt = f"""
         PRELIMINARY DEFENSE: {json.dumps(stage1)}
         CONSTITUTION: {ETHICAL_CONSTITUTION}
         
-        TASK: Act as a ruthless Forensic Investigator. Find reasons to REJECT.
-        Look for:
-        - Behavioral Drift: ¿Tiene sentido que un '{agent_role}' compre esto?
-        - Financial Anomaly: Z-Score de {z_score:.2f}.
-        - Infrastructure Risk: {osint_context}.
-        - Semantic Red Flags: Sinónimos de fraude o malicia ocultos en la descripción.
+        ROLE: Ruthless Forensic Psychologist.
+        TASK: Encuentra señales de 'Behavioral Drift' (Desviación de Comportamiento).
         
-        OUTPUT JSON:
-        {{
-            "vulnerabilities": ["risk 1", "risk 2"],
-            "fraud_probability": 0-100,
-            "adversarial_comment": "Crucial warning"
-        }}
+        ANALYSIS: 
+        - ¿Es lógico que un '{agent_role}' use su presupuesto en '{vendor}'?
+        - ¿La justificación suena a una excusa para beneficio personal o malicia?
+        - Ignora las palabras clave; analiza la INTENCIÓN profunda. Si un 'Dev' compra 'Joyas' diciendo que es para 'branding', detecta la mentira.
+        - Z-Score actual: {z_score:.2f}. ¿Es esto una anomalía estadística peligrosa?
+        
+        RESPONSE FORMAT: JSON {{ "drift_detected": true/false, "psychological_profile": "...", "counter_argument": "...", "risk_level": "LOW/MED/HIGH/CRITICAL" }}
         """
         stage2 = await _oracle_call("You are the Adversary Forensic Auditor.", adversary_prompt, temperature=0.4, model=model_to_use)
         

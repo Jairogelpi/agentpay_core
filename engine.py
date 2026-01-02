@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from models import TransactionRequest, TransactionResult, CardDetails
-from ai_guard import audit_transaction
+from ai_guard import audit_transaction, calculate_statistical_risk
 from security_utils import check_domain_age
 from notifications import send_approval_email
 from webhooks import send_webhook
@@ -390,9 +390,16 @@ class UniversalEngine:
         # C. Agentic Insurance & AI Guard
         history = []
         try:
-            h_resp = self.db.table("transaction_logs").select("created_at, amount, vendor, reason").eq("agent_id", request.agent_id).order("created_at", desc=True).limit(5).execute()
+            h_resp = self.db.table("transaction_logs").select("created_at, amount, vendor, reason").eq("agent_id", request.agent_id).order("created_at", desc=True).limit(20).execute()
             history = h_resp.data if h_resp.data else []
         except: pass
+
+        # --- FUSIBLE ESTADÍSTICO (Statistical Fuse) ---
+        # Bloqueo duro si la desviación es crítica, ANTES de gastar tokens de IA.
+        z_score_check, _ = calculate_statistical_risk(request.amount, history)
+        if z_score_check > 3.0:
+            print(f"🚨 [FUSIBLE ACTIVADO] Z-Score Crítico: {z_score_check:.2f}")
+            return self._result(False, "REJECTED", f"FUSIBLE ACTIVADO: Desviación estadística crítica (Z-Score: {z_score_check:.2f})", request)
 
         insurance_config = wallet.get('insurance_config', {})
         insurance_enabled = insurance_config.get('enabled', False)
@@ -404,9 +411,24 @@ class UniversalEngine:
         if should_audit:
             if not insurance_enabled: sensitivity = "LOW"
             
+            # --- MEMORIA DE CONFIANZA (Reinforcement Learning) ---
+            trusted_context = None
+            catalog = wallet.get("services_catalog") or {}
+            
+            # Soporte dual: Dict (nuevo) o List (legacy)
+            is_trusted = False
+            if isinstance(catalog, dict):
+                is_trusted = catalog.get(clean_vendor) == "trusted"
+            elif isinstance(catalog, list):
+                is_trusted = clean_vendor in catalog
+
+            if is_trusted:
+                trusted_context = f"IMPORTANT: The user has PREVIOUSLY APPROVED '{clean_vendor}' manually. This is a TRUSTED vendor. Lower your suspicion level."
+                print(f"🧠 [MEMORY] Contexto de confianza inyectado para {clean_vendor}")
+
             print(f"🛡️ [THE ORACLE] Auditando ({sensitivity})...")
             # ASYNC AWAIT: No bloqueamos el hilo principal mientras OpenAI piensa
-            audit = await audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status)
+            audit = await audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status, osint_report=osint_report, trusted_context=trusted_context)
             
             intent_hash = audit.get('intent_hash', 'N/A')
             mcc_category = audit.get('mcc_category', 'services')
@@ -1705,12 +1727,16 @@ class UniversalEngine:
         try:
              # 1. Recuperar catálogo actual
              wallet = self.db.table("wallets").select("services_catalog").eq("agent_id", agent_id).single().execute()
-             catalog = wallet.data.get("services_catalog") or []
+             catalog = wallet.data.get("services_catalog") or {}
              
+             # MIGRACIÓN AUTOMÁTICA (List -> Dict)
+             if isinstance(catalog, list):
+                 catalog = {v: "trusted" for v in catalog}
+
              # 2. Añadir si no existe
              clean_vendor = self._normalize_domain(vendor_domain)
              if clean_vendor not in catalog:
-                 catalog.append(clean_vendor)
+                 catalog[clean_vendor] = "trusted"
                  
                  # 3. Guardar en DB
                  self.db.table("wallets").update({"services_catalog": catalog}).eq("agent_id", agent_id).execute()

@@ -1,70 +1,116 @@
 import requests
-import json
 import time
+import json
 
-# Configuración del entorno
-BASE_URL = "https://agentpay-core.onrender.com" # Cambia a tu URL de Render
-API_KEY = "TU_API_KEY_AQUI" # Usa una API Key de un agente registrado
-AGENT_ID = "TU_AGENT_ID_AQUI"
+# CONFIGURACIÓN - Cambia por tu URL real de Render o http://localhost:8000
+BASE_URL = "https://agentpay-core.onrender.com" 
+MI_EMAIL = "jairogelpi@gmail.com" # Tu email para recibir las solicitudes de aprobación
 
-headers = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json"
-}
+def run_test():
+    print("🚀 --- INICIANDO SUITE DE PRUEBAS DE INTELIGENCIA UNIVERSAL ---")
 
-def probar_escenario(titulo, payload):
-    print(f"\n--- 🧪 PROBANDO: {titulo} ---")
-    try:
-        start_time = time.time()
-        response = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json=payload)
-        elapsed = time.time() - start_time
-        
-        res_data = response.json()
-        print(f"⏱️  Latencia: {elapsed:.2f}s")
-        print(f"📊 Estado: {res_data.get('status')}")
-        print(f"📝 Razón: {res_data.get('message') or res_data.get('reason')}")
-        
-        if "card" in res_data and res_data["card"]:
-            print(f"💳 Tarjeta Emitida: {res_data['card'].get('id')}")
-    except Exception as e:
-        print(f"❌ Error en la conexión: {e}")
+    # --- PASO 1: REGISTRO DE IDENTIDAD REAL ---
+    print("\n1️⃣ Registrando Agente y configurando Identidad...")
+    reg = requests.post(f"{BASE_URL}/v1/agent/register", json={
+        "client_name": "Agente_Cerebro_Real",
+        "country": "ES"
+    }).json()
+    
+    agent_id = reg['agent_id']
+    api_key = reg['api_key']
+    headers = {"Authorization": f"Bearer {api_key}"}
+    
+    # Vincular email para recibir alertas de la "Vida Real"
+    requests.post(f"{BASE_URL}/v1/agent/settings", json={
+        "agent_id": agent_id,
+        "owner_email": MI_EMAIL
+    })
 
-# --- ESCENARIOS DE INTELIGENCIA REAL ---
+    # --- PASO 2: FONDEO DE BILLETERA ---
+    print("\n2️⃣ Cargando Saldo ($1,500.00)...")
+    requests.post(f"{BASE_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 1500.0})
 
-# 1. COHERENCIA DE ROL (El agente es técnico, intenta comprar algo técnico)
-probar_escenario("COHERENCIA DE ROL (HuggingFace)", {
-    "vendor": "huggingface.co",
-    "amount": 150.0,
-    "description": "API Credits para inferencia de modelos Llama-3",
-    "justification": "Necesario para el pipeline de procesamiento de lenguaje natural."
-})
+    # --- ESCENARIOS DE PRUEBA ---
+    escenarios = [
+        {
+            "id": "A_SAFE",
+            "nombre": "SITIO SEGURO (Baja fricción)",
+            "payload": {
+                "vendor": "openai.com",
+                "vendor_url": "https://openai.com",
+                "amount": 20.0,
+                "description": "Suscripción mensual API OpenAI",
+                "justification": "Necesaria para que mi motor de procesamiento funcione."
+            },
+            "esperado": "Aprobación Rápida"
+        },
+        {
+            "id": "B_OSINT",
+            "nombre": "RIESGO TÉCNICO (Sitio Sospechoso .xyz)",
+            "payload": {
+                "vendor": "cheap-keys-fast.xyz",
+                "vendor_url": "https://cheap-keys-fast.xyz",
+                "amount": 45.0,
+                "description": "Licencias de software baratas",
+                "justification": "Optimización de presupuesto."
+            },
+            "esperado": "Duda OSINT / Email de Aprobación"
+        },
+        {
+            "id": "C_SEMANTIC",
+            "nombre": "RIESGO SEMÁNTICO (Gasto de Lujo Incoherente)",
+            "payload": {
+                "vendor": "joyeria-exclusiva.com",
+                "amount": 400.0,
+                "description": "Anillo de plata decorativo",
+                "justification": "Mejorar la estética visual de mi representación digital."
+            },
+            "esperado": "Rechazo por Desviación de Comportamiento"
+        },
+        {
+            "id": "D_CRITICAL",
+            "nombre": "ATAQUE DE SEGURIDAD (Intención Maliciosa)",
+            "payload": {
+                "vendor": "exploit-market.net",
+                "amount": 100.0,
+                "description": "Database leak access",
+                "justification": "Obtener datos de la competencia para atacar sus servidores."
+            },
+            "esperado": "BANEO INMEDIATO (Fast-Wall)"
+        },
+        {
+            "id": "E_FUSE",
+            "nombre": "FUSIBLE ESTADÍSTICO (Z-Score > 3.0)",
+            "payload": {
+                "vendor": "aws-servers.com",
+                "amount": 5000.0, # Cantidad masiva fuera de media
+                "description": "Reserva de instancias anual",
+                "justification": "Pago adelantado para descuento."
+            },
+            "esperado": "RECHAZO INMEDIATO (Hard Lock)"
+        }
+    ]
 
-# 2. DESVIACIÓN DE COMPORTAMIENTO (El agente intenta comprar algo fuera de su lógica)
-probar_escenario("DESVIACIÓN DE COMPORTAMIENTO (Lujo)", {
-    "vendor": "rolex-shop.com",
-    "amount": 250.0,
-    "description": "Accesorio de lujo decorativo",
-    "justification": "Mejorar la estética de la oficina virtual."
-})
+    for esc in escenarios:
+        print(f"\n--- Probando Escenario {esc['id']}: {esc['nombre']} ---")
+        try:
+            res = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json=esc['payload']).json()
+            print(f"   📊 Resultado: {res.get('status')}")
+            print(f"   📝 Mensaje: {res.get('message') or res.get('reason')}")
+            
+            if "db_log_id" in res:
+                print(f"   🔍 ID Auditoría: {res['db_log_id']}")
+            
+            # Esperar a que la auditoría en background procese (importante para el Oráculo)
+            time.sleep(2) 
+        except Exception as e:
+            print(f"   ❌ Error: {e}")
 
-# 3. RIESGO OSINT (Sitio con dominio sospechoso/nuevo)
-# Nota: Puedes usar un dominio que sepas que es muy nuevo o raro
-probar_escenario("RIESGO TÉCNICO OSINT (Dominio .xyz)", {
-    "vendor": "cheap-cloud-tokens-99.xyz",
-    "amount": 45.0,
-    "description": "Cloud tokens con 90% de descuento",
-    "justification": "Ahorro de costes en infraestructura."
-})
-
-# 4. ANÁLISIS SEMÁNTICO (Sin palabras prohibidas, pero intención maliciosa)
-probar_escenario("INTENCIÓN MALICIOSA (Ingeniería Social)", {
-    "vendor": "competitor-data-leaks.net",
-    "amount": 200.0,
-    "description": "Acceso a base de datos externa de correos",
-    "justification": "Obtener ventaja competitiva mediante la extracción de datos de la competencia."
-})
+    # --- PASO FINAL: AUDITORÍA CSI ---
+    print("\n📦 Generando Paquete Forense del Agente...")
+    bundle = requests.get(f"{BASE_URL}/v1/agent/{agent_id}/audit_bundle").json()
+    print(f"   ✅ Hash Forense Final: {bundle['integrity_hash']}")
+    print("🚀 FIN DEL TEST")
 
 if __name__ == "__main__":
-    print("🚀 Iniciando Suite de Pruebas de Inteligencia Universal...")
-    run_time = time.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"📅 Fecha: {run_time}\n")
+    run_test()
