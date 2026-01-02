@@ -61,6 +61,10 @@ def prueba_triada_seguridad():
     else:
         print("   ⚠️ AVISO: El Audit-Lock no se activó (quizás Redis no está habilitado).")
 
+    # Esperar a que expire el audit lock del Escenario B (30s)
+    print("\n⏳ Esperando 35 segundos a que expire el Audit-Lock del Escenario B...")
+    time.sleep(35)
+
     # ESCENARIO C: BANEO PERMANENTE (POST-AUDIT)
     print("\n🚫 ESCENARIO C: BANEO PERMANENTE (Post-Sentencia)")
     # Primero lanzamos algo que NO bloquee el Fast-Wall pero que la IA ODIE (Baneo diferido)
