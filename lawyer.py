@@ -63,10 +63,7 @@ class AutoLawyer:
                 "suggested_action": "REJECT_CLAIM",
                 "confidence_score": 0
             }
-                "judicial_opinion": "Court System Offline (No API Key).",
-                "suggested_action": "REJECT_CLAIM",
-                "confidence_score": 0
-            }
+
 
         try:
             # ETAPA 1: DESCUBRIMIENTO
