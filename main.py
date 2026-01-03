@@ -8,7 +8,7 @@ from loguru import logger
 import os
 import json
 from engine import UniversalEngine
-from models import TransactionRequest
+from models import TransactionRequest, CreditNoteRequest
 from identity import IdentityManager
 from mcp.server.fastmcp import FastMCP
 
@@ -623,13 +623,13 @@ async def issue_cert(req: dict):
     )
 
 @app.post("/v1/accounting/credit-note")
-async def generate_credit_note(request: TransactionRequest, agent_id: str = Depends(verify_api_key)):
+async def generate_credit_note(request: CreditNoteRequest, agent_id: str = Depends(verify_api_key)):
     """
     Genera una Nota de Crédito (Factura Rectificativa) para una transacción reembolsada.
     """
     try:
         # Verificar que la transacción existe y pertenece al agente
-        tx = engine.db.table("transaction_logs").select("*").eq("id", request.transaction_id).eq("agent_id", agent_id).single().execute()
+        tx = engine.db.table("transaction_logs").select("*").eq("id", request.original_transaction_id).eq("agent_id", agent_id).single().execute()
         if not tx.data:
             raise HTTPException(status_code=404, detail="Transacción no encontrada")
             

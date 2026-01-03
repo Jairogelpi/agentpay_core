@@ -8,6 +8,12 @@ class TransactionRequest(BaseModel):
     description: str
     justification: Optional[str] = None # Proof of Intent (Chain of Thought)
     vendor_url: Optional[str] = None # For OSINT audit
+    transaction_id: Optional[str] = None # Optional usually, but required for credit note currently if reused
+
+class CreditNoteRequest(BaseModel):
+    agent_id: str
+    original_transaction_id: str
+    reason: str
 
 class CardDetails(BaseModel):
     id: Optional[str] = None
