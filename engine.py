@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from supabase.lib.client_options import ClientOptions
 from models import TransactionRequest, TransactionResult, CardDetails
 from ai_guard import audit_transaction, calculate_statistical_risk
 from security_utils import check_domain_age
@@ -45,7 +46,16 @@ class UniversalEngine:
         if not url or not key or not stripe.api_key:
             raise ValueError("❌ FALTAN CREDENCIALES: Revisa SUPABASE_URL, SUPABASE_KEY y STRIPE_SECRET_KEY en .env")
             
-        self.db: Client = create_client(url, key)
+        # --- INFRAESTRUCTURA 2026: BLINDAJE DE RED ---
+        # Configuramos timeouts explícitos (10s) para fallar rápido en lugar de colgar.
+        options = ClientOptions(
+            postgrest_client_timeout=10,
+            storage_client_timeout=10,
+            schema="public"
+        )
+        
+        # Inicializamos el cliente con las opciones blindadas
+        self.db: Client = create_client(url, key, options=options)
         self.credit_bureau = CreditBureau(self.db)
         self.legal_wrapper = LegalWrapper()
         self.identity_mgr = IdentityManager(self.db)
@@ -963,180 +973,203 @@ class UniversalEngine:
 
     async def run_background_audit(self, tx_data):
         """
-        Auditoría Post-Pago: El cerebro trabaja mientras el dinero ya se movió.
+        Auditoría Post-Pago Blindada (2026 Standard).
+        Si el servidor muere, guarda la evidencia en Redis para reintentar.
         """
-        logger.info(f"🕵️ [THE ORACLE] Analizando rastro de: {tx_data.get('vendor')}")
-        
-        # Recuperar contexto necesario
-        agent_id = tx_data.get('agent_id')
-        vendor = tx_data.get('vendor')
-        amount = tx_data.get('amount')
-        
-        # 0. AUTO-LEARN CHECK (Lista Blanca)
         try:
-             w_res = self.db.table("wallets").select("agent_role, services_catalog, owner_email").eq("agent_id", agent_id).single().execute()
-             wallet_data = w_res.data or {}
-             agent_role = wallet_data.get('agent_role', 'Unknown')
-             trusted_vendors = wallet_data.get('services_catalog', []) or []
-             owner_email = wallet_data.get('owner_email')
-             
-             clean_vendor = self._normalize_domain(vendor)
-             if clean_vendor in trusted_vendors:
-                 logger.success(f"✅ [AUTO-LEARN] '{clean_vendor}' ya es de confianza. Aprobando automáticamente.")
-                 self.db.table("transaction_logs").update({
-                     "status": "APPROVED",
-                     "reason": f"Trusted Vendor (Auto-Learn): {clean_vendor}"
-                 }).eq("id", tx_data.get('id')).execute()
-                 return
-                 
-             h_resp = self.db.table("transaction_logs").select("created_at, amount, vendor, reason").eq("agent_id", agent_id).order("created_at", desc=True).limit(5).execute()
-             history = h_resp.data if h_resp.data else []
-        except Exception as e: 
-             logger.error(f"Error fetching wallet/history data for background audit: {e}")
-             agent_role = "Unknown"
-             history = []
-             trusted_vendors = {}
-
-        # 0. OSINT AUDIT (Mente Colmena)
-        # Recuperamos datos de reputación en tiempo real para el AI Guard
-        osint_report = await self._perform_osint_scan(tx_data.get('vendor_url') or tx_data.get('vendor'))
-
-        # Llamamos a tu AI Guard COMPLETO (con políticas corporativas)
-        corporate_policies = wallet_data.get('corporate_policies', {}) if 'wallet_data' in dir() else {}
-        risk_assessment = await audit_transaction(
-            vendor=vendor, 
-            amount=amount, 
-            description=tx_data.get('description', 'N/A'), 
-            agent_id=agent_id, 
-            agent_role=agent_role, 
-            history=history, 
-            justification=tx_data.get('justification', 'N/A'),
-            sensitivity="HIGH",
-            osint_report=osint_report,
-            corporate_policies=corporate_policies  # <--- NUEVO: Políticas corporativas
-        )
-        
-        verdict = risk_assessment.get('decision', 'FLAGGED')
-        reason_text = risk_assessment.get('reasoning', 'Fraud Detected')
-
-        if "REJECTED" in verdict or "HIGH RISK" in str(risk_assessment).upper():
-            agent_id = tx_data['agent_id']
-            amount = float(tx_data['amount'])
-            vendor = tx_data.get('vendor', 'UNKNOWN')
+            # --- INTENTO DE AUDITORÍA ---
+            # (Aquí va toda tu lógica actual de auditoría...)
+            logger.info(f"🕵️ [THE ORACLE] Analizando rastro de: {tx_data.get('vendor')}")
             
-            # 0. Recuperar configuración de contacto del agente (Slack y Email)
-            wallet_res = self.db.table("wallets").select("slack_webhook_url, owner_email").eq("agent_id", agent_id).single().execute()
-            contact_info = wallet_res.data if wallet_res.data else {}
-            slack_url = contact_info.get('slack_webhook_url')
-            owner_email = contact_info.get('owner_email')
+            # Recuperar contexto necesario
+            agent_id = tx_data.get('agent_id')
+            vendor = tx_data.get('vendor')
+            amount = tx_data.get('amount')
             
-            # 1. REVERSIÓN: Devolver el dinero (monto negativo suma al saldo)
-            self.db.rpc("deduct_balance", {"p_agent_id": agent_id, "p_amount": -amount}).execute()
-
-            # 2. BANEO + PILLAR 5: HIVE MIND BLACKLIST
-            # Si el riesgo es crítico, quemamos el dominio en la red global
-            if "CRITICAL" in str(risk_assessment).upper() or osint_report.get('score', 100) < 30:
-                 try:
-                     logger.warning(f"☣️ [HIVE MIND] Agregando {vendor} a la LISTA NEGRA GLOBAL.")
-                     self.db.table("global_blacklist").upsert({
-                         "vendor": self._normalize_domain(vendor),
-                         "reason": f"Automated Ban by AI Guard: {reason_text}",
-                         "severity": "CRITICAL"
-                     }).execute()
-                 except Exception as bl_err:
-                     logger.error(f"⚠️ Error actualizando Blacklist Global: {bl_err}")
-
-            # 2. BANEO: Actualizar el estado del agente a BANNED
-            self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", agent_id).execute()
-
-            # 3. LOG: Registrar la expulsión por seguridad
-            import uuid
-            self.db.table("transaction_logs").insert({
-                "id": str(uuid.uuid4()),
-                "agent_id": agent_id,
-                "amount": 0.0,
-                "vendor": "SYSTEM_SECURITY",
-                "status": "SECURITY_BAN",
-                "reason": f"Fraude detectado por IA: {verdict}"
-            }).execute()
-            
-            # 4. ALERTA INTERNA: Notificar al equipo de seguridad (SECURITY_ALERT_EMAIL)
-            from notifications import send_security_ban_alert
-            send_security_ban_alert(agent_id, reason_text, amount)
-            
-            # 5. ALERTA SLACK: Notificar al canal del agente si tiene Slack configurado
-            if slack_url:
-                from integrations import send_slack_approval
-                send_slack_approval(
-                    webhook_url=slack_url,
-                    agent_id=agent_id,
-                    amount=amount,
-                    vendor=vendor,
-                    approval_link="#",
-                    reason=f"🚨 BANEO AUTOMÁTICO: {verdict}"
-                )
-                logger.info(f"📢 Alerta Slack enviada para {agent_id}")
-            
-            # 6. ALERTA EMAIL AL CLIENTE: Notificar al dueño si tiene email configurado
-            if owner_email:
-                from notifications import send_ban_alert_to_owner
-                try:
-                    send_ban_alert_to_owner(
-                        to_email=owner_email,
-                        agent_id=agent_id,
-                        vendor=vendor,
-                        amount=amount,
-                        reason=verdict
-                    )
-                    logger.info(f"📧 Alerta de baneo enviada a {owner_email}")
-                except Exception as e:
-                    logger.error(f"⚠️ Fallo al enviar alerta por email al cliente: {e}")
-            
-            logger.success(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
-
-        # --- ZONA GRIS / APRENDIZAJE ---
-        # Cambia la lógica de "Zona Gris" para que sea más sensible en el mundo real
-        # --- ZONA DE DECISIÓN INTELIGENTE (Pillar REAL) ---
-        # Solo mandamos email si la IA NO está segura (FLAGGED) o si detecta riesgo
-        elif verdict == "FLAGGED" or "LOW RISK" not in verdict:
-            logger.info(f"🤔 [SISTEMA INTELIGENTE] Transacción sospechosa detectada por la IA.")
-            
-            # Recuperar email si no estaba en rejected block
+            # 0. AUTO-LEARN CHECK (Lista Blanca)
             try:
-                wr = self.db.table("wallets").select("owner_email").eq("agent_id", agent_id).single().execute()
-                owner_email = wr.data.get('owner_email')
+                 w_res = self.db.table("wallets").select("agent_role, services_catalog, owner_email").eq("agent_id", agent_id).single().execute()
+                 wallet_data = w_res.data or {}
+                 agent_role = wallet_data.get('agent_role', 'Unknown')
+                 trusted_vendors = wallet_data.get('services_catalog', []) or []
+                 owner_email = wallet_data.get('owner_email')
+                 
+                 clean_vendor = self._normalize_domain(vendor)
+                 if clean_vendor in trusted_vendors:
+                     logger.success(f"✅ [AUTO-LEARN] '{clean_vendor}' ya es de confianza. Aprobando automáticamente.")
+                     self.db.table("transaction_logs").update({
+                         "status": "APPROVED",
+                         "reason": f"Trusted Vendor (Auto-Learn): {clean_vendor}"
+                     }).eq("id", tx_data.get('id')).execute()
+                     return
+                     
+                 h_resp = self.db.table("transaction_logs").select("created_at, amount, vendor, reason").eq("agent_id", agent_id).order("created_at", desc=True).limit(5).execute()
+                 history = h_resp.data if h_resp.data else []
             except Exception as e: 
-                logger.error(f"Error fetching owner email for flagged transaction: {e}")
-                owner_email = None
+                 logger.error(f"Error fetching wallet/history data for background audit: {e}")
+                 agent_role = "Unknown"
+                 history = []
+                 trusted_vendors = {}
+    
+            # 0. OSINT AUDIT (Mente Colmena)
+            # Recuperamos datos de reputación en tiempo real para el AI Guard
+            osint_report = await self._perform_osint_scan(tx_data.get('vendor_url') or tx_data.get('vendor'))
+    
+            # Llamamos a tu AI Guard COMPLETO (con políticas corporativas)
+            corporate_policies = wallet_data.get('corporate_policies', {}) if 'wallet_data' in dir() else {}
+            risk_assessment = await audit_transaction(
+                vendor=vendor, 
+                amount=amount, 
+                description=tx_data.get('description', 'N/A'), 
+                agent_id=agent_id, 
+                agent_role=agent_role, 
+                history=history, 
+                justification=tx_data.get('justification', 'N/A'),
+                sensitivity="HIGH",
+                osint_report=osint_report,
+                corporate_policies=corporate_policies  # <--- NUEVO: Políticas corporativas
+            )
             
-            # Marcamos como pendiente de aprobación solo lo sospechoso
-            self.db.table("transaction_logs").update({
-                "status": "PENDING_APPROVAL",
-                "reason": f"Detección de Riesgo IA: {reason_text}"
-            }).eq("id", tx_data.get('id')).execute()
-
-            if owner_email:
-                from notifications import send_approval_email
-                # El sistema ahora enviará el correo basándose en el riesgo detectado por la IA
-                tx_id = tx_data.get('id')
+            verdict = risk_assessment.get('decision', 'FLAGGED')
+            reason_text = risk_assessment.get('reasoning', 'Fraud Detected')
+    
+            if "REJECTED" in verdict or "HIGH RISK" in str(risk_assessment).upper():
+                agent_id = tx_data['agent_id']
+                amount = float(tx_data['amount'])
+                vendor = tx_data.get('vendor', 'UNKNOWN')
+                
+                # 0. Recuperar configuración de contacto del agente (Slack y Email)
+                wallet_res = self.db.table("wallets").select("slack_webhook_url, owner_email").eq("agent_id", agent_id).single().execute()
+                contact_info = wallet_res.data if wallet_res.data else {}
+                slack_url = contact_info.get('slack_webhook_url')
+                owner_email = contact_info.get('owner_email')
+                
+                # 1. REVERSIÓN: Devolver el dinero (monto negativo suma al saldo)
+                self.db.rpc("deduct_balance", {"p_agent_id": agent_id, "p_amount": -amount}).execute()
+    
+                # 2. BANEO + PILLAR 5: HIVE MIND BLACKLIST
+                # Si el riesgo es crítico, quemamos el dominio en la red global
+                if "CRITICAL" in str(risk_assessment).upper() or osint_report.get('score', 100) < 30:
+                     try:
+                         logger.warning(f"☣️ [HIVE MIND] Agregando {vendor} a la LISTA NEGRA GLOBAL.")
+                         self.db.table("global_blacklist").upsert({
+                             "vendor": self._normalize_domain(vendor),
+                             "reason": f"Automated Ban by AI Guard: {reason_text}",
+                             "severity": "CRITICAL"
+                         }).execute()
+                     except Exception as bl_err:
+                         logger.error(f"⚠️ Error actualizando Blacklist Global: {bl_err}")
+    
+                # 2. BANEO: Actualizar el estado del agente a BANNED
+                self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", agent_id).execute()
+    
+                # 3. LOG: Registrar la expulsión por seguridad
+                import uuid
+                self.db.table("transaction_logs").insert({
+                    "id": str(uuid.uuid4()),
+                    "agent_id": agent_id,
+                    "amount": 0.0,
+                    "vendor": "SYSTEM_SECURITY",
+                    "status": "SECURITY_BAN",
+                    "reason": f"Fraude detectado por IA: {verdict}"
+                }).execute()
+                
+                # 4. ALERTA INTERNA: Notificar al equipo de seguridad (SECURITY_ALERT_EMAIL)
+                from notifications import send_security_ban_alert
+                send_security_ban_alert(agent_id, reason_text, amount)
+                
+                # 5. ALERTA SLACK: Notificar al canal del agente si tiene Slack configurado
+                if slack_url:
+                    from integrations import send_slack_approval
+                    send_slack_approval(
+                        webhook_url=slack_url,
+                        agent_id=agent_id,
+                        amount=amount,
+                        vendor=vendor,
+                        approval_link="#",
+                        reason=f"🚨 BANEO AUTOMÁTICO: {verdict}"
+                    )
+                    logger.info(f"📢 Alerta Slack enviada para {agent_id}")
+                
+                # 6. ALERTA EMAIL AL CLIENTE: Notificar al dueño si tiene email configurado
+                if owner_email:
+                    from notifications import send_ban_alert_to_owner
+                    try:
+                        send_ban_alert_to_owner(
+                            to_email=owner_email,
+                            agent_id=agent_id,
+                            vendor=vendor,
+                            amount=amount,
+                            reason=verdict
+                        )
+                        logger.info(f"📧 Alerta de baneo enviada a {owner_email}")
+                    except Exception as e:
+                        logger.error(f"⚠️ Fallo al enviar alerta por email al cliente: {e}")
+                
+                logger.success(f"✅ Protocolo completado. Agente {agent_id} neutralizado.")
+    
+            # --- ZONA GRIS / APRENDIZAJE ---
+            # Cambia la lógica de "Zona Gris" para que sea más sensible en el mundo real
+            # --- ZONA DE DECISIÓN INTELIGENTE (Pillar REAL) ---
+            # Solo mandamos email si la IA NO está segura (FLAGGED) o si detecta riesgo
+            elif verdict == "FLAGGED" or "LOW RISK" not in verdict:
+                logger.info(f"🤔 [SISTEMA INTELIGENTE] Transacción sospechosa detectada por la IA.")
+                
+                # Recuperar email si no estaba en rejected block
                 try:
-                    send_approval_email(owner_email, agent_id, vendor, amount, tx_id)
-                    logger.info(f"📧 Solicitud de Aprobación+Aprendizaje enviada a {owner_email}")
-                except Exception as e:
-                    logger.error(f"⚠️ Error enviando email approval: {e}")
-
-        else:
-            # CASO: LOW RISK (Confianza Total)
-            logger.info(f"✅ [THE ORACLE] Bajo riesgo detectado. Ejecutando aprendizaje automático para {vendor}.")
+                    wr = self.db.table("wallets").select("owner_email").eq("agent_id", agent_id).single().execute()
+                    owner_email = wr.data.get('owner_email')
+                except Exception as e: 
+                    logger.error(f"Error fetching owner email for flagged transaction: {e}")
+                    owner_email = None
+                
+                # Marcamos como pendiente de aprobación solo lo sospechoso
+                self.db.table("transaction_logs").update({
+                    "status": "PENDING_APPROVAL",
+                    "reason": f"Detección de Riesgo IA: {reason_text}"
+                }).eq("id", tx_data.get('id')).execute()
+    
+                if owner_email:
+                    from notifications import send_approval_email
+                    # El sistema ahora enviará el correo basándose en el riesgo detectado por la IA
+                    tx_id = tx_data.get('id')
+                    try:
+                        send_approval_email(owner_email, agent_id, vendor, amount, tx_id)
+                        logger.info(f"📧 Solicitud de Aprobación+Aprendizaje enviada a {owner_email}")
+                    except Exception as e:
+                        logger.error(f"⚠️ Error enviando email approval: {e}")
+    
+            else:
+                # CASO: LOW RISK (Confianza Total)
+                logger.info(f"✅ [THE ORACLE] Bajo riesgo detectado. Ejecutando aprendizaje automático para {vendor}.")
+                
+                # 1. Añadir a la whitelist del agente para que no vuelva a pasar por la IA
+                self.add_to_trusted_services(agent_id, vendor)
+                
+                # 2. Actualizar log
+                self.db.table("transaction_logs").update({
+                    "status": "APPROVED",
+                    "reason": "Auto-Validated (Low Risk) - Added to Trusted Services"
+                }).eq("id", tx_data.get('id')).execute()
             
-            # 1. Añadir a la whitelist del agente para que no vuelva a pasar por la IA
-            self.add_to_trusted_services(agent_id, vendor)
+            # Si llegamos aquí, todo salió bien.
             
-            # 2. Actualizar log
-            self.db.table("transaction_logs").update({
-                "status": "APPROVED",
-                "reason": "Auto-Validated (Low Risk) - Added to Trusted Services"
-            }).eq("id", tx_data.get('id')).execute()
+        except Exception as e:
+            # --- RED DE SEGURIDAD (SAFETY NET) ---
+            logger.critical(f"🔥 FALLO CRÍTICO EN AUDITORÍA: {e}")
+            
+            if self.redis_enabled:
+                # GUARDAR EN CAJA NEGRA (REDIS) PARA NO PERDER LA EVIDENCIA
+                import json
+                try:
+                    failed_audit_payload = json.dumps(tx_data, default=str)
+                    # Empujamos a una lista de 'auditorias_pendientes'
+                    self.redis.rpush("dead_letter_audits", failed_audit_payload)
+                    logger.warning(f"💾 Evidencia salvada en Redis (dead_letter_audits) para análisis forense manual.")
+                except Exception as redis_err:
+                    logger.critical(f"☠️ FALLO TOTAL: No se pudo guardar en Redis: {redis_err}")
+            else:
+                logger.critical("⚠️ Redis no disponible. La evidencia de auditoría podría haberse perdido.")
 
     def _check_role_vendor_mismatch(self, agent_role, vendor, description="", justification=""):
         """
