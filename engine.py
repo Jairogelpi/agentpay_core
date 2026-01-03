@@ -1363,7 +1363,7 @@ class UniversalEngine:
                 logger.error(f"⚠️ Legal artifacts failed: {leg_e}")
                 invoice_url = None
 
-            # 3. LOG MANUAL (Sync Check)
+            # 3. LOG MANUAL SINCRONIZADO (Corrección del Error 0)
             import uuid
             log_id = str(uuid.uuid4())
             
@@ -1376,27 +1376,38 @@ class UniversalEngine:
             # Determines accounting tags logic
             gl_code, deductible = self.identify_accounting_nature(request.vendor, mcc_cat='services')
 
-            self.db.table("transaction_logs").insert({
+            # Construimos el payload completo para evitar rechazos por esquema
+            log_payload = {
                 "id": log_id,
                 "agent_id": request.agent_id,
                 "vendor": request.vendor,
-                "amount": total_deducted, # Total charged
+                "amount": request.amount, # Monto neto
+                "fee": fee,               # Comisión separada
                 "description": request.description,
                 "status": "APPROVED",
-                "reason": "Pago Seguro Verificado",
-                "forensic_hash": str(uuid.uuid4()), # Placeholder para hash real
+                "reason": "Pago Seguro Verificado (Atomic)",
+                "forensic_hash": str(uuid.uuid4()),
+                "invoice_url": invoice_url,
                 "accounting_tag": gl_code,
                 "fx_rate": 1.0, 
                 "settlement_currency": "USD",
                 "tax_deductible": deductible,
-                "invoice_url": invoice_url
-            }).execute()
+                "mcc_category": "services",
+                "created_at": datetime.now().isoformat()
+            }
+            
+            # Insertamos con manejo de error explícito
+            self.db.table("transaction_logs").insert(log_payload).execute()
 
         except Exception as e:
-            # Si falla aquí, el dinero se descontó pero no hay log -> Critical consistency issue
-            # En producción se requeriría un sistema de reconciliación
-            logger.critical(f"CRITICAL ERROR: Money deducted but log failed: {e}")
-            return {"status": "REJECTED", "reason": f"Error de Sistema: {e}"}
+            # Si falla aquí, tenemos un problema de consistencia (Dinero descontado, sin log)
+            # Imprimimos el error real, no solo el código
+            error_details = str(e)
+            if hasattr(e, 'message'): error_details += f" | {e.message}"
+            if hasattr(e, 'code'): error_details += f" | Code: {e.code}"
+            
+            logger.critical(f"CRITICAL ERROR: Money deducted but log failed: {error_details}")
+            return {"status": "REJECTED", "reason": f"Error de Integridad: {error_details}"}
 
         # 4. Issue Card (Fast) - Necesario para que el pago funcione
         clean_vendor = self._normalize_domain(request.vendor)
@@ -1542,7 +1553,9 @@ class UniversalEngine:
             "fx_rate": fx_rate,
             "settlement_currency": "USD",
             "accounting_tag": gl_code if gl_code else "0000",
-            "tax_deductible": deductible if deductible is not None else False
+            "tax_deductible": deductible if deductible is not None else False,
+            "mcc_category": mcc_category,
+            "created_at": datetime.now().isoformat()
         }
         
         if invoice_url: payload["invoice_url"] = invoice_url
