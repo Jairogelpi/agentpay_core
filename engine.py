@@ -285,6 +285,18 @@ class UniversalEngine:
             return False
 
     async def evaluate(self, request: TransactionRequest, idempotency_key: str = None) -> TransactionResult:
+        # --- CAPA 0: POLÍTICAS CORPORATIVAS (Rule-Based) ---
+        # "El Manual del Empleado" - Reglas duras antes de gastar tokens de IA
+        compliance_ok, compliance_reason = self.check_corporate_compliance(str(request.agent_id), request)
+        
+        if not compliance_ok:
+             # Si devuelve False, es un rechazo duro (Hard Block)
+             return self._result(False, "REJECTED", f"Política Corporativa: {compliance_reason}", request)
+        
+        if compliance_ok == "PENDING":
+             # Si devuelve "PENDING", es un Soft Limit que requiere aprobación humana
+             return self._create_approval_request(request, self._normalize_domain(request.vendor), reason_prefix=f"👮 {compliance_reason}")
+
         # --- CAPA -1: SANITY CHECK (NUEVO) ---
         # Bloqueamos montos negativos, cero o absurdamente pequeños antes de gastar recursos.
         if request.amount <= 0.50:  # Mínimo de Stripe suele ser $0.50
