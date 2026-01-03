@@ -1336,7 +1336,11 @@ class UniversalEngine:
             new_balance = float(rpc_res.data[0]['updated_balance'])
             logger.success(f"✅ Transacción completada. Nuevo saldo: ${new_balance}")
 
-            # 2. GENERACIÓN DE FACTURA & CERTIFICADO LEGAL
+            # 2. FETCH WALLET DATA (needed for legal artifacts)
+            wallet_res = self.db.table("wallets").select("owner_email, tax_id").eq("agent_id", request.agent_id).single().execute()
+            wallet_data = wallet_res.data if wallet_res.data else {}
+
+            # 3. GENERACIÓN DE FACTURA & CERTIFICADO LEGAL
             # ------------------------------------------------
             try:
                 # A. Certificado de Responsabilidad (Liability Chain)
