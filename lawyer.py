@@ -48,11 +48,11 @@ class AutoLawyer:
             logger.error(f"⚖️ [COURT ERROR] {str(e)}")
             return None
 
-    def arbitrate_dispute(self, vendor, amount, issue_description, evidence_text):
+    def analyze_case(self, agent_id, vendor, amount, issue_description, evidence_text):
         """
         JUEZ SUPREMO: Decide quién tiene la razón en un conflicto.
         """
-        logger.info(f"⚖️ [HIGH COURT] Iniciando Arbitraje contra {vendor}...")
+        logger.info(f"⚖️ [HIGH COURT] Iniciando Arbitraje para Agente {agent_id} contra {vendor}...")
         
         # 1. Fallback si no hay IA
         if not self.ai_enabled:

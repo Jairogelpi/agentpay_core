@@ -4,11 +4,31 @@ from loguru import logger
 
 # Configuración
 BASE_URL = "https://agentpay-core.onrender.com"
-AGENT_ID = "ag_1583476b1a31"  # Tu agente activo
-HEADERS = {"Content-Type": "application/json"}
+AGENT_ID = None # Se llenará dinámicamente
 
 def run_advanced_tests():
+    global AGENT_ID
     logger.info("🏛️ INICIANDO TEST DE GOBERNANZA Y SEGURIDAD AVANZADA")
+
+    # 0. REGISTRO (Para obtener API Key válida)
+    logger.info("\n0️⃣ PREPARACIÓN: Registrando agente de prueba...")
+    reg_data = {
+        "client_name": "Governance_Test_Bot",
+        "country": "ES"
+    }
+    reg_res = requests.post(f"{BASE_URL}/v1/agent/register", json=reg_data).json()
+    
+    if "agent_id" not in reg_res:
+        logger.error(f"❌ Fallo en registro: {reg_res}")
+        return
+
+    AGENT_ID = reg_res['agent_id']
+    API_KEY = reg_res['api_key']
+    HEADERS = {"Authorization": f"Bearer {API_KEY}"} # Header con Token
+    logger.success(f"✅ Agente Registrado: {AGENT_ID}")
+    
+    # Recarga inicial para tener fondos
+    requests.post(f"{BASE_URL}/v1/topup/auto", json={"agent_id": AGENT_ID, "amount": 1000.0})
 
     # ---------------------------------------------------------
     # 1. TEST DE ESCROW (Garantía de Fondos)
@@ -20,6 +40,7 @@ def run_advanced_tests():
         "amount": 150.0,
         "description": "Desarrollo de módulo de cifrado cuántico"
     }
+    # Usamos HEADERS aunque escrow no sea estricto, por buena práctica
     escrow_res = requests.post(f"{BASE_URL}/v1/escrow/create", json=escrow_payload).json()
     
     if escrow_res.get("status") == "ESCROW_ACTIVE":
@@ -49,26 +70,27 @@ def run_advanced_tests():
     logger.info("\n3️⃣ HIVE MIND: Reportando fraude y verificando bloqueo global...")
     fraud_domain = "malicious-api-scam.net"
     
-    # Reportamos el fraude
-    requests.post(f"{BASE_URL}/v1/fraud/report", json={
+    # Reportamos el fraude (Protegido con Token)
+    requests.post(f"{BASE_URL}/v1/fraud/report", headers=HEADERS, json={
         "agent_id": AGENT_ID,
         "vendor": fraud_domain,
         "reason": "Phishing detectado en el endpoint de pago."
     })
     logger.warning(f"🚨 Dominio {fraud_domain} reportado a la red.")
 
-    # Intentamos pagar al mismo dominio (debería ser bloqueado por la reputación global)
-    pay_attempt = requests.post(f"{BASE_URL}/v1/pay", json={
-        "agent_id": AGENT_ID,
-        "vendor": fraud_domain,
+    # Intentamos pagar al mismo dominio (debería ser bloqueado, REQUIERE TOKEN para llegar al check)
+    pay_attempt = requests.post(f"{BASE_URL}/v1/pay", headers=HEADERS, json={
+        "vendor": fraud_domain, # Pay endpoint deduce el agent_id del token o body, pero mejor enviar ambos si la API lo pide
         "amount": 10.0,
-        "description": "Test de bloqueo"
+        "description": "Test de bloqueo",
+        "justification": "Test"
     }).json()
     
     if pay_attempt.get("status") == "REJECTED":
         logger.success("✅ MENTE COLMENA OK: El pago fue bloqueado por reputación global.")
     else:
-        logger.error("⚠️ FALLO: La mente colmena no propagó el bloqueo.")
+        # Si devuelve 401 o 500 saldrá aquí
+        logger.error(f"⚠️ FALLO: {pay_attempt}")
 
     # ---------------------------------------------------------
     # 4. TEST DE LÍMITES DIARIOS (Circuit Breaker)
@@ -76,14 +98,14 @@ def run_advanced_tests():
     logger.info("\n4️⃣ LÍMITES: Verificando protección de gasto diario...")
     # Intentamos un pago que exceda el límite (asumiendo límite de $1000 y saldo restante)
     limit_payload = {
-        "agent_id": AGENT_ID,
         "vendor": "expensive-service.com",
         "amount": 5000.0,
-        "description": "Compra excesiva"
+        "description": "Compra excesiva",
+        "justification": "Testing limits"
     }
-    limit_res = requests.post(f"{BASE_URL}/v1/pay", json=limit_payload).json()
+    limit_res = requests.post(f"{BASE_URL}/v1/pay", headers=HEADERS, json=limit_payload).json()
     
-    if limit_res.get("status") == "REJECTED" and "límite" in limit_res.get("reason", "").lower():
+    if limit_res.get("status") == "REJECTED" and "límite" in str(limit_res.get("reason", "")).lower():
         logger.success("✅ FUSIBLE OK: El sistema impidió el gasto excesivo.")
     else:
         logger.info(f"Resultado límites: {limit_res.get('reason')}")
