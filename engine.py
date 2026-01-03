@@ -476,7 +476,9 @@ class UniversalEngine:
 
             logger.info(f"🛡️ [THE ORACLE] Auditando ({sensitivity})...")
             # ASYNC AWAIT: No bloqueamos el hilo principal mientras OpenAI piensa
-            audit = await audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status, osint_report=osint_report, trusted_context=trusted_context)
+            # Pasamos corporate_policies para que Oracle tome decisiones policy-aware
+            corporate_policies = wallet.get('corporate_policies', {})
+            audit = await audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status, osint_report=osint_report, trusted_context=trusted_context, corporate_policies=corporate_policies)
             
             intent_hash = audit.get('intent_hash', 'N/A')
             mcc_category = audit.get('mcc_category', 'services')
@@ -999,7 +1001,8 @@ class UniversalEngine:
         # Recuperamos datos de reputación en tiempo real para el AI Guard
         osint_report = await self._perform_osint_scan(tx_data.get('vendor_url') or tx_data.get('vendor'))
 
-        # Llamamos a tu AI Guard COMPLETO
+        # Llamamos a tu AI Guard COMPLETO (con políticas corporativas)
+        corporate_policies = wallet_data.get('corporate_policies', {}) if 'wallet_data' in dir() else {}
         risk_assessment = await audit_transaction(
             vendor=vendor, 
             amount=amount, 
@@ -1009,7 +1012,8 @@ class UniversalEngine:
             history=history, 
             justification=tx_data.get('justification', 'N/A'),
             sensitivity="HIGH",
-            osint_report=osint_report  # <--- NUEVO: Contexto de Desconfianza
+            osint_report=osint_report,
+            corporate_policies=corporate_policies  # <--- NUEVO: Políticas corporativas
         )
         
         verdict = risk_assessment.get('decision', 'FLAGGED')

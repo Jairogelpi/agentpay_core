@@ -65,10 +65,11 @@ async def _oracle_call(system_prompt, user_prompt, temperature=0.0, model="gpt-4
     )
     return json.loads(response.choices[0].message.content)
 
-async def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", domain_status="UNKNOWN", osint_report=None, trusted_context=None):
+async def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", domain_status="UNKNOWN", osint_report=None, trusted_context=None, corporate_policies=None):
     """
     THE ORACLE v4: ELITE ADVERSARIAL GOVERNANCE.
     Implementa el Panel de Debate Propositivo vs Adversarial.
+    Ahora incluye CORPORATE POLICIES para decisiones más inteligentes.
     """
     if not AI_ENABLED:
         return {"decision": "FLAGGED", "reason": "Oracle Offline"}
@@ -81,12 +82,29 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     if osint_report:
         osint_context = f"Score: {osint_report.get('score')}/100. Entropy: {osint_report.get('entropy')}. Risks: {', '.join(osint_report.get('risk_factors', []))}"
 
+    # Format corporate policies for the AI
+    policy_context = "No specific corporate policies defined."
+    if corporate_policies:
+        spending = corporate_policies.get('spending_limits', {})
+        policy_context = f"""
+CORPORATE EXPENSE POLICIES (OFFICIAL COMPANY RULES):
+- Max Per Item: ${spending.get('max_per_item', 'Unlimited')}
+- Daily Budget: ${spending.get('daily_budget', 'Unlimited')}  
+- Slack Approval Threshold: ${spending.get('soft_limit_slack', 'N/A')} (amounts above require human approval)
+- Restricted Vendors: {', '.join(corporate_policies.get('restricted_vendors', []) or ['None'])}
+- Allowed Categories: {', '.join(corporate_policies.get('allowed_categories', ['all']))}
+- Working Hours: {corporate_policies.get('working_hours', {}).get('start', 'Any')} - {corporate_policies.get('working_hours', {}).get('end', 'Any')} ({corporate_policies.get('working_hours', {}).get('timezone', 'UTC')})
+- Justification Required: {corporate_policies.get('enforce_justification', False)}
+"""
+
     logger.info(f"👁️ [THE ORACLE v4] Universal Audit for ${amount} at {vendor} (Z-Score: {z_score:.2f})...")
 
     # --- STAGE 1: THE PROPONENT (Strategic Business Consultant) ---
     proponent_prompt = f"""
     YOU ARE: A Strategic Business Consultant.
     EVALUATING AGENT ROLE: {agent_role} (This is the buyer's professional identity).
+    
+    {policy_context}
     
     TRANSACTION: {vendor} (${amount})
     DESCRIPTION: {description}
@@ -96,12 +114,14 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     History: {history_md}
     
     TASK: Argue why this purchase is a REASONABLE and NECESSARY business expense for a professional '{agent_role}'. 
-    Focus on operational utility and potential ROI.
+    Consider the company's official policies above when evaluating.
+    If the vendor is in the restricted list, acknowledge it but still provide business justification.
     
     OBLIGATORY JSON STRUCTURE:
     {{
         "business_justification": "Detailed business-centric explanation",
         "role_consistency_score": 0-100,
+        "policy_compliance_score": 0-100,
         "suggested_mcc": "software|marketing|services|travel|retail",
         "preliminary_verdict": "BENIGN"
     }}
@@ -125,16 +145,24 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         SUBJECT: A '{agent_role}' buying from '{vendor}'.
         JUSTIFICATION GIVEN: "{justification}"
         
+        {policy_context}
+        
         INSTRUCTIONS:
         1. DETECT 'TECHNOBABBLE': Is the user using complex technical words to hide a consumer purchase? (e.g. calling a PlayStation a "GPU Cluster" or a Rolex a "Precision Timing Instrument").
         2. ANALYZE VENDOR MATCH: A Backend Dev buys from AWS/Azure/DigitalOcean, NOT from Sony/Nintendo/Netflix. A Lawyer buys LexisNexis, NOT Sephora.
         3. ALTERNATIVES: If they are buying Consumer Hardware/Goods for a Professional Role -> HIGH PROBABILITY OF FRAUD.
+        4. POLICY VIOLATION: Check if the vendor is in the RESTRICTED VENDORS list. If so, this is a CRITICAL violation.
+        5. CATEGORY MISMATCH: Check if the purchase category matches the ALLOWED CATEGORIES in the policy.
         
-        TASK: Destroy the Proponent's argument. Be extremely suspicious of 'Entertainment' or 'Luxury' vendors disguised as 'Infrastructure' or 'Office Supplies'.
+        TASK: Destroy the Proponent's argument. Be extremely suspicious of:
+        - Vendors in the restricted list
+        - Purchases that violate company spending policies
+        - 'Entertainment' or 'Luxury' vendors disguised as 'Infrastructure'
         
         OBLIGATORY JSON STRUCTURE:
         {{
             "vulnerabilities": ["List specific doubts"],
+            "policy_violations": ["List any policy violations detected"],
             "fraud_probability": 0-100,
             "adversarial_comment": "Direct accusation if applicable"
         }}
@@ -152,20 +180,27 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         arbiter_prompt = f"""
         YOU ARE: The Supreme Arbiter of Financial Logic.
         
+        {policy_context}
+        
         DEBATE:
         Proponent: {stage1['business_justification']}
+        Proponent Policy Compliance Score: {stage1.get('policy_compliance_score', 50)}/100
         Adversary: {stage2['adversarial_comment']} (Fraud Prob: {stage2['fraud_probability']}%)
+        Policy Violations Detected: {stage2.get('policy_violations', ['None'])}
         
-        CRITICAL RULE:
-        - If Fraud Probability > 60%, YOU MUST REJECT.
-        - If the Vendor is clearly Entertainment/Luxury/Gaming and Role is Technical/Professional -> REJECT immediately, ignore the justification.
-        - Better to have a False Positive than to allow a Trojan Horse attack (Personal use disguised as business).
+        CRITICAL RULES (IN ORDER OF PRIORITY):
+        1. If vendor is in RESTRICTED VENDORS list -> AUTOMATIC REJECT (Policy Override)
+        2. If amount exceeds Max Per Item in policy -> REJECT
+        3. If Fraud Probability > 60% -> REJECT
+        4. If the Vendor is clearly Entertainment/Luxury/Gaming and Role is Technical/Professional -> REJECT
+        5. Better to have a False Positive than to allow a Trojan Horse attack (Personal use disguised as business).
         
         OBLIGATORY JSON STRUCTURE:
         {{
             "decision": "APPROVED" | "REJECTED" | "FLAGGED",
             "risk_score": 0-100,
-            "reasoning": "Final verdict explaining why",
+            "policy_violation": true | false,
+            "reasoning": "Final verdict explaining why, including policy considerations",
             "short_reason": "Summary for logs",
             "accounting": {{ "gl_code": "XXXX", "deductible": false }}
         }}
