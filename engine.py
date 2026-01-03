@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from supabase.lib.client_options import ClientOptions
+from supabase.client import ClientOptions
 from models import TransactionRequest, TransactionResult, CardDetails
 from ai_guard import audit_transaction, calculate_statistical_risk
 from security_utils import check_domain_age
