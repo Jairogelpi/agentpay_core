@@ -48,9 +48,10 @@ class AutoLawyer:
             logger.error(f"⚖️ [COURT ERROR] {str(e)}")
             return None
 
-    def analyze_case(self, agent_id, vendor, amount, issue_description, evidence_text):
+    def analyze_case(self, agent_id, vendor, amount, claim_reason, proof_logs, transaction_context=None):
         """
         JUEZ SUPREMO: Decide quién tiene la razón en un conflicto.
+        Acepta contexto de transacción opcional para mayor precisión.
         """
         logger.info(f"⚖️ [HIGH COURT] Iniciando Arbitraje para Agente {agent_id} contra {vendor}...")
         
@@ -58,6 +59,10 @@ class AutoLawyer:
         if not self.ai_enabled:
             return {
                 "viability": "DISMISSED",
+                "judicial_opinion": "Court System Offline (No API Key).",
+                "suggested_action": "REJECT_CLAIM",
+                "confidence_score": 0
+            }
                 "judicial_opinion": "Court System Offline (No API Key).",
                 "suggested_action": "REJECT_CLAIM",
                 "confidence_score": 0

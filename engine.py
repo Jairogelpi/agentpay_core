@@ -295,6 +295,17 @@ class UniversalEngine:
                 reason=f"Monto inválido (${request.amount}). El mínimo es $0.50."
             )
 
+        # --- CAPA -0.5: HIVE MIND REAL-TIME BLOCK (NUEVO) ---
+        # Bloqueo inmediato para dominios reportados hace milisegundos (Race Condition Mitigation)
+        clean_vendor = self._normalize_domain(request.vendor)
+        if self.redis_enabled and self.redis.get(f"blacklist:{clean_vendor}"):
+            logger.critical(f"🚫 [HIVE MIND] Bloqueo Tiempo Real activado para {clean_vendor}")
+            return TransactionResult(
+                authorized=False,
+                status="REJECTED",
+                reason="Bloqueado por Mente Colmena (Tiempo Real)"
+            )
+
         # 0. IDEMPOTENCIA (Evitar cobros dobles)
         if idempotency_key and self.redis_enabled:
             cache_key = f"idempotency:{idempotency_key}"
