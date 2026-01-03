@@ -1330,11 +1330,24 @@ class UniversalEngine:
                 'amount_to_deduct': total_deducted
             }).execute()
 
-            if not rpc_res.data or not rpc_res.data[0].get('success'):
-                reason = rpc_res.data[0].get('reason', 'Unknown') if rpc_res.data else 'No data'
-                return {"status": "REJECTED", "reason": f"Saldo insuficiente: {reason}"}
+            # DEFENSIVE: Handle different response structures from Supabase RPC
+            rpc_data = rpc_res.data
+            logger.info(f"📋 [RPC DEBUG] Response type: {type(rpc_data)}, data: {rpc_data}")
+            
+            # Normalize: if it's a list, get first element; if dict, use directly
+            if isinstance(rpc_data, list) and len(rpc_data) > 0:
+                result = rpc_data[0]
+            elif isinstance(rpc_data, dict):
+                result = rpc_data
+            else:
+                logger.error(f"❌ Unexpected RPC response: {rpc_data}")
+                return {"status": "REJECTED", "reason": f"Error en RPC: Respuesta inesperada"}
+            
+            if not result.get('success'):
+                reason = result.get('reason', 'Saldo insuficiente o error de concurrencia')
+                return {"status": "REJECTED", "reason": reason}
 
-            new_balance = float(rpc_res.data[0].get('updated_balance', 0))
+            new_balance = float(result.get('updated_balance', 0))
             logger.success(f"✅ Transacción completada. Nuevo saldo: ${new_balance}")
 
             # STEP 2: FETCH WALLET DATA
