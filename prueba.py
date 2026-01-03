@@ -19,8 +19,11 @@ def run_final_compliance_test():
 
     # 2. Configuración y Fondeo
     requests.post(f"{BASE_URL}/v1/agent/settings", headers=headers, json={"agent_id": agent_id, "agent_role": "Senior Cloud Infrastructure Engineer"})
-    requests.post(f"{BASE_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 100.0})
-    logger.info("💰 Saldo fondeado.")
+    topup_res = requests.post(f"{BASE_URL}/v1/topup/auto", headers=headers, json={"agent_id": agent_id, "amount": 100.0})
+    if topup_res.status_code != 200:
+        logger.error(f"❌ Topup falló: {topup_res.status_code} - {topup_res.text}")
+        return
+    logger.info("💰 Saldo fondeado exitosamente.")
 
     # 3. Pago de Prueba con Manejo de Errores
     logger.info("💸 Ejecutando pago...")

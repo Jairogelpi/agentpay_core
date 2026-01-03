@@ -1179,6 +1179,7 @@ class UniversalEngine:
         return False
 
     async def process_instant_payment(self, request: TransactionRequest):
+        import uuid  # Ensure uuid is available throughout function
         # ... (Validaciones iniciales de monto y sanity check existentes) ...
 
         # --- 0. RECUPERAR DATOS DEL AGENTE ---
