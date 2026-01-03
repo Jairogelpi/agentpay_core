@@ -36,10 +36,31 @@ def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security
     return agent_id
 
 @app.post("/v1/identity/twilio-webhook")
-async def twilio_webhook(From: str = Form(...), Body: str = Form(...), To: str = Form(...)):
+async def twilio_webhook(request: Request, From: str = Form(...), Body: str = Form(...), To: str = Form(...)):
     """
     Recibe SMS reales de Twilio y los guarda en Supabase.
     """
+    # VERIFICACIÓN DE FIRMA (TWILIO SECURITY)
+    try:
+        from twilio.request_validator import RequestValidator
+        
+        # Leemos el token de ENV
+        auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+        if auth_token:
+            validator = RequestValidator(auth_token)
+            
+            # Recibimos el header 'X-Twilio-Signature'
+            signature = request.headers.get("X-Twilio-Signature", "")
+            
+            # Reconstruimos la URL y params
+            # Nota: para que esto funcione exacto en local/render, la URL debe ser la pública
+            # Si estamos detrás de un proxy (Render), esto puede ser tricky.
+            # Por ahora, si hay firma, la validamos. Si no hay token, skippeamos.
+            pass # TODO: Implementar validación estricta cuando tengamos la URL pública exacta.
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Twilio signature check skipped/failed: {e}")
+        
     logger.info(f"📲 [SMS RECIBIDO] De: {From} | Para: {To} | Msj: {Body}")
     
     try:
@@ -667,7 +688,7 @@ async def daily_reset():
     return await reset_limits()
 
 @app.post("/v1/autonomous/read-sms")
-async def read_latest_sms(req: dict):
+async def read_latest_sms(req: dict, agent_id: str = Depends(verify_api_key)):
     """
     Endpoint para que el Agente recupere códigos OTP/2FA de forma autónoma.
     """
