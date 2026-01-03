@@ -4,10 +4,7 @@ from loguru import logger
 import os
 import datetime
 
-def generate_invoice_pdf(transaction_id, agent_id, vendor, amount, description):
-    """
-    Genera una factura PDF simple para una transacción aprobada.
-    """
+def generate_invoice_pdf(transaction_id, agent_id, vendor, amount, description, tax_id="EU-VAT-PENDING"):
     filename = f"invoice_{transaction_id}.pdf"
     path = os.path.join("invoices", filename)
     
@@ -18,26 +15,37 @@ def generate_invoice_pdf(transaction_id, agent_id, vendor, amount, description):
     c = canvas.Canvas(path, pagesize=letter)
     width, height = letter
     
-    # Cabecera
-    c.setFont("Helvetica-Bold", 20)
-    c.drawString(50, height - 50, "AGENTPAY - FACTURA OFICIAL")
-    
-    c.setFont("Helvetica", 12)
-    c.drawString(50, height - 80, f"Fecha: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    c.drawString(50, height - 100, f"ID Transacción: {transaction_id}")
-    
-    # Detalles
-    c.line(50, height - 120, width - 50, height - 120)
-    
-    c.drawString(50, height - 150, f"Agente: {agent_id}")
-    c.drawString(50, height - 170, f"Proveedor: {vendor}")
-    c.drawString(50, height - 190, f"Descripción: {description}")
-    
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, height - 230, f"TOTAL PAGADO: ${amount:.2f}")
-    
-    c.setFont("Helvetica-Oblique", 10)
-    c.drawString(50, 50, "Generado automáticamente por AgentPay Core System.")
+    # Datos Legales del Emisor (AgentPay LLC/SL)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, height - 50, "AGENTPAY GLOBAL SERVICES")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, height - 65, "Tax ID: US-EIN-123456789 / EU-VAT-ES12345678")
+    c.drawString(50, height - 75, "Address: Gran Via 1, Madrid, ES / Delaware, USA")
+
+    # Datos de la Factura
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(400, height - 50, f"INVOICE #: {transaction_id[:8].upper()}")
+    c.drawString(400, height - 65, f"DATE: {datetime.datetime.now().strftime('%Y-%m-%d')}")
+
+    # Cuerpo de la Factura
+    c.line(50, height - 100, width - 50, height - 100)
+    c.drawString(50, height - 120, f"BILL TO: Agent {agent_id}")
+    c.drawString(50, height - 135, f"VENDOR: {vendor}")
+    c.drawString(50, height - 150, f"DESCRIPTION: {description}")
+
+    # Desglose Contable (REQUISITO LEGAL)
+    tax_rate = 0.21 # Ejemplo IVA España
+    net_amount = amount / (1 + tax_rate)
+    tax_amount = amount - net_amount
+
+    c.line(350, height - 200, width - 50, height - 200)
+    c.drawString(350, height - 220, f"Subtotal (Net): ${net_amount:.2f}")
+    c.drawString(350, height - 235, f"Tax (VAT 21%): ${tax_amount:.2f}")
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(350, height - 260, f"TOTAL PAID: ${amount:.2f}")
+
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(50, 50, "Este documento tiene validez legal como justificante de gasto B2B.")
     
     c.save()
     logger.info(f"📄 FACTURA GENERADA: {path}")

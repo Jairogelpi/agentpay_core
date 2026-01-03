@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException, Depends, Security, Header, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+import csv
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 from loguru import logger
@@ -714,6 +715,30 @@ async def get_agent_security_history(agent_id: str):
         }
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/v1/accounting/export-csv")
+async def export_accounting_data(month: int, year: int):
+    """
+    Genera un archivo CSV listo para importar en QuickBooks, Xero o SAP.
+    """
+    start_date = f"{year}-{month:02d}-01"
+    # Consulta a Supabase
+    logs = engine.db.table("transaction_logs")\
+        .select("created_at, vendor, amount, status, accounting_tag, tax_deductible")\
+        .gte("created_at", start_date)\
+        .execute()
+
+    filename = f"accounting_export_{year}_{month}.csv"
+    with open(filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["Date", "Vendor", "Amount", "Currency", "GL_Code", "Tax_Deductible", "Status"])
+        for log in logs.data:
+            writer.writerow([
+                log['created_at'], log['vendor'], log['amount'], 
+                "USD", log.get('accounting_tag', 'UNCATEGORIZED'), log.get('tax_deductible', False), log['status']
+            ])
+
+    return FileResponse(filename, media_type='text/csv', filename=filename)
 
 if __name__ == "__main__":
     # Para correr local: python main.py
