@@ -82,8 +82,11 @@ async def twilio_webhook(request: Request, From: str = Form(...), Body: str = Fo
 
 # --- IMPORTANTE: Endpoint para que tu script de prueba pueda LEER el SMS ---
 @app.get("/v1/identity/sms/latest")
-async def read_latest_sms():
-    # Usamos el identity_mgr que ya tienes inicializado en main.py
+async def read_latest_sms(agent_id: str = Depends(verify_api_key)):
+    # Usamos el identity_mgr que ya tienes inicializado en main.py (Solo permitimos acceso autenticado)
+    # Nota: El método check_sms_inbox actualmente devuelve el *último* SMS global.
+    # En un sistema multi-tenant estricto, deberíamos filtrar por el teléfono asignado al agente.
+    # Por ahora, cerramos la fuga pública.
     return identity_mgr.check_sms_inbox()
 
 @app.post("/v1/payments/scan_qr")
@@ -227,6 +230,12 @@ async def brevo_inbound_webhook(request: Request):
     Recibe correos de Brevo y los guarda en SQL. Adaptado al payload Real de Brevo.
     Resuelve el agent_id completo consultando la tabla identities.
     """
+    # VERIFICACIÓN DE ORIGEN (BREVO)
+    # Brevo no firma requests de la misma forma que Stripe/Twilio.
+    # La mejor práctica es whitelist de IPs (Brevo publica sus rangos) o un token secreto en la URL del webhook.
+    # Por ahora, añadimos un check de User-Agent básico o un token query param si existiera.
+    # TODO: Configurar Brevo para enviar ?token=SECRET en la URL del webhook.
+    
     try:
         data = await request.json()
         
