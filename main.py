@@ -752,28 +752,48 @@ async def get_agent_security_history(agent_id: str):
         return {"error": str(e)}
 
 @app.get("/v1/accounting/export-csv")
-async def export_accounting_data(month: int, year: int):
+async def export_accounting_data(agent_id: str = Depends(verify_api_key)):
     """
-    Genera un archivo CSV listo para importar en QuickBooks, Xero o SAP.
+    Genera un reporte mensual CSV para QuickBooks/Xero.
+    GDPR: Registra la descarga en audit_sessions.
     """
-    start_date = f"{year}-{month:02d}-01"
-    # Consulta a Supabase
-    logs = engine.db.table("transaction_logs")\
-        .select("created_at, vendor, amount, status, accounting_tag, tax_deductible")\
-        .gte("created_at", start_date)\
-        .execute()
+    try:
+        # 1. GDPR Trail
+        engine.db.table("audit_sessions").insert({
+            "agent_id": agent_id,
+            "action": "CSV_EXPORT",
+            "resource_id": f"MONTH_{datetime.now().strftime('%Y_%m')}",
+            "ip_address": "DO_NOT_LOG_IP" # Privacy by design
+        }).execute()
 
-    filename = f"accounting_export_{year}_{month}.csv"
-    with open(filename, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(["Date", "Vendor", "Amount", "Currency", "GL_Code", "Tax_Deductible", "Status"])
-        for log in logs.data:
-            writer.writerow([
-                log['created_at'], log['vendor'], log['amount'], 
-                "USD", log.get('accounting_tag', 'UNCATEGORIZED'), log.get('tax_deductible', False), log['status']
-            ])
-
-    return FileResponse(filename, media_type='text/csv', filename=filename)
+        # 2. Get Data
+        txs = engine.db.table("transaction_logs").select("*").eq("agent_id", agent_id).execute().data
+        
+        filename = f"export_{agent_id}_{datetime.now().strftime('%Y%m%d')}.csv"
+        filepath = os.path.join("invoices", filename)
+        
+        with open(filepath, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Date", "Transaction ID", "Vendor", "Amount", "Currency", "FX Rate", "Category", "Description", "GL Code", "Tax Deductible", "Status"])
+            for tx in txs:
+                writer.writerow([
+                    tx.get('created_at'),
+                    tx.get('id'),
+                    tx.get('vendor'),
+                    tx.get('amount'),
+                    tx.get('settlement_currency', 'USD'),
+                    tx.get('fx_rate', 1.0),
+                    tx.get('mcc_category', 'Uncategorized'),
+                    tx.get('reason'),
+                    tx.get('accounting_tag', '0000'),
+                    tx.get('tax_deductible', False),
+                    tx.get('status')
+                ])
+                
+        return FileResponse(path=filepath, filename=filename, media_type='text/csv')
+    except Exception as e:
+        logger.error(f"Error exporting CSV: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     # Para correr local: python main.py
