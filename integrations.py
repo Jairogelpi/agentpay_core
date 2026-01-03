@@ -16,17 +16,10 @@ def send_slack_approval(webhook_url, agent_id, amount, vendor, approval_link, re
                 },
                 {
                     "type": "section",
-                    "fields": [
-                        {"type": "mrkdwn", "text": f"*Agente:*\n{agent_id}"},
-                        {"type": "mrkdwn", "text": f"*Monto:*\n${amount}"}
-                    ]
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                        {"type": "mrkdwn", "text": f"*Proveedor:*\n{vendor}"},
-                        {"type": "mrkdwn", "text": f"*Motivo:*\n{reason}"}
-                    ]
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*Agente:* {agent_id}\n*Monto:* ${amount}\n*Proveedor:* {vendor}\n*Motivo:* {reason}"
+                    }
                 },
                 {
                     "type": "actions",
