@@ -12,12 +12,14 @@ from mcp.server.fastmcp import FastMCP
 
 # Configuración de Logs (Rotación y Persistencia)
 logger.add("logs/agentpay.log", rotation="500 MB", level="INFO")
+from legal import LegalWrapper
 
 # Inicializamos
 app = FastAPI(title="AgentPay Production Server")
 security = HTTPBearer()
 engine = UniversalEngine()
 identity_mgr = IdentityManager(engine.db)
+legal_wrapper = LegalWrapper()
 
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
     """Dependencia de Seguridad: Valida el Bearer Token contra la DB."""

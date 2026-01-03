@@ -1450,15 +1450,7 @@ class UniversalEngine:
         logger.info(f"Quote requested for {service_type} from {provider_agent_id}: ${price}")
         return {"status": "QUOTED", "quote": {"quote_id": f"Q-{uuid.uuid4().hex[:6]}", "price": price, "currency": "USD"}}
 
-    def create_escrow_transaction(self, agent_id, vendor, amount, description="Escrow"):
-        txn_id = str(uuid.uuid4())
-        self.db.table("transaction_logs").insert({"id": txn_id, "agent_id": agent_id, "vendor": vendor, "amount": amount, "status": "ESCROW_LOCKED", "reason": description}).execute()
-        logger.info(f"Escrow transaction {txn_id} created for {agent_id} with {vendor} for ${amount}.")
-        return {"status": "ESCROW_CREATED", "transaction_id": txn_id}
 
-    def confirm_delivery(self, agent_id, transaction_id):
-        logger.info(f"Delivery confirmed for transaction {transaction_id} by {agent_id}.")
-        return {"status": "RELEASED"}
 
     def raise_escrow_dispute(self, agent_id, transaction_id, issue, evidence):
         """
