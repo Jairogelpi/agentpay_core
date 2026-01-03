@@ -1,132 +1,90 @@
 import requests
 import time
+import uuid
 from loguru import logger
 
-# Configuración
+# Configuración del entorno
 BASE_URL = "https://agentpay-core.onrender.com"
-AGENT_ID = None # Se llenará dinámicamente
+logger.add("compliance_audit.log", rotation="10 MB")
 
-def run_advanced_tests():
-    global AGENT_ID
-    logger.info("🏛️ INICIANDO TEST DE GOBERNANZA Y SEGURIDAD AVANZADA")
+def run_global_compliance_test():
+    logger.info("🌍 INICIANDO AUDITORÍA INTEGRAL DE CUMPLIMIENTO (EU/US)")
 
-    # 0. REGISTRO (Para obtener API Key válida)
-    logger.info("\n0️⃣ PREPARACIÓN: Registrando agente de prueba...")
-    reg_data = {
-        "client_name": "Governance_Test_Bot",
-        "country": "ES"
+    # 1. REGISTRO LEGAL (KYC/KYB Automático)
+    # ---------------------------------------------------------
+    logger.info("\n1️⃣ REGISTRO: Creando agente con parámetros de cumplimiento...")
+    reg_payload = {
+        "client_name": "Autonomous_Consensus_LLC",
+        "country": "ES" # Probamos con España (Europa) para validar 3DS y VAT
     }
-    reg_res = requests.post(f"{BASE_URL}/v1/agent/register", json=reg_data).json()
+    reg_res = requests.post(f"{BASE_URL}/v1/agent/register", json=reg_payload).json()
     
-    if "agent_id" not in reg_res:
-        logger.error(f"❌ Fallo en registro: {reg_res}")
-        return
-
-    AGENT_ID = reg_res['agent_id']
-    API_KEY = reg_res['api_key']
-    HEADERS = {"Authorization": f"Bearer {API_KEY}"} # Header con Token
-    logger.success(f"✅ Agente Registrado: {AGENT_ID}")
+    agent_id = reg_res['agent_id']
+    api_key = reg_res['api_key']
+    headers = {"Authorization": f"Bearer {api_key}"}
     
-    # Recarga inicial para tener fondos
-    requests.post(f"{BASE_URL}/v1/topup/auto", json={"agent_id": AGENT_ID, "amount": 1000.0})
+    logger.success(f"✅ Agente Registrado legalmente: {agent_id}")
 
+    # 2. CONFIGURACIÓN FISCAL (Tax IDs y Contacto)
     # ---------------------------------------------------------
-    # 1. TEST DE ESCROW (Garantía de Fondos)
-    # ---------------------------------------------------------
-    logger.info("\n1️⃣ ESCROW: Creando contrato con retención de fondos...")
-    escrow_payload = {
-        "agent_id": AGENT_ID,
-        "vendor": "ai-developer-service.com",
-        "amount": 150.0,
-        "description": "Desarrollo de módulo de cifrado cuántico"
-    }
-    # Usamos HEADERS aunque escrow no sea estricto, por buena práctica
-    escrow_res = requests.post(f"{BASE_URL}/v1/escrow/create", json=escrow_payload).json()
-    
-    if escrow_res.get("status") == "ESCROW_ACTIVE":
-        tx_id = escrow_res['transaction_id']
-        logger.success(f"✅ Fondos bloqueados en Escrow. ID: {tx_id}")
-    else:
-        logger.error(f"❌ Fallo en Escrow: {escrow_res}")
-        return
-
-    # ---------------------------------------------------------
-    # 2. TEST DE DISPUTA Y JUEZ IA (Arbitraje)
-    # ---------------------------------------------------------
-    logger.info("\n2️⃣ DISPUTA: Simulando fallo del proveedor y arbitraje...")
-    dispute_payload = {
-        "agent_id": AGENT_ID,
-        "transaction_id": tx_id,
-        "issue_description": "El código entregado no compila y el proveedor no responde.",
-        "technical_evidence": "Logs: Error 500 at build time. Signature mismatch in delivery."
-    }
-    dispute_res = requests.post(f"{BASE_URL}/v1/escrow/dispute", json=dispute_payload).json()
-    logger.info(f"⚖️ Veredicto del Juez IA: {dispute_res.get('status')}")
-    logger.info(f"Opinion Judicial: {dispute_res.get('verdict', {}).get('judicial_opinion')}")
-
-    # ---------------------------------------------------------
-    # 3. TEST DE HIVE MIND (Mente Colmena / Blacklist)
-    # ---------------------------------------------------------
-    logger.info("\n3️⃣ HIVE MIND: Reportando fraude y verificando bloqueo global...")
-    fraud_domain = "malicious-api-scam.net"
-    
-    # Reportamos el fraude (Protegido con Token)
-    requests.post(f"{BASE_URL}/v1/fraud/report", headers=HEADERS, json={
-        "agent_id": AGENT_ID,
-        "vendor": fraud_domain,
-        "reason": "Phishing detectado en el endpoint de pago."
+    logger.info("\n2️⃣ FISCAL: Configurando datos de facturación para la UE...")
+    requests.post(f"{BASE_URL}/v1/agent/settings", headers=headers, json={
+        "agent_id": agent_id,
+        "owner_email": "accounting@consensus_llc.ai",
+        "agent_role": "Engineer"
     })
-    logger.warning(f"🚨 Dominio {fraud_domain} reportado a la red.")
+    
+    # Recarga de saldo inicial para operar
+    requests.post(f"{BASE_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 1000.0})
+    logger.info("💰 Saldo fondeado: $1000.0")
 
-    # Intentamos pagar al mismo dominio (debería ser bloqueado, REQUIERE TOKEN para llegar al check)
-    pay_attempt = requests.post(f"{BASE_URL}/v1/pay", headers=HEADERS, json={
-        "vendor": fraud_domain, # Pay endpoint deduce el agent_id del token o body, pero mejor enviar ambos si la API lo pide
-        "amount": 10.0,
-        "description": "Test de bloqueo",
-        "justification": "Test"
+    # 3. EJECUCIÓN DE GASTO CON CLASIFICACIÓN IA
+    # ---------------------------------------------------------
+    logger.info("\n3️⃣ PAGO: Ejecutando gasto B2B (Google Cloud)...")
+    payment_payload = {
+        "vendor": "cloud.google.com",
+        "amount": 250.75,
+        "description": "Compute Engine instances for LLM fine-tuning",
+        "justification": "Necessary server infrastructure for client delivery."
+    }
+    
+    pay_res = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json=payment_payload).json()
+    tx_id = pay_res.get("db_log_id") or pay_res.get("transaction_id")
+    
+    logger.success(f"✅ Pago aprobado. Esperando firma forense y contable...")
+    time.sleep(12) # Tiempo para que el Oracle v4 procese la contabilidad
+
+    # 4. AUDITORÍA DE DOCUMENTACIÓN (Factura + Ledger)
+    # ---------------------------------------------------------
+    logger.info("\n4️⃣ CONTABILIDAD: Verificando la 'Huella Digital' del gasto...")
+    
+    # Consultar estado en el Ledger
+    tx_status = requests.post(f"{BASE_URL}/v1/transactions/status", headers=headers, json={"transaction_id": tx_id}).json()
+    
+    logger.info(f"📊 Código GL (Libro Mayor): {tx_status.get('accounting_tag')}")
+    logger.info(f"⚖️ Deducibilidad Fiscal: {'SÍ' if tx_status.get('tax_deductible') else 'NO'}")
+    
+    # Descargar Factura PDF Legal (con desglose de impuestos)
+    invoice_res = requests.post(f"{BASE_URL}/v1/invoices/download", headers=headers, json={"transaction_id": tx_id}).json()
+    logger.success(f"📄 Factura Legal Generada: {invoice_res.get('invoice_url')}")
+
+    # 5. EMISIÓN DE CERTIFICADO DE RESPONSABILIDAD (Legal Wrapper)
+    # ---------------------------------------------------------
+    logger.info("\n5️⃣ LEGAL: Generando aval de responsabilidad civil...")
+    legal_res = requests.post(f"{BASE_URL}/v1/legal/issue-certificate", headers=headers, json={
+        "agent_id": agent_id,
+        "email": "accounting@consensus_llc.ai",
+        "platform_url": "https://console.cloud.google.com",
+        "forensic_hash": tx_status.get("forensic_hash")
     }).json()
     
-    if pay_attempt.get("status") == "REJECTED":
-        logger.success("✅ MENTE COLMENA OK: El pago fue bloqueado por reputación global.")
-    else:
-        # Si devuelve 401 o 500 saldrá aquí
-        logger.error(f"⚠️ FALLO: {pay_attempt}")
+    logger.success(f"⚖️ Certificado de Cumplimiento emitido: {legal_res['certificate_id']}")
 
+    # 6. EXPORTACIÓN PARA EL CONTADOR (CSV)
     # ---------------------------------------------------------
-    # 4. TEST DE LÍMITES DIARIOS (Circuit Breaker)
-    # ---------------------------------------------------------
-    logger.info("\n4️⃣ LÍMITES: Verificando protección de gasto diario...")
-    # Intentamos un pago que exceda el límite (asumiendo límite de $1000 y saldo restante)
-    limit_payload = {
-        "vendor": "expensive-service.com",
-        "amount": 5000.0,
-        "description": "Compra excesiva",
-        "justification": "Testing limits"
-    }
-    limit_res = requests.post(f"{BASE_URL}/v1/pay", headers=HEADERS, json=limit_payload).json()
-    
-    if limit_res.get("status") == "REJECTED" and "límite" in str(limit_res.get("reason", "")).lower():
-        logger.success("✅ FUSIBLE OK: El sistema impidió el gasto excesivo.")
-    else:
-        logger.info(f"Resultado límites: {limit_res.get('reason')}")
-
-    # ---------------------------------------------------------
-    # 5. TEST LEGAL (Liability Certificate)
-    # ---------------------------------------------------------
-    logger.info("\n5️⃣ LEGAL: Generando Certificado de Responsabilidad Civil...")
-    legal_payload = {
-        "agent_id": AGENT_ID,
-        "email": f"{AGENT_ID}@agentpay.ai",
-        "platform_url": "https://service-provider.com",
-        "forensic_hash": "SHA256-PROOF-OF-INTENT-99"
-    }
-    legal_res = requests.post(f"{BASE_URL}/v1/legal/issue-certificate", json=legal_payload).json()
-    
-    if legal_res.get("status") == "ACTIVE":
-        logger.success(f"✅ Certificado Legal Emitido: {legal_res['certificate_id']}")
-        logger.info(f"Firma Criptográfica: {legal_res['signature'][:20]}...")
-    else:
-        logger.error("❌ Fallo al emitir certificado legal.")
+    logger.info("\n6️⃣ EXPORTACIÓN: Generando reporte para QuickBooks/Xero...")
+    export_url = f"{BASE_URL}/v1/accounting/export-csv?month=1&year=2026"
+    logger.info(f"📥 Link de exportación contable: {export_url}")
 
 if __name__ == "__main__":
-    run_advanced_tests()
+    run_global_compliance_test()

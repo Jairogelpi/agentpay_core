@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, Depends, Security, Header, Form
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 import csv
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 from loguru import logger
@@ -21,6 +22,10 @@ security = HTTPBearer()
 engine = UniversalEngine()
 identity_mgr = IdentityManager(engine.db)
 legal_wrapper = LegalWrapper()
+
+if not os.path.exists("invoices"):
+    os.makedirs("invoices")
+app.mount("/v1/invoices", StaticFiles(directory="invoices"), name="invoices")
 
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
     """Dependencia de Seguridad: Valida el Bearer Token contra la DB."""
