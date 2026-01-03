@@ -31,7 +31,7 @@ def run_global_compliance_test():
     requests.post(f"{BASE_URL}/v1/agent/settings", headers=headers, json={
         "agent_id": agent_id,
         "owner_email": "accounting@consensus_llc.ai",
-        "agent_role": "Engineer"
+        "agent_role": "AI Infrastructure Manager"
     })
     
     # Recarga de saldo inicial para operar
