@@ -698,6 +698,21 @@ class UniversalEngine:
         return entropy
 
     def _normalize_domain(self, vendor_str: str) -> str:
+        """Limpieza básica de dominios."""
+        return vendor_str.lower().strip()
+
+    def identify_accounting_nature(self, vendor, mcc_cat='services'):
+        """
+        Determina el código contable (GL Code) y deducibilidad basado en el proveedor.
+        """
+        v = vendor.lower()
+        if "google" in v or "aws" in v or "azure" in v:
+            return "6200", True # Software/Infrastructure
+        if "uber" in v or "lyft" in v:
+            return "5400", True # Travel
+        if "restaurant" in v or "food" in v:
+            return "5200", True # Meals
+        return "0000", False # Uncategorized / Personal
         vendor_str = vendor_str.lower().strip()
         if not vendor_str.startswith(('http://', 'https://')):
             vendor_str = 'https://' + vendor_str
@@ -1358,6 +1373,9 @@ class UniversalEngine:
                  os.rename(pdf_path, new_path)
                  invoice_url = f"{self.admin_url}/v1/invoices/{os.path.basename(new_path)}"
 
+            # Determines accounting tags logic
+            gl_code, deductible = self.identify_accounting_nature(request.vendor, mcc_cat='services')
+
             self.db.table("transaction_logs").insert({
                 "id": log_id,
                 "agent_id": request.agent_id,
@@ -1367,10 +1385,10 @@ class UniversalEngine:
                 "status": "APPROVED",
                 "reason": "Pago Seguro Verificado",
                 "forensic_hash": str(uuid.uuid4()), # Placeholder para hash real
-                "accounting_tag": "0000",
+                "accounting_tag": gl_code,
                 "fx_rate": 1.0, 
                 "settlement_currency": "USD",
-                "tax_deductible": True,
+                "tax_deductible": deductible,
                 "invoice_url": invoice_url
             }).execute()
 
@@ -1522,10 +1540,11 @@ class UniversalEngine:
             "intent_hash": intent_hash,
             "forensic_hash": forensic_url.split('/')[-1] if forensic_url else None,
             "fx_rate": fx_rate,
-            "settlement_currency": settlement_currency
+            "settlement_currency": "USD",
+            "accounting_tag": gl_code if gl_code else "0000",
+            "tax_deductible": deductible if deductible is not None else False
         }
-        if gl_code: payload['accounting_tag'] = gl_code
-        if deductible is not None: payload['tax_deductible'] = deductible
+        
         if invoice_url: payload["invoice_url"] = invoice_url
         
         try:
