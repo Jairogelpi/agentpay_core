@@ -585,6 +585,36 @@ async def issue_cert(req: dict):
         forensic_hash=req.get("forensic_hash", "PROOF-TRAZABILIDAD-001")
     )
 
+@app.post("/v1/accounting/credit-note")
+async def generate_credit_note(request: TransactionRequest, agent_id: str = Depends(verify_api_key)):
+    """
+    Genera una Nota de Crédito (Factura Rectificativa) para una transacción reembolsada.
+    """
+    try:
+        # Verificar que la transacción existe y pertenece al agente
+        tx = engine.db.table("transaction_logs").select("*").eq("id", request.transaction_id).eq("agent_id", agent_id).single().execute()
+        if not tx.data:
+            raise HTTPException(status_code=404, detail="Transacción no encontrada")
+            
+        data = tx.data
+        
+        # Generar PDF Rectificativo
+        from invoicing import generate_invoice_pdf
+        path = generate_invoice_pdf(
+            data['id'], 
+            data['agent_id'], 
+            data['vendor'], 
+            -float(data['amount']), # Negativo para Credit Note
+            f"REFUND/CORRECTION: {data.get('reason', 'Correction')}",
+            invoice_type="CREDIT_NOTE"
+        )
+        
+        # En prod: subir a S3
+        return {"status": "GENERATED", "credit_note_url": f"https://agentpay-core.onrender.com/v1/invoices/{os.path.basename(path)}"}
+    except Exception as e:
+        logger.error(f"Error generando Credit Note: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # --- M2M MARKET API ---
 @app.post("/v1/market/quote")
 async def market_quote(req: dict):

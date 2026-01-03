@@ -1431,7 +1431,7 @@ class UniversalEngine:
             logger.warning(f"Transaction {transaction_id} not found for value reporting.")
         return {"status": "VALUE_RECORDED", "perceived_value": perceived_value_usd}
 
-    def _result(self, auth, status, reason, req, bal=None, invoice_url=None, fee=0.0, card_data=None, forensic_url=None, mcc_category=None, intent_hash=None, gl_code=None, deductible=None):
+    def _result(self, auth, status, reason, req, bal=None, invoice_url=None, fee=0.0, card_data=None, forensic_url=None, mcc_category=None, intent_hash=None, gl_code=None, deductible=None, fx_rate=1.0, settlement_currency="USD"):
         txn_id = str(uuid.uuid4())
         payload = {
             "id": txn_id, 
@@ -1444,7 +1444,9 @@ class UniversalEngine:
             "justification": req.justification,
             "mcc_category": mcc_category,
             "intent_hash": intent_hash,
-            "forensic_hash": forensic_url.split('/')[-1] if forensic_url else None
+            "forensic_hash": forensic_url.split('/')[-1] if forensic_url else None,
+            "fx_rate": fx_rate,
+            "settlement_currency": settlement_currency
         }
         if gl_code: payload['accounting_tag'] = gl_code
         if deductible is not None: payload['tax_deductible'] = deductible

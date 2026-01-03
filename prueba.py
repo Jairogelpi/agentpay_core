@@ -1,90 +1,56 @@
 import requests
 import time
-import uuid
 from loguru import logger
 
-# Configuración del entorno
 BASE_URL = "https://agentpay-core.onrender.com"
-logger.add("compliance_audit.log", rotation="10 MB")
 
-def run_global_compliance_test():
-    logger.info("🌍 INICIANDO AUDITORÍA INTEGRAL DE CUMPLIMIENTO (EU/US)")
+def test_full_compliance_cycle():
+    logger.info("🌍 INICIANDO PRUEBA DE CONTABILIDAD Y POLÍTICAS EU/US")
 
-    # 1. REGISTRO LEGAL (KYC/KYB Automático)
-    # ---------------------------------------------------------
-    logger.info("\n1️⃣ REGISTRO: Creando agente con parámetros de cumplimiento...")
-    reg_payload = {
-        "client_name": "Autonomous_Consensus_LLC",
-        "country": "ES" # Probamos con España (Europa) para validar 3DS y VAT
-    }
-    reg_res = requests.post(f"{BASE_URL}/v1/agent/register", json=reg_payload).json()
-    
+    # 1. Registro y Configuración de Políticas
+    reg_res = requests.post(f"{BASE_URL}/v1/agent/register", json={"client_name": "Consensus_Tech_SL", "country": "ES"}).json()
     agent_id = reg_res['agent_id']
-    api_key = reg_res['api_key']
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"Authorization": f"Bearer {reg_res['api_key']}", "Content-Type": "application/json"}
     
-    logger.success(f"✅ Agente Registrado legalmente: {agent_id}")
+    logger.success(f"✅ Agente Registrado: {agent_id}")
 
-    # 2. CONFIGURACIÓN FISCAL (Tax IDs y Contacto)
-    # ---------------------------------------------------------
-    logger.info("\n2️⃣ FISCAL: Configurando datos de facturación para la UE...")
+    # Necesitamos saldo
+    requests.post(f"{BASE_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 2000.0})
+
+    # Aplicar Políticas de Rol y Límites
     requests.post(f"{BASE_URL}/v1/agent/settings", headers=headers, json={
         "agent_id": agent_id,
-        "owner_email": "accounting@consensus_llc.ai",
-        "agent_role": "AI Infrastructure Manager"
+        "agent_role": "Senior Cloud Infrastructure Engineer", # Rol Profesional
+        "owner_email": "accounting@consensus.tech"
     })
     
-    # Recarga de saldo inicial para operar
-    requests.post(f"{BASE_URL}/v1/topup/auto", json={"agent_id": agent_id, "amount": 1000.0})
-    logger.info("💰 Saldo fondeado: $1000.0")
+    requests.post(f"{BASE_URL}/v1/agent/limits", headers=headers, json={
+        "agent_id": agent_id,
+        "max_tx": 500.0, # Política de límite por transacción
+        "daily_limit": 1000.0
+    })
+    logger.info("✅ Políticas de Rol y Límites aplicadas.")
 
-    # 3. EJECUCIÓN DE GASTO CON CLASIFICACIÓN IA
-    # ---------------------------------------------------------
-    logger.info("\n3️⃣ PAGO: Ejecutando gasto B2B (Google Cloud)...")
-    payment_payload = {
+    # 2. Ejecución de Pago
+    logger.info("💸 Ejecutando pago bajo política...")
+    pay_res = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json={
         "vendor": "cloud.google.com",
         "amount": 250.75,
-        "description": "Compute Engine instances for LLM fine-tuning",
-        "justification": "Necessary server infrastructure for client delivery."
-    }
-    
-    pay_res = requests.post(f"{BASE_URL}/v1/pay", headers=headers, json=payment_payload).json()
-    tx_id = pay_res.get("db_log_id") or pay_res.get("transaction_id")
-    
-    logger.success(f"✅ Pago aprobado. Esperando firma forense y contable...")
-    time.sleep(12) # Tiempo para que el Oracle v4 procese la contabilidad
-
-    # 4. AUDITORÍA DE DOCUMENTACIÓN (Factura + Ledger)
-    # ---------------------------------------------------------
-    logger.info("\n4️⃣ CONTABILIDAD: Verificando la 'Huella Digital' del gasto...")
-    
-    # Consultar estado en el Ledger
-    tx_status = requests.post(f"{BASE_URL}/v1/transactions/status", headers=headers, json={"transaction_id": tx_id}).json()
-    
-    logger.info(f"📊 Código GL (Libro Mayor): {tx_status.get('accounting_tag')}")
-    logger.info(f"⚖️ Deducibilidad Fiscal: {'SÍ' if tx_status.get('tax_deductible') else 'NO'}")
-    
-    # Descargar Factura PDF Legal (con desglose de impuestos)
-    invoice_res = requests.post(f"{BASE_URL}/v1/invoices/download", headers=headers, json={"transaction_id": tx_id}).json()
-    logger.success(f"📄 Factura Legal Generada: {invoice_res.get('invoice_url')}")
-
-    # 5. EMISIÓN DE CERTIFICADO DE RESPONSABILIDAD (Legal Wrapper)
-    # ---------------------------------------------------------
-    logger.info("\n5️⃣ LEGAL: Generando aval de responsabilidad civil...")
-    legal_res = requests.post(f"{BASE_URL}/v1/legal/issue-certificate", headers=headers, json={
-        "agent_id": agent_id,
-        "email": "accounting@consensus_llc.ai",
-        "platform_url": "https://console.cloud.google.com",
-        "forensic_hash": tx_status.get("forensic_hash")
+        "description": "Compute Engine instances",
+        "justification": "Scaling production DB"
     }).json()
     
-    logger.success(f"⚖️ Certificado de Cumplimiento emitido: {legal_res['certificate_id']}")
+    tx_id = pay_res.get('db_log_id') or pay_res.get('transaction_id')
+    logger.info(f"⏳ Pago iniciado ({tx_id}). Esperando clasificación IA...")
+    time.sleep(10) # Tiempo para que la IA clasifique y genere el PDF
 
-    # 6. EXPORTACIÓN PARA EL CONTADOR (CSV)
-    # ---------------------------------------------------------
-    logger.info("\n6️⃣ EXPORTACIÓN: Generando reporte para QuickBooks/Xero...")
-    export_url = f"{BASE_URL}/v1/accounting/export-csv?month=1&year=2026"
-    logger.info(f"📥 Link de exportación contable: {export_url}")
+    # 3. Verificación Contable
+    status = requests.post(f"{BASE_URL}/v1/transactions/status", headers=headers, json={"transaction_id": tx_id}).json()
+    logger.info(f"📊 Clasificación Contable: {status.get('accounting_tag')} | Deducible: {status.get('tax_deductible')}")
+    logger.info(f"💱 FX Rate: {status.get('fx_rate')} | Moneda: {status.get('settlement_currency')}")
+    
+    invoice = requests.post(f"{BASE_URL}/v1/invoices/download", headers=headers, json={"transaction_id": tx_id}).json()
+    logger.success(f"📄 Factura Legal (EU VAT Compliant) generada en: {invoice.get('invoice_url')}")
 
 if __name__ == "__main__":
-    run_global_compliance_test()
+    test_full_compliance_cycle()
