@@ -786,11 +786,7 @@ class UniversalEngine:
             reason=f"{reason_prefix}. Link enviado al admin.",
             transaction_id=tx_id
         )
-            authorized=False, 
-            status="PENDING_APPROVAL", 
-            reason=reason_prefix, 
-            approval_link=magic_link
-        )
+
 
     # Eliminado el duplicado de report_fraud para mantener consistencia
 
