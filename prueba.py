@@ -102,7 +102,10 @@ def test_policy_enforcement(headers):
         "description": "AWS Credits",
         "justification": "Cloud infrastructure for development"
     }).json()
-    passed = res.get('status') == 'REJECTED' and 'restringido' in str(res.get('reason', '')).lower()
+    
+    # Accept "restringido" OR "lista negra" as valid rejection reasons
+    reason = str(res.get('reason', '')).lower()
+    passed = res.get('status') == 'REJECTED' and ('restringido' in reason or 'lista negra' in reason)
     results.append(test_result("Restricted Vendor Block", passed, f"Reason: {res.get('reason', 'N/A')[:50]}"))
     
     # 2.2 Amount Limit Block
@@ -195,7 +198,11 @@ def test_accounting_export(headers, agent_id):
     # 5.1 Export transactions as CSV
     export_res = requests.get(f"{BASE_URL}/v1/accounting/export-csv", headers=headers)
     
-    passed = export_res.status_code == 200
+    passed = export_res.status_code == 200 and 'text/csv' in export_res.headers.get('content-type', '')
+    
+    if not passed:
+        logger.error(f"❌ CSV Export Failed Body: {export_res.text}")
+        
     test_result("CSV Export", passed, f"Content-Type: {export_res.headers.get('content-type', 'N/A')}")
     
     return passed

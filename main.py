@@ -7,6 +7,7 @@ import uvicorn
 from loguru import logger
 import os
 import json
+from datetime import datetime
 from engine import UniversalEngine
 from models import TransactionRequest, CreditNoteRequest
 from identity import IdentityManager
@@ -814,7 +815,7 @@ async def export_accounting_data(agent_id: str = Depends(verify_api_key)):
         filename = f"export_{agent_id}_{datetime.now().strftime('%Y%m%d')}.csv"
         filepath = os.path.join("invoices", filename)
         
-        with open(filepath, mode='w', newline='') as file:
+        with open(filepath, mode='w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
             writer.writerow(["Date", "Transaction ID", "Vendor", "Amount", "Currency", "FX Rate", "Category", "Description", "GL Code", "Tax Deductible", "Status"])
             for tx in txs:
