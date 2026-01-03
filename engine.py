@@ -28,6 +28,7 @@ import redis
 from integrations import send_slack_approval
 from loguru import logger
 import json # Added for json.loads if needed, though model_validate_json is used
+import jwt # <--- JWT Support
 
 load_dotenv()
 
@@ -39,6 +40,7 @@ class UniversalEngine:
         url = os.environ.get("SUPABASE_URL")
         key = os.environ.get("SUPABASE_KEY")
         self.admin_url = os.environ.get("ADMIN_API_URL", "http://localhost:8000")
+        self.jwt_secret = os.environ.get("JWT_SECRET", "super-secret-fix-in-prod") # <--- Secret for signing tokens
         
         if not url or not key or not stripe.api_key:
             raise ValueError("❌ FALTAN CREDENCIALES: Revisa SUPABASE_URL, SUPABASE_KEY y STRIPE_SECRET_KEY en .env")
@@ -668,13 +670,17 @@ class UniversalEngine:
                 }
             )
             
+            # LOG SEGURO (Masked)
+            logger.info(f"💳 Virtual Card issued: **** {card.last4} | Limit: ${amount}")
+            
             return {
                 "id": card.id,
-                "number": getattr(card, 'number', "4000 0000 0000 0000"),
+                "number": getattr(card, 'number', "4000 0000 0000 0000"), # Necessary for agent use
                 "cvv": getattr(card, 'cvc', "000"),
                 "exp_month": card.exp_month,
                 "exp_year": card.exp_year,
                 "brand": card.brand,
+                "last4": card.last4,
                 "status": card.status
             }
             
@@ -760,8 +766,15 @@ class UniversalEngine:
             logger.error(f"❌ Error persisting pending transaction: {e}")
             # Fallback a ID generado sin persistencia (el link fallará pero no crashea el flujo)
         
-        # El token es directamente el ID (no hace falta base64 complejo si ya tenemos el state en DB)
-        magic_link = f"{self.admin_url}/admin/approve?token={tx_id}"
+        # 3. Generar token JWT firmado (15 min expiración)
+        payload = {
+            "tx_id": tx_id,
+            "exp": datetime.utcnow() + timedelta(minutes=15),
+            "iat": datetime.utcnow()
+        }
+        token = jwt.encode(payload, self.jwt_secret, algorithm="HS256")
+        
+        magic_link = f"{self.admin_url}/admin/approve?token={token}"
         
         try:
             response = self.db.table("wallets").select("owner_email, slack_webhook_url").eq("agent_id", request.agent_id).execute()
@@ -795,9 +808,14 @@ class UniversalEngine:
         Procesa la aprobación manual de una transacción desde el email.
         """
         try:
-             # Aquí deberías validar el token (JWT)
-             # Por simplicidad, asumimos que el token es el ID de transacción directo o un JWT decodificado
-             transaction_id = token 
+             # Validar Token JWT
+             try:
+                 payload = jwt.decode(token, self.jwt_secret, algorithms=["HS256"])
+                 transaction_id = payload.get("tx_id")
+             except jwt.ExpiredSignatureError:
+                 return {"error": "El enlace ha expirado."}
+             except jwt.InvalidTokenError:
+                 return {"error": "Token inválido."} 
              
              # 1. Recuperar Transacción
              tx = self.db.table("transaction_logs").select("*").eq("id", transaction_id).single().execute()
@@ -1149,7 +1167,7 @@ class UniversalEngine:
         # ... (Validaciones iniciales de monto y sanity check existentes) ...
 
         # --- 0. RECUPERAR DATOS DEL AGENTE ---
-        resp = self.db.table("wallets").select("agent_role, kyc_status").eq("agent_id", request.agent_id).single().execute()
+        resp = self.db.table("wallets").select("agent_role, kyc_status, tax_id").eq("agent_id", request.agent_id).single().execute()
         wallet_data = resp.data or {}
         agent_role = wallet_data.get('agent_role', 'Unknown')
         kyc_level = wallet_data.get('kyc_status', 'UNVERIFIED') # Se usará después
@@ -1180,7 +1198,12 @@ class UniversalEngine:
                     "vendor": request.vendor,
                     "amount": request.amount,
                     "status": "REJECTED",
-                    "reason": f"Defensa Troyana: {audit_result.get('reasoning')}"
+                    "reason": f"Defensa Troyana: {audit_result.get('reasoning')}",
+                    "forensic_hash": audit_result.get('forensic_hash'),
+                    "accounting_tag": "0000",
+                    "fx_rate": 1.0, 
+                    "settlement_currency": "USD",
+                    "tax_deductible": False
                 }).execute()
                 
                 return {"status": "REJECTED", "reason": audit_result.get('reasoning')}
@@ -1212,7 +1235,12 @@ class UniversalEngine:
                     "amount": 0.0,
                     "vendor": "FAST_WALL_SECURITY",
                     "status": "SECURITY_BAN",
-                    "reason": f"Fast-Wall: {fast_check['reason']}"
+                    "reason": f"Fast-Wall: {fast_check['reason']}",
+                    "forensic_hash": "FAST-WALL-BAN",
+                    "accounting_tag": "0000",
+                    "fx_rate": 1.0, 
+                    "settlement_currency": "USD",
+                    "tax_deductible": False
                 }).execute()
             except Exception as log_err:
                 logger.warning(f"⚠️ Error al insertar log: {log_err}")
@@ -1280,7 +1308,7 @@ class UniversalEngine:
 
             logger.info(f"💰 [SECURE] Ejecutando transacción blindada para {request.agent_id}...")
             
-            # 1. Deducción Segura (RPC)
+        # 1. Deducción Segura (RPC)
             # Nota: Requiere que el usuario haya ejecutado secure_payment.sql en Supabase
             rpc_res = self.db.rpc('secure_deduct_balance', {
                 'target_agent_id': request.agent_id,
@@ -1293,17 +1321,57 @@ class UniversalEngine:
             new_balance = float(rpc_res.data[0]['updated_balance'])
             logger.success(f"✅ Transacción completada. Nuevo saldo: ${new_balance}")
 
-            # 2. LOG MANUAL (Ahora tenemos el control del ID)
+            # 2. GENERACIÓN DE FACTURA & CERTIFICADO LEGAL
+            # ------------------------------------------------
+            try:
+                # A. Certificado de Responsabilidad (Liability Chain)
+                cert = self.legal_wrapper.issue_liability_certificate(
+                    request.agent_id, 
+                    wallet_data.get('owner_email', 'unknown@agent.com'), 
+                    "agentpay.platform", 
+                    forensic_hash="PENDING-HASH" # Se actualizará
+                )
+                
+                # B. Factura PDF (VAT Compliant)
+                from invoicing import generate_invoice_pdf
+                tax_id = wallet_data.get('tax_id', 'EU-VAT-PENDING')
+                pdf_path = generate_invoice_pdf(
+                    str(uuid.uuid4()), # Temp ID for filename (will replace with log_id)
+                    request.agent_id, 
+                    request.vendor, 
+                    request.amount, 
+                    request.description, 
+                    tax_id=tax_id
+                )
+                invoice_url = f"{self.admin_url}/v1/invoices/{os.path.basename(pdf_path)}"
+            except Exception as leg_e:
+                logger.error(f"⚠️ Legal artifacts failed: {leg_e}")
+                invoice_url = None
+
+            # 3. LOG MANUAL (Sync Check)
             import uuid
             log_id = str(uuid.uuid4())
+            
+            # Renombrar PDF con ID real si existe
+            if invoice_url and os.path.exists(pdf_path):
+                 new_path = pdf_path.replace(os.path.basename(pdf_path).split('_')[1], f"{log_id}.pdf")
+                 os.rename(pdf_path, new_path)
+                 invoice_url = f"{self.admin_url}/v1/invoices/{os.path.basename(new_path)}"
+
             self.db.table("transaction_logs").insert({
                 "id": log_id,
                 "agent_id": request.agent_id,
                 "vendor": request.vendor,
-                "amount": total_deducted,
+                "amount": total_deducted, # Total charged
                 "description": request.description,
                 "status": "APPROVED",
-                "reason": "Pago Seguro Verificado"
+                "reason": "Pago Seguro Verificado",
+                "forensic_hash": str(uuid.uuid4()), # Placeholder para hash real
+                "accounting_tag": "0000",
+                "fx_rate": 1.0, 
+                "settlement_currency": "USD",
+                "tax_deductible": True,
+                "invoice_url": invoice_url
             }).execute()
 
         except Exception as e:
@@ -1337,7 +1405,7 @@ class UniversalEngine:
             "db_log_id": log_id, # <--- NUEVO CAMPO CRÍTICO
             "card": card,
             "balance": "hidden (async)", 
-            "forensic_url": "PENDING"
+            "forensic_url": invoice_url
         }
 
     def charge_user_card(self, agent_id, amount, payment_method_id):

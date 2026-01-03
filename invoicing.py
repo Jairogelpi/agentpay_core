@@ -23,7 +23,7 @@ def generate_invoice_pdf(transaction_id, agent_id, vendor, amount, description, 
     c.setFont("Helvetica-Bold", 14)
     c.drawString(50, height - 50, "AGENTPAY GLOBAL SERVICES")
     c.setFont("Helvetica", 10)
-    c.drawString(50, height - 65, "Tax ID: US-EIN-123456789 / EU-VAT-ES12345678")
+    c.drawString(50, height - 65, f"Tax ID: {tax_id}")
     c.drawString(50, height - 75, "Address: Gran Via 1, Madrid, ES / Delaware, USA")
 
     # Datos de la Factura

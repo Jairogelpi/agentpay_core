@@ -381,8 +381,9 @@ async def pay(
     return result
 
 @app.post("/v1/identity/create")
-async def create_id(req: dict):
-    return identity_mgr.create_identity(req.get("agent_id"), req.get("needs_phone", False))
+async def create_id(req: dict, agent_id: str = Depends(verify_api_key)):
+    # Overwrite agent_id with the authenticated one to ensure security
+    return identity_mgr.create_identity(agent_id, req.get("needs_phone", False))
 
 @app.get("/v1/identity/{identity_id}/check")
 async def check_id(identity_id: str):
@@ -403,9 +404,9 @@ async def create_topup_link(req: dict):
     return {"url": url}
 
 @app.post("/v1/topup/auto")
-async def automatic_topup(req: dict):
+async def automatic_topup(req: dict, agent_id: str = Depends(verify_api_key)):
     """Recarga automática sin intervención humana (Solo Test Mode)"""
-    return engine.automatic_topup(req.get("agent_id"), req.get("amount"))
+    return engine.automatic_topup(agent_id, req.get("amount"))
 
 @app.post("/v1/topup/direct_charge")
 async def direct_charge(req: dict):
@@ -465,9 +466,9 @@ async def stream_payment(req: dict):
     return streaming_money.stream_packet(req.get("agent_id"), req.get("vendor"), float(req.get("amount", 0)))
 
 @app.post("/v1/fraud/report")
-async def report_fraud(req: dict):
+async def report_fraud(req: dict, agent_id: str = Depends(verify_api_key)):
     """Mente Colmena: Reportar un fraude a la comunidad"""
-    return engine.report_fraud(req.get("agent_id"), req.get("vendor"), req.get("reason"))
+    return engine.report_fraud(agent_id, req.get("vendor"), req.get("reason"))
 
 @app.post("/v1/agent/settings")
 async def update_settings(req: dict):
@@ -515,8 +516,8 @@ async def register_agent(req: dict):
     return engine.register_new_agent(req.get("client_name"), country_code=country)
 
 @app.post("/v1/agent/limits")
-async def update_limits(req: dict):
-    return engine.update_limits(req.get("agent_id"), req.get("max_tx"), req.get("daily_limit"))
+async def update_limits(req: dict, agent_id: str = Depends(verify_api_key)):
+    return engine.update_limits(agent_id, req.get("max_tx"), req.get("daily_limit"))
 
 @app.post("/v1/agent/notify")
 async def agent_notify(req: dict):
@@ -598,6 +599,10 @@ async def generate_credit_note(request: TransactionRequest, agent_id: str = Depe
             
         data = tx.data
         
+        # Recuperar Tax ID del agente
+        wallet = engine.db.table("wallets").select("tax_id").eq("agent_id", agent_id).single().execute()
+        tax_id = wallet.data.get('tax_id', 'EU-VAT-PENDING') if wallet.data else 'EU-VAT-PENDING'
+        
         # Generar PDF Rectificativo
         from invoicing import generate_invoice_pdf
         path = generate_invoice_pdf(
@@ -606,6 +611,7 @@ async def generate_credit_note(request: TransactionRequest, agent_id: str = Depe
             data['vendor'], 
             -float(data['amount']), # Negativo para Credit Note
             f"REFUND/CORRECTION: {data.get('reason', 'Correction')}",
+            tax_id=tax_id,
             invoice_type="CREDIT_NOTE"
         )
         
