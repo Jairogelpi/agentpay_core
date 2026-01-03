@@ -1932,7 +1932,7 @@ class UniversalEngine:
         al confirmar recepción del servicio/bienes.
         """
         clean_vendor = self._normalize_domain(vendor)
-        tx_id = f"ESC-{uuid.uuid4().hex[:8].upper()}"
+        tx_id = str(uuid.uuid4())
         
         # 1. Debitar saldo inmediatamente (Bloqueo de fondos)
         try:
@@ -1949,7 +1949,7 @@ class UniversalEngine:
             "vendor": clean_vendor,
             "amount": amount,
             "status": "ESCROW_HOLD",
-            "description": f"ESCROW: {description}",
+            "description": f"[ESCROW] {description}",
             "reason": "Dinero retenido por Garantía de Fondos (Roadmap 2026)"
         }).execute()
 
