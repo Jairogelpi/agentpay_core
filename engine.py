@@ -1330,32 +1330,39 @@ class UniversalEngine:
                 'amount_to_deduct': total_deducted
             }).execute()
 
-            if not rpc_res.data or not rpc_res.data[0]['success']:
-                return {"status": "REJECTED", "reason": "Saldo insuficiente o error de concurrencia"}
+            if not rpc_res.data or not rpc_res.data[0].get('success'):
+                reason = rpc_res.data[0].get('reason', 'Unknown') if rpc_res.data else 'No data'
+                return {"status": "REJECTED", "reason": f"Saldo insuficiente: {reason}"}
 
-            new_balance = float(rpc_res.data[0]['updated_balance'])
+            new_balance = float(rpc_res.data[0].get('updated_balance', 0))
             logger.success(f"✅ Transacción completada. Nuevo saldo: ${new_balance}")
 
-            # 2. FETCH WALLET DATA (needed for legal artifacts)
-            wallet_res = self.db.table("wallets").select("owner_email, tax_id").eq("agent_id", request.agent_id).single().execute()
-            wallet_data = wallet_res.data if wallet_res.data else {}
-
-            # 3. GENERACIÓN DE FACTURA & CERTIFICADO LEGAL
-            # ------------------------------------------------
+            # STEP 2: FETCH WALLET DATA
+            logger.info(f"📋 [STEP 2] Fetching wallet data...")
             try:
-                # A. Certificado de Responsabilidad (Liability Chain)
+                wallet_res = self.db.table("wallets").select("owner_email, tax_id").eq("agent_id", request.agent_id).single().execute()
+                wallet_data = wallet_res.data if wallet_res.data else {}
+                logger.info(f"📋 [STEP 2] Wallet data OK: {bool(wallet_data)}")
+            except Exception as w_err:
+                logger.warning(f"⚠️ [STEP 2] Wallet fetch failed: {w_err}")
+                wallet_data = {}
+
+            # STEP 3: LEGAL ARTIFACTS (Optional - should not block payment)
+            logger.info(f"📋 [STEP 3] Generating legal artifacts...")
+            invoice_url = None
+            pdf_path = None
+            try:
                 cert = self.legal_wrapper.issue_liability_certificate(
                     request.agent_id, 
                     wallet_data.get('owner_email', 'unknown@agent.com'), 
                     "agentpay.platform", 
-                    forensic_hash="PENDING-HASH" # Se actualizará
+                    forensic_hash="PENDING-HASH"
                 )
                 
-                # B. Factura PDF (VAT Compliant)
                 from invoicing import generate_invoice_pdf
                 tax_id = wallet_data.get('tax_id', 'EU-VAT-PENDING')
                 pdf_path = generate_invoice_pdf(
-                    str(uuid.uuid4()), # Temp ID for filename (will replace with log_id)
+                    str(uuid.uuid4()),
                     request.agent_id, 
                     request.vendor, 
                     request.amount, 
@@ -1363,30 +1370,31 @@ class UniversalEngine:
                     tax_id=tax_id
                 )
                 invoice_url = f"{self.admin_url}/v1/invoices/{os.path.basename(pdf_path)}"
+                logger.info(f"📋 [STEP 3] Legal artifacts OK: {invoice_url}")
             except Exception as leg_e:
-                logger.error(f"⚠️ Legal artifacts failed: {leg_e}")
-                invoice_url = None
+                logger.warning(f"⚠️ [STEP 3] Legal artifacts failed (non-blocking): {leg_e}")
 
-            # 3. LOG MANUAL SINCRONIZADO (Corrección del Error 0)
-            import uuid
+            # STEP 4: LOG TO DATABASE
+            logger.info(f"📋 [STEP 4] Inserting transaction log...")
             log_id = str(uuid.uuid4())
             
-            # Renombrar PDF con ID real si existe
-            if invoice_url and os.path.exists(pdf_path):
-                 new_path = pdf_path.replace(os.path.basename(pdf_path).split('_')[1], f"{log_id}.pdf")
-                 os.rename(pdf_path, new_path)
-                 invoice_url = f"{self.admin_url}/v1/invoices/{os.path.basename(new_path)}"
+            # Rename PDF if exists
+            if invoice_url and pdf_path and os.path.exists(pdf_path):
+                try:
+                    new_path = pdf_path.replace(os.path.basename(pdf_path).split('_')[1], f"{log_id}.pdf")
+                    os.rename(pdf_path, new_path)
+                    invoice_url = f"{self.admin_url}/v1/invoices/{os.path.basename(new_path)}"
+                except Exception as rename_err:
+                    logger.warning(f"⚠️ PDF rename failed: {rename_err}")
 
-            # Determines accounting tags logic
             gl_code, deductible = self.identify_accounting_nature(request.vendor, mcc_cat='services')
 
-            # Construimos el payload completo para evitar rechazos por esquema
             log_payload = {
                 "id": log_id,
                 "agent_id": request.agent_id,
                 "vendor": request.vendor,
-                "amount": request.amount, # Monto neto
-                "fee": fee,               # Comisión separada
+                "amount": request.amount,
+                "fee": fee,
                 "description": request.description,
                 "status": "APPROVED",
                 "reason": "Pago Seguro Verificado (Atomic)",
@@ -1400,17 +1408,21 @@ class UniversalEngine:
                 "created_at": datetime.now().isoformat()
             }
             
-            # Insertamos con manejo de error explícito
-            self.db.table("transaction_logs").insert(log_payload).execute()
+            try:
+                self.db.table("transaction_logs").insert(log_payload).execute()
+                logger.info(f"📋 [STEP 4] Transaction log inserted: {log_id}")
+            except Exception as log_err:
+                logger.error(f"❌ [STEP 4] Log insert failed: {type(log_err).__name__}: {log_err}")
+                # Log failed but money was deducted - continue to issue card anyway
+                # The transaction is still valid, just needs manual reconciliation
 
         except Exception as e:
-            # Si falla aquí, tenemos un problema de consistencia (Dinero descontado, sin log)
-            # Imprimimos el error real, no solo el código
-            error_details = str(e)
-            if hasattr(e, 'message'): error_details += f" | {e.message}"
-            if hasattr(e, 'code'): error_details += f" | Code: {e.code}"
+            error_type = type(e).__name__
+            error_details = f"{error_type}: {str(e)}"
+            if hasattr(e, 'message'): error_details += f" | msg: {e.message}"
+            if hasattr(e, 'code'): error_details += f" | code: {e.code}"
             
-            logger.critical(f"CRITICAL ERROR: Money deducted but log failed: {error_details}")
+            logger.critical(f"CRITICAL ERROR in process_instant_payment: {error_details}")
             return {"status": "REJECTED", "reason": f"Error de Integridad: {error_details}"}
 
         # 4. Issue Card (Fast) - Necesario para que el pago funcione
@@ -2147,3 +2159,110 @@ class UniversalEngine:
              
         except Exception as e:
             return {"status": "ERROR", "message": str(e)}
+
+    # =========================================================================
+    # CORPORATE EXPENSE POLICY ENGINE (The 4 Fundamental Rules)
+    # =========================================================================
+    def check_corporate_compliance(self, agent_id, vendor, amount, justification=None):
+        """
+        Verifica si una transacción cumple con las políticas corporativas del agente.
+        Returns: (status, message) where status is True/False/"PENDING"
+        """
+        from datetime import datetime
+        import pytz
+        
+        try:
+            # 1. Obtener políticas desde Supabase
+            policy_res = self.db.table("wallets").select("corporate_policies, agent_role").eq("agent_id", agent_id).single().execute()
+            if not policy_res.data:
+                return True, "⚠️ Sin políticas definidas. Permitido por defecto."
+            
+            policies = policy_res.data.get('corporate_policies') or {}
+            agent_role = policy_res.data.get('agent_role', 'General')
+            
+            # Default policies if not set
+            spending_limits = policies.get('spending_limits', {})
+            restricted_vendors = policies.get('restricted_vendors', [])
+            working_hours = policies.get('working_hours', {})
+            enforce_justification = policies.get('enforce_justification', False)
+            allowed_categories = policies.get('allowed_categories', ['all'])
+            
+            # ---- CHECK 1: Working Hours ----
+            if working_hours.get('start') and working_hours.get('end'):
+                tz_name = working_hours.get('timezone', 'UTC')
+                try:
+                    tz = pytz.timezone(tz_name)
+                    now = datetime.now(tz)
+                    start_hour = int(working_hours['start'].split(':')[0])
+                    end_hour = int(working_hours['end'].split(':')[0])
+                    
+                    if not (start_hour <= now.hour < end_hour):
+                        logger.warning(f"🕐 [POLICY] Fuera de horario: {now.hour}:00 (Permitido: {start_hour}:00 - {end_hour}:00)")
+                        return False, f"⏰ Fuera de horario comercial permitido ({working_hours['start']} - {working_hours['end']} {tz_name})."
+                except Exception as tz_err:
+                    logger.warning(f"⚠️ Error parsing timezone: {tz_err}")
+            
+            # ---- CHECK 2: Restricted Vendors ----
+            vendor_lower = vendor.lower()
+            for restricted in restricted_vendors:
+                if restricted.lower() in vendor_lower:
+                    logger.warning(f"🚫 [POLICY] Proveedor restringido: {vendor}")
+                    return False, f"❌ Proveedor '{vendor}' está en la lista negra corporativa."
+            
+            # ---- CHECK 3: Spending Limits & Slack Approval ----
+            max_per_item = spending_limits.get('max_per_item', 1000.0)
+            daily_budget = spending_limits.get('daily_budget', 2000.0)
+            soft_limit_slack = spending_limits.get('soft_limit_slack', 100.0)
+            
+            if amount > max_per_item:
+                logger.warning(f"💸 [POLICY] Monto ${amount} > Max por item ${max_per_item}")
+                return False, f"💰 Monto (${amount}) excede el límite por item (${max_per_item})."
+            
+            if amount > soft_limit_slack:
+                # Trigger Slack approval instead of blocking
+                logger.info(f"⏳ [POLICY] Monto ${amount} > Umbral Slack ${soft_limit_slack}. Requiere aprobación.")
+                return "PENDING", f"⏳ El monto (${amount}) requiere aprobación humana vía Slack (umbral: ${soft_limit_slack})."
+            
+            # ---- CHECK 4: Justification Required ----
+            if enforce_justification and (not justification or len(justification) < 10):
+                logger.warning(f"📝 [POLICY] Justificación requerida pero no proporcionada.")
+                return False, "📝 Política corporativa exige una justificación de al menos 10 caracteres."
+            
+            # ---- CHECK 5: Category Whitelisting by Role (Optional) ----
+            if 'all' not in allowed_categories:
+                # Simple role-category mapping
+                role_category_map = {
+                    'DevOps': ['cloud_services', 'saas_tools', 'tech_support'],
+                    'Marketing': ['advertising', 'design_tools', 'saas_tools'],
+                    'Sales': ['crm', 'travel', 'entertainment'],
+                    'Engineer': ['cloud_services', 'saas_tools', 'hardware']
+                }
+                allowed_for_role = role_category_map.get(agent_role, allowed_categories)
+                
+                # Detect vendor category (simplified)
+                vendor_category = self._detect_vendor_category(vendor)
+                if vendor_category not in allowed_for_role and vendor_category != 'unknown':
+                    logger.warning(f"🏷️ [POLICY] Categoría '{vendor_category}' no permitida para rol '{agent_role}'")
+                    return False, f"🏷️ La categoría '{vendor_category}' no está autorizada para el rol '{agent_role}'."
+            
+            logger.info(f"✅ [POLICY] Transacción de {agent_id} cumple todas las políticas.")
+            return True, "✅ Cumple con todas las políticas corporativas."
+            
+        except Exception as e:
+            logger.error(f"⚠️ Error checking corporate compliance: {e}")
+            return True, f"⚠️ Error de políticas (Permitido por defecto): {e}"
+
+    def _detect_vendor_category(self, vendor):
+        """Simple vendor category detection based on domain."""
+        v = vendor.lower()
+        if any(x in v for x in ['aws', 'google', 'azure', 'digitalocean', 'heroku', 'render']):
+            return 'cloud_services'
+        if any(x in v for x in ['slack', 'notion', 'figma', 'canva', 'asana', 'trello']):
+            return 'saas_tools'
+        if any(x in v for x in ['facebook', 'google ads', 'linkedin', 'twitter']):
+            return 'advertising'
+        if any(x in v for x in ['uber', 'lyft', 'booking', 'airbnb', 'expedia']):
+            return 'travel'
+        if any(x in v for x in ['amazon', 'ebay', 'aliexpress']):
+            return 'ecommerce'
+        return 'unknown'
