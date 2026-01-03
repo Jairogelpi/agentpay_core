@@ -730,9 +730,27 @@ class UniversalEngine:
         ))
 
     def _create_approval_request(self, request, clean_vendor, reason_prefix="Proveedor nuevo. Aprobación requerida."):
-        payload = f"{request.agent_id}:{clean_vendor}:{request.amount}"
-        token = base64.b64encode(payload.encode()).decode()
-        magic_link = f"{self.admin_url}/admin/approve?token={token}"
+        # Generar ID de transacción persistente para que el link funcione
+        tx_id = str(uuid.uuid4())
+        
+        # Insertar registro PENDING_APPROVAL
+        try:
+            self.db.table("transaction_logs").insert({
+                "id": tx_id,
+                "agent_id": request.agent_id,
+                "vendor": clean_vendor,
+                "amount": request.amount,
+                "status": "PENDING_APPROVAL",
+                "reason": reason_prefix,
+                "created_at": datetime.now().isoformat()
+            }).execute()
+        except Exception as e:
+            logger.error(f"❌ Error persisting pending transaction: {e}")
+            # Fallback a ID generado sin persistencia (el link fallará pero no crashea el flujo)
+        
+        # El token es directamente el ID (no hace falta base64 complejo si ya tenemos el state en DB)
+        magic_link = f"{self.admin_url}/admin/approve?token={tx_id}"
+        
         try:
             response = self.db.table("wallets").select("owner_email, slack_webhook_url").eq("agent_id", request.agent_id).execute()
             wallet_data = response.data[0] if response.data else {}
@@ -748,9 +766,14 @@ class UniversalEngine:
                 send_approval_email(owner_email, request.agent_id, clean_vendor, request.amount, magic_link)
 
         except Exception as e:
-            logger.error(f"   ⚠️ Error enviando notificación: {e}")
-
+            logger.error(f"Error enviando notificaciones: {e}")
+            
         return TransactionResult(
+            authorized=False, 
+            status="APPROVED_PENDING_AUDIT", 
+            reason=f"{reason_prefix}. Link enviado al admin.",
+            transaction_id=tx_id
+        )
             authorized=False, 
             status="PENDING_APPROVAL", 
             reason=reason_prefix, 
