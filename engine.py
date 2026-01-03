@@ -2267,7 +2267,13 @@ class UniversalEngine:
                     now = datetime.now(tz)
                     start_hour = int(working_hours['start'].split(':')[0])
                     end_hour = int(working_hours['end'].split(':')[0])
-                    
+                
+                    # --- HOTFIX 2026: Corregir bug de la hora 23 ---
+                    # Si el cierre es "23:59", queremos que end_hour actúe como 24 para que (23 < 24) sea True.
+                    if end_hour == 23 and int(working_hours['end'].split(':')[1]) > 0:
+                        end_hour = 24
+                    # -----------------------------------------------
+
                     if not (start_hour <= now.hour < end_hour):
                         logger.warning(f"🕐 [POLICY] Fuera de horario: {now.hour}:00 (Permitido: {start_hour}:00 - {end_hour}:00)")
                         return False, f"⏰ Fuera de horario comercial permitido ({working_hours['start']} - {working_hours['end']} {tz_name})."
