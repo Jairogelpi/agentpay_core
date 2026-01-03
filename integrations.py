@@ -9,6 +9,13 @@ def send_slack_approval(webhook_url, agent_id, amount, vendor, approval_link, re
     # Saneamiento de la razón para evitar roturas de JSON
     clean_reason = str(reason).replace('"', "'")[:200]
     
+    # --- CORRECCIÓN ERROR 400 (invalid_blocks) ---
+    # Slack exige que 'url' sea válida (http/https). 
+    # Si engine.py envía "#" (placeholder), lo cambiamos por una URL segura por defecto.
+    valid_link = approval_link
+    if not valid_link or not valid_link.startswith(('http://', 'https://')):
+        valid_link = "https://agentpay.ai/admin/alerts" # URL de fallback segura
+
     # Construcción del payload siguiendo el estándar Block Kit
     payload = {
         "blocks": [
@@ -48,7 +55,7 @@ def send_slack_approval(webhook_url, agent_id, amount, vendor, approval_link, re
                         "type": "button",
                         "text": {"type": "plain_text", "text": "✅ Revisar y Aprobar"},
                         "style": "primary",
-                        "url": approval_link,
+                        "url": valid_link, # Usamos el link validado
                         "action_id": "approve_button"
                     }
                 ]
