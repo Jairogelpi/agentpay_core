@@ -1047,18 +1047,35 @@ class UniversalEngine:
                 # 1. REVERSIÓN: Devolver el dinero (monto negativo suma al saldo)
                 self.db.rpc("deduct_balance", {"p_agent_id": agent_id, "p_amount": -amount}).execute()
     
-                # 2. BANEO + PILLAR 5: HIVE MIND BLACKLIST
-                # Si el riesgo es crítico, quemamos el dominio en la red global
-                if "CRITICAL" in str(risk_assessment).upper() or osint_report.get('score', 100) < 30:
-                     try:
-                         logger.warning(f"☣️ [HIVE MIND] Agregando {vendor} a la LISTA NEGRA GLOBAL.")
-                         self.db.table("global_blacklist").upsert({
-                             "vendor": self._normalize_domain(vendor),
-                             "reason": f"Automated Ban by AI Guard: {reason_text}",
-                             "severity": "CRITICAL"
-                         }).execute()
-                     except Exception as bl_err:
-                         logger.error(f"⚠️ Error actualizando Blacklist Global: {bl_err}")
+            # 2. BANEO + PILLAR 5: HIVE MIND BLACKLIST (INTELIGENCIA UNIVERSAL)
+            
+            # Obtenemos la autoridad del dominio (0-100) calculada por tu OSINT
+            domain_authority = osint_report.get('score', 0)
+            
+            # --- REGLA UNIVERSAL DE INMUNIDAD ---
+            # Si el dominio tiene alta autoridad (>75), asumimos que es Infraestructura (SaaS/Cloud/Utility)
+            # y que el "Riesgo Crítico" se debe al mal comportamiento del usuario, no a que el sitio sea malicioso.
+            is_infrastructure = domain_authority > 75
+            
+            # Lógica de Disparo:
+            # Solo baneamos GLOBALMENTE si la IA detecta peligro Y el dominio es basura (<75).
+            should_ban_globally = ("CRITICAL" in str(risk_assessment).upper()) and (not is_infrastructure)
+
+            if should_ban_globally:
+                 try:
+                     logger.warning(f"☣️ [HIVE MIND] Dominio de bajo nivel ({domain_authority}/100) detectado como amenaza. Agregando {vendor} a la LISTA NEGRA GLOBAL.")
+                     self.db.table("global_blacklist").upsert({
+                         "vendor": self._normalize_domain(vendor),
+                         "reason": f"Automated Ban by AI Guard: {reason_text}",
+                         "severity": "CRITICAL"
+                     }).execute()
+                 except Exception as bl_err:
+                     logger.error(f"⚠️ Error actualizando Blacklist Global: {bl_err}")
+            
+            elif "CRITICAL" in str(risk_assessment).upper() and is_infrastructure:
+                 # CASO: Ataque en Infraestructura (Ej: Hackers pagando AWS con tarjeta robada)
+                 # Acción: Matamos al Agente, pero protegemos la plataforma.
+                 logger.warning(f"🛡️ [UNIVERSAL SHIELD] Bloqueo Global evitado para {vendor}. Su alta reputación ({domain_authority}/100) indica que es Infraestructura Crítica. Solo se baneará al Agente.")
     
                 # 2. BANEO: Actualizar el estado del agente a BANNED
                 self.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", agent_id).execute()
