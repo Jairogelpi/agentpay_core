@@ -502,8 +502,14 @@ async def report_fraud(req: dict, agent_id: str = Depends(verify_api_key)):
 
 @app.post("/v1/agent/settings")
 async def update_settings(req: dict):
-    """Configura Webhook y Email de contacto del agente"""
-    return engine.update_agent_settings(req.get("agent_id"), req.get("webhook_url"), req.get("owner_email"))
+    """Configura Webhook, Email, Rol y Políticas Corporativas del agente"""
+    return engine.update_agent_settings(
+        req.get("agent_id"), 
+        webhook_url=req.get("webhook_url"), 
+        owner_email=req.get("owner_email"),
+        agent_role=req.get("agent_role"),
+        corporate_policies=req.get("corporate_policies")
+    )
 
 @app.post("/v1/agent/status")
 async def agent_status(req: dict):

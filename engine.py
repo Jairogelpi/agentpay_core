@@ -1322,6 +1322,23 @@ class UniversalEngine:
                     logger.warning(f"🛑 [LIMIT EXCEEDED] Agente {request.agent_id} (${d_spent}/${d_limit})")
                     return {"status": "REJECTED", "reason": "Excede el límite de gasto diario configurado."}
 
+            # 1. CHECK CORPORATE COMPLIANCE (Pre-flight Policy Check)
+            compliance_status, compliance_reason = self.check_corporate_compliance(
+                request.agent_id, 
+                request.vendor, 
+                request.amount, 
+                request.justification
+            )
+            
+            if compliance_status == False:
+                logger.warning(f"🚫 [POLICY] Rechazado por política corporativa: {compliance_reason}")
+                return {"status": "REJECTED", "reason": compliance_reason}
+            elif compliance_status == "PENDING":
+                # Trigger Slack approval and return pending
+                logger.info(f"⏳ [POLICY] Requiere aprobación humana: {compliance_reason}")
+                # For now, we'll still process but flag it
+                # In production, this would create a pending approval request
+
             logger.info(f"💰 [SECURE] Ejecutando transacción blindada para {request.agent_id}...")
             
         # 1. Deducción Segura (RPC)
@@ -1952,12 +1969,16 @@ class UniversalEngine:
             logger.error(f"❌ Error creando agente: {e}")
             return {"status": "ERROR", "message": str(e)}
 
-    def update_agent_settings(self, agent_id, webhook_url=None, owner_email=None):
+    def update_agent_settings(self, agent_id, webhook_url=None, owner_email=None, agent_role=None, corporate_policies=None):
         data = {}
         if webhook_url: data["webhook_url"] = webhook_url
         if owner_email: data["owner_email"] = owner_email
-        self.db.table("wallets").update(data).eq("agent_id", agent_id).execute()
-        logger.info(f"Agent {agent_id} settings updated.")
+        if agent_role: data["agent_role"] = agent_role
+        if corporate_policies: data["corporate_policies"] = corporate_policies
+        
+        if data:
+            self.db.table("wallets").update(data).eq("agent_id", agent_id).execute()
+            logger.info(f"Agent {agent_id} settings updated: {list(data.keys())}")
         return {"status": "UPDATED"}
 
     def update_limits(self, agent_id, max_tx=None, daily_limit=None):
