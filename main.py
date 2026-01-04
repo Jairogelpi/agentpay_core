@@ -550,7 +550,12 @@ async def download_invoice(req: dict):
 async def register_agent(req: dict):
     # Extraemos el país (con soporte para ambos nombres 'country' y 'country_code')
     country = req.get("country") or req.get("country_code", "US")
-    return engine.register_new_agent(req.get("client_name"), country_code=country)
+    # FIX: Pass agent_role to the engine
+    return engine.register_new_agent(
+        req.get("client_name"), 
+        country_code=country, 
+        agent_role=req.get("agent_role", "Asistente General")
+    )
 
 @app.post("/v1/agent/limits")
 async def update_limits(req: dict, agent_id: str = Depends(verify_api_key)):
