@@ -22,7 +22,8 @@ from mcp.server.fastmcp import FastMCP
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
 
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
@@ -47,8 +48,9 @@ resource = Resource.create({
     "deployment.environment": os.getenv("ENVIRONMENT", "production")
 })
 
-# Endpoint correcto para Grafana Cloud (gRPC puro)
-otlp_endpoint = os.getenv("OTLP_ENDPOINT", "otlp-gateway-prod-eu-central-0.grafana.net:443")
+# Endpoint correcto para Grafana Cloud (HTTP/HTTPS)
+otlp_endpoint = os.getenv("OTLP_ENDPOINT", "https://otlp-gateway-prod-eu-central-0.grafana.net/v1/traces")
+
 
 
 # Autenticación para tokens glc_
@@ -75,9 +77,9 @@ provider = TracerProvider(resource=resource)
 processor = BatchSpanProcessor(
     OTLPSpanExporter(
         endpoint=otlp_endpoint,
-        headers=otlp_headers,
-        insecure=False # Use TLS for gRPC (Grafana Cloud requires it)
+        headers=otlp_headers
     ),
+
     schedule_delay_millis=5000 
 )
 provider.add_span_processor(processor)
