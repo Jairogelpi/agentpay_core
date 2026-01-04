@@ -536,6 +536,34 @@ async def approve_endpoint(token: str):
 # En un despliegue real FastAPI, exponemos las tools como endpoints REST
 # para que LangChain/crews puedan llamarlos vía HTTP Request.
 
+@app.get("/v1/debug/sentry-force")
+async def debug_sentry_force():
+    """Endpoint de diagnóstico extremo para Sentry (Server Side)"""
+    import sentry_sdk
+    import os
+    
+    dsn = os.getenv("SENTRY_DSN")
+    
+    # 1. Verificar si SDK está activo
+    is_active = sentry_sdk.Hub.current.client is not None
+    
+    # 2. Forzar mensaje
+    msg_id = sentry_sdk.capture_message("🔍 AgentPay: Sentry Force Debug Message")
+    
+    # 3. Forzar Excepción controlada
+    try:
+        1 / 0
+    except Exception as e:
+        exc_id = sentry_sdk.capture_exception(e)
+    
+    return {
+        "sentry_active": is_active,
+        "dsn_configured": bool(dsn),
+        "dsn_preview": f"{dsn[:15]}..." if dsn else "MISSING",
+        "message_event_id": msg_id,
+        "exception_event_id": exc_id
+    }
+
 @app.get("/v1/debug/stripe")
 async def debug_stripe():
     """Diagnóstico directo de Issuing."""
