@@ -10,7 +10,7 @@ import whois
 import socket
 import ssl
 import validators
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -262,6 +262,101 @@ class UniversalEngine:
 
         except Exception as e:
             logger.warning(f"⚠️ Aviso de Orquestación: {e}")
+
+    # --- PREDICTIVE TREASURY SYSTEM ---
+
+    def calculate_burn_rate(self, lookback_days=7):
+        """
+        [PREDICTIVE AI] Calcula cuánto dinero quema la plataforma al día (promedio).
+        """
+        try:
+            # 1. Definir rango de fechas
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=lookback_days)
+            
+            # 2. Consultar Supabase: Suma de transacciones APROBADAS en ese periodo
+            response = self.db.table("transaction_logs")\
+                .select("amount")\
+                .eq("status", "APPROVED")\
+                .gte("created_at", start_date.isoformat())\
+                .execute()
+            
+            if not response.data:
+                return 0.0
+
+            total_spent = sum(float(item['amount']) for item in response.data)
+            daily_burn = total_spent / lookback_days
+            
+            # Suelo mínimo de seguridad ($50/día) para evitar divisiones raras al inicio
+            return max(daily_burn, 50.0) 
+
+        except Exception as e:
+            logger.error(f"⚠️ Error calculating burn rate: {e}")
+            return 100.0 # Valor seguro por defecto si falla la DB
+
+    def check_treasury_health(self):
+        """
+        [CRON] VIGILANCIA PREDICTIVA.
+        Calcula si el saldo real de Stripe aguanta el ritmo de gasto actual.
+        """
+        try:
+            # 1. Obtener Saldo Real (Stripe)
+            balance = stripe.Balance.retrieve()
+            available_usd = 0.0
+            
+            # Buscar saldo en USD (Issuing o General)
+            sources = balance.get('issuing', {}).get('available', []) or balance.get('available', [])
+            for bal in sources:
+                if bal['currency'] == 'usd':
+                    available_usd = bal['amount'] / 100.0
+                    break
+            
+            logger.info(f"🏦 [TREASURY] Saldo Real Stripe: ${available_usd:,.2f}")
+
+            # 2. CALCULAR UMBRAL DINÁMICO
+            daily_burn = self.calculate_burn_rate(lookback_days=7)
+            
+            # FACTOR DE SEGURIDAD: 4.0 (3 días de fin de semana + 1 día margen)
+            SAFETY_FACTOR = 4.0 
+            PREDICTIVE_THRESHOLD = max(daily_burn * SAFETY_FACTOR, 500.0)
+            
+            logger.info(f"📊 [PREDICTIVE] Burn Rate: ${daily_burn:.2f}/día | Umbral Seguro: ${PREDICTIVE_THRESHOLD:.2f}")
+
+            # 3. VERIFICACIÓN Y ALERTA
+            if available_usd < PREDICTIVE_THRESHOLD:
+                shortfall = PREDICTIVE_THRESHOLD - available_usd
+                logger.critical(f"🚨 [LIQUIDITY RISK] Saldo ${available_usd:.2f} < Umbral ${PREDICTIVE_THRESHOLD:.2f}")
+                
+                # Alerta a Slack
+                admin_webhook = os.environ.get("SLACK_ADMIN_WEBHOOK")
+                if admin_webhook:
+                   # Importación local para evitar ciclos si integrations.py usa engine.py
+                    from integrations import send_slack_approval
+                    send_slack_approval(
+                        webhook_url=admin_webhook,
+                        agent_id="SYSTEM_TREASURY_AI",
+                        amount=available_usd,
+                        vendor="STRIPE PREDICTIVE ALERT",
+                        approval_link="https://dashboard.stripe.com/topups", 
+                        reason=f"⚠️ ALERTA: Al ritmo actual (${daily_burn:.0f}/día), riesgo de Muerte Súbita el fin de semana. Faltan ${shortfall:.2f}."
+                    )
+                
+                return {
+                    "status": "WARNING", 
+                    "balance": available_usd, 
+                    "burn_rate": daily_burn, 
+                    "alert_sent": True
+                }
+
+            return {
+                "status": "HEALTHY", 
+                "balance": available_usd, 
+                "burn_rate": daily_burn
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error in treasury guard: {e}")
+            return {"status": "ERROR", "message": str(e)}
 
     def check_circuit_breaker(self, agent_id, kyc_level="UNVERIFIED"):
         """

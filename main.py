@@ -717,6 +717,17 @@ async def approve_tx(req: dict):
 async def list_identities(req: dict):
     return identity_mgr.get_active_identities(req.get("agent_id"))
 
+@app.post("/v1/internal/cron/treasury-check")
+async def treasury_check_cron(request: Request):
+    """
+    CRON HOURLY: Verifica la salud financiera basada en predicción de gasto.
+    Debe llamarse cada hora.
+    """
+    # Opcional: Verificar un header secreto si quieres seguridad extra
+    # if request.headers.get("X-CRON-KEY") != os.getenv("CRON_SECRET"): raise HTTPException(401)
+    
+    return engine.check_treasury_health()
+
 @app.post("/v1/internal/reset-daily-limits")
 async def reset_limits():
     """Tarea programada para resetear daily_spent a 0 cada medianoche (CRON)"""
