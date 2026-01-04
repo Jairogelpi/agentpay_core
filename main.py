@@ -9,6 +9,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 from loguru import logger
 import os
+import sys
 import json
 from datetime import datetime
 from engine import UniversalEngine
@@ -16,10 +17,59 @@ from models import TransactionRequest, CreditNoteRequest
 from identity import IdentityManager
 from mcp.server.fastmcp import FastMCP
 
-# Configuración de Logs (Rotación y Persistencia)
+# --- OPENTELEMETRY IMPORTS ---
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.instrumentation.redis import RedisInstrumentor
+from opentelemetry.instrumentation.logging import LoggingInstrumentor
+
+# --- 1. CONFIGURACIÓN DE TRACING (OPENTELEMETRY) ---
+# Debe inicializarse ANTES de crear la app FastAPI
+otlp_endpoint = os.getenv("OTLP_ENDPOINT", "localhost:4317")
+provider = TracerProvider()
+processor = BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True))
+provider.add_span_processor(processor)
+trace.set_tracer_provider(provider)
+
+# Instrumentaciones Automáticas
+RequestsInstrumentor().instrument()
+RedisInstrumentor().instrument()
+LoggingInstrumentor().instrument()
+
+# --- 2. CONFIGURACIÓN DE LOGS ESTRUCTURADOS (JSON) ---
+# Inyector de Contexto para Loguru (Vincula Logs con Traces)
+def inject_trace_data(record):
+    span = trace.get_current_span()
+    if span and span.get_span_context().is_valid:
+        record["extra"]["trace_id"] = format(span.get_span_context().trace_id, "032x")
+        record["extra"]["span_id"] = format(span.get_span_context().span_id, "16x")
+    return True
+
+logger.remove() # Eliminar manejador default (texto plano)
+
+# Configuración JSON para Ficheros (Rotación)
 if not os.path.exists("logs"):
     os.makedirs("logs")
-logger.add("logs/agentpay.log", rotation="500 MB", level="INFO")
+
+logger.add(
+    "logs/agentpay_structured.log", 
+    rotation="500 MB", 
+    serialize=True, # <--- JSON Format
+    filter=inject_trace_data, 
+    level="INFO"
+)
+
+# Configuración JSON para Stdout (Docker/Kubernetes/Render Friendly)
+logger.add(
+    sys.stdout, 
+    serialize=True, 
+    filter=inject_trace_data, 
+    level="INFO"
+)
 
 class SentryHandler:
     def write(self, message):
@@ -31,10 +81,10 @@ class SentryHandler:
 logger.add(SentryHandler(), level="ERROR")
 from legal import LegalWrapper
 
-# Inicializamos
+# Inicializamos Sentry (Coexistencia con OTel)
 sentry_sdk.init(
     dsn=os.environ.get("SENTRY_DSN"),
-    traces_sample_rate=1.0,
+    traces_sample_rate=1.0, 
     profiles_sample_rate=1.0,
     environment="production",
     integrations=[
@@ -43,6 +93,7 @@ sentry_sdk.init(
     ],
 )
 app = FastAPI(title="AgentPay Production Server")
+FastAPIInstrumentor.instrument_app(app) # <--- Instrumentación de FastAPI
 security = HTTPBearer()
 engine = UniversalEngine()
 identity_mgr = IdentityManager(engine.db)
@@ -166,7 +217,14 @@ def request_payment(vendor: str, amount: float, description: str, agent_id: str)
     """Solicita un pago real. Devuelve veredicto de The Oracle y datos de tarjeta."""
     req = TransactionRequest(agent_id=agent_id, vendor=vendor, amount=amount, description=description)
     try:
-        result = engine.evaluate(req)
+        # 3. Span Personalizado para Auditoría Interna
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span("engine.evaluate") as span:
+             span.set_attribute("agent.id", agent_id)
+             span.set_attribute("transaction.amount", amount)
+             result = engine.evaluate(req)
+             span.set_attribute("transaction.status", result.status)
+        
         return json.dumps({
             "success": result.authorized, "status": result.status,
             "message": result.reason, "card": result.card_details.__dict__ if result.card_details else None,
