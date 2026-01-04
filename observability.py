@@ -3,13 +3,14 @@ from loguru import logger
 from logtail import LogtailHandler
 
 # TUS CREDENCIALES REALES (No las compartas públicamente)
+# TUS CREDENCIALES REALES
 LOGTAIL_TOKEN = "U9uJndRo8hPrgj1grS5yCRci"
-LOGTAIL_HOST = "https://s1661890.eu-nbg-2.betterstackdata.com"
+# LOGTAIL_HOST eliminado para usar el endpoint de ingestión por defecto (in.logs.betterstack.com)
 
 def setup_observability():
     """
     Configura el pipeline de logs 'Grado Bancario'.
-    Conecta Loguru con Better Stack (Logtail) usando tu host EU.
+    Conecta Loguru con Better Stack (Logtail).
     """
     # 1. Limpiar handlers por defecto para evitar duplicados
     logger.remove()
@@ -23,8 +24,8 @@ def setup_observability():
 
     # 3. Handler de Better Stack (La Nube)
     try:
-        # Instanciamos el handler con TU host específico
-        handler = LogtailHandler(source_token=LOGTAIL_TOKEN, host=LOGTAIL_HOST)
+        # Instanciamos el handler usando el endpoint default de Better Stack
+        handler = LogtailHandler(source_token=LOGTAIL_TOKEN)
         
         # Conectamos Loguru al handler de Logtail
         logger.add(
