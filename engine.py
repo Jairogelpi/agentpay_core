@@ -720,6 +720,14 @@ class UniversalEngine:
             deductible=is_deductible
         )
 
+        # [OBSERVABILITY] Evento crítico para Deadman Switch (Si no ocurre en 1h -> Alerta)
+        logger.bind(
+            event="payment_success",
+            amount=request.amount,
+            vendor=clean_vendor,
+            agent_id=request.agent_id
+        ).info(f"✅ Pago Exitoso: {request.amount} a {clean_vendor}")
+
         # APRENDIZAJE AUTOMÁTICO (RAG)
         # Guardamos el vector para que la próxima vez sea más rápido
         try:
