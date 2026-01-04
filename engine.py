@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from supabase.client import ClientOptions
 from models import TransactionRequest, TransactionResult, CardDetails
-from ai_guard import audit_transaction, calculate_statistical_risk
+from ai_guard import audit_transaction, calculate_statistical_risk, get_embedding
 from security_utils import check_domain_age
 from notifications import send_approval_email
 from webhooks import send_webhook
@@ -76,6 +76,17 @@ class UniversalEngine:
              logger.warning(f"⚠️ Redis no disponible. Usando memoria RAM (Inseguro para prod). Error: {e}")
              self.redis_enabled = False
              self.transaction_velocity = {} 
+
+    async def _save_transaction_memory(self, tx_id, text_content):
+        """Genera y guarda el embedding para aprendizaje futuro (RAG)."""
+        try:
+            vector = await get_embedding(text_content)
+            if vector:
+                self.db.table("transaction_logs").update({
+                    "embedding": vector
+                }).eq("id", tx_id).execute()
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudo guardar memoria vectorial: {e}") 
 
     async def _perform_osint_scan(self, vendor_url: str):
         """
@@ -595,7 +606,7 @@ class UniversalEngine:
             # ASYNC AWAIT: No bloqueamos el hilo principal mientras OpenAI piensa
             # Pasamos corporate_policies para que Oracle tome decisiones policy-aware
             corporate_policies = wallet.get('corporate_policies', {})
-            audit = await audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status, osint_report=osint_report, trusted_context=trusted_context, corporate_policies=corporate_policies)
+            audit = await audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status, osint_report=osint_report, trusted_context=trusted_context, corporate_policies=corporate_policies, db_client=self.db)
             
             intent_hash = audit.get('intent_hash', 'N/A')
             mcc_category = audit.get('mcc_category', 'services')
@@ -691,6 +702,14 @@ class UniversalEngine:
             gl_code=gl_code,
             deductible=is_deductible
         )
+
+        # APRENDIZAJE AUTOMÁTICO (RAG)
+        # Guardamos el vector para que la próxima vez sea más rápido
+        try:
+            mem_text = f"{request.vendor} {request.description} {request.justification or ''}"
+            await self._save_transaction_memory(result.transaction_id, mem_text)
+        except Exception as e:
+            logger.warning(f"Failed to save RAG memory: {e}")
 
         # IDEMPOTENCY SAVE (Al final de todo)
         if idempotency_key and self.redis_enabled:
@@ -1134,7 +1153,8 @@ class UniversalEngine:
                 justification=tx_data.get('justification', 'N/A'),
                 sensitivity="HIGH",
                 osint_report=osint_report,
-                corporate_policies=corporate_policies
+                corporate_policies=corporate_policies,
+                db_client=self.db
             )
             
             verdict = risk_assessment.get('decision', 'FLAGGED')
