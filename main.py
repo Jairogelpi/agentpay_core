@@ -506,8 +506,7 @@ async def pay(
             task_data['id'] = result.get('db_log_id')
             
             background_tasks.add_task(engine.run_background_audit, task_data)
-            
-            background_tasks.add_task(engine.run_background_audit, task_data)
+
             
         span.set_attribute("transaction.status", result.get("status"))
         
