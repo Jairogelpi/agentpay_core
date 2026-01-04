@@ -157,9 +157,32 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
         return response
 
-app.add_middleware(SecurityHeadersMiddleware)
+# --- ZERO TRUST MIDDLEWARE (ORIGIN LOCKDOWN) ---
+class ZeroTrustMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Solo activamos el candado si existe la llave en el entorno
+        server_secret = os.getenv("SOURCE_TOKEN")
+        
+        if server_secret:
+            # Buscamos la contraseña en la cabecera
+            request_secret = request.headers.get("X-Origin-Secret")
+            
+            # Si no coincide (y no es el health check interno de Render/Uptime)
+            # Nota: Si usas BetterStack Uptime, configura ahí también la cabecera o añade excepción aquí.
+            if request_secret != server_secret:
+                # Permitir /health para monitores básicos que no soportan headers (opcional)
+                if request.url.path == "/health":
+                    return await call_next(request)
+                    
+                return JSONResponse(
+                    status_code=403, 
+                    content={"status": "FORBIDDEN", "message": "Direct Access Not Allowed. Use Cloudflare."}
+                )
+        
+        return await call_next(request)
 
-FastAPIInstrumentor.instrument_app(app) # <--- Instrumentación de FastAPI
+app.add_middleware(ZeroTrustMiddleware) # <--- 1er Muro de Defensa
+app.add_middleware(SecurityHeadersMiddleware) # <--- 2do Muro (Headers)
 security = HTTPBearer()
 engine = UniversalEngine()
 identity_mgr = IdentityManager(engine.db)
