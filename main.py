@@ -33,10 +33,13 @@ otlp_endpoint = os.getenv("OTLP_ENDPOINT", "localhost:4317")
 otlp_headers = os.getenv("OTLP_HEADERS")
 
 provider = TracerProvider()
-processor = BatchSpanProcessor(OTLPSpanExporter(
-    endpoint=otlp_endpoint,
-    headers=otlp_headers
-))
+processor = BatchSpanProcessor(
+    OTLPSpanExporter(
+        endpoint=otlp_endpoint,
+        headers=otlp_headers
+    ),
+    schedule_delay_millis=5000 # 2. Silenciar Telemetría (No bloquear pagos)
+)
 provider.add_span_processor(processor)
 trace.set_tracer_provider(provider)
 
@@ -68,10 +71,11 @@ logger.add(
     level="INFO"
 )
 
-# Configuración JSON para Stdout
+# Configuración para Stdout (Humano/Cliente - Limpio)
 logger.add(
     sys.stdout, 
-    serialize=True, 
+    serialize=False, # <--- 5. Cliente ve texto limpio, no JSON
+    format="{time:HH:mm:ss} | {level} | {message}",
     level="INFO"
 )
 
@@ -229,13 +233,14 @@ def request_payment(vendor: str, amount: float, description: str, agent_id: str)
              result = engine.evaluate(req)
              span.set_attribute("transaction.status", result.status)
         
+        # 4. Interfaz de Respuesta (JSON Limpio)
         return json.dumps({
-            "success": result.authorized, "status": result.status,
-            "message": result.reason, "card": result.card_details.__dict__ if result.card_details else None,
-            "forensic_hash": result.forensic_hash,
-            "forensic_url": result.forensic_bundle_url
+            "success": result.authorized, 
+            "status": result.status,
+            "card": result.card_details.__dict__ if result.card_details else None,
+            # "message": result.reason # Opcional: Ocultar razón técnica si se desea
         })
-    except Exception as e: return json.dumps({"success": False, "error": str(e)})
+    except Exception as e: return json.dumps({"success": False, "status": "ERROR", "error": str(e)})
 
 @mcp_server.tool()
 def get_dashboard(agent_id: str) -> str:
@@ -502,8 +507,18 @@ async def pay(
             
             background_tasks.add_task(engine.run_background_audit, task_data)
             
+            background_tasks.add_task(engine.run_background_audit, task_data)
+            
         span.set_attribute("transaction.status", result.get("status"))
-        return result
+        
+        # 4. Interfaz de Respuesta (JSON Limpio)
+        return {
+            "success": result.get("authorized", False),
+            "status": result.get("status", "UNKNOWN"),
+            "card_details": result.get("card_details"), 
+            "message": result.get("reason") # Feedback mínimo para el humano
+        }
+
 
 @app.post("/v1/identity/create")
 async def create_id(req: dict, agent_id: str = Depends(verify_api_key)):
