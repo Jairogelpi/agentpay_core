@@ -103,6 +103,10 @@ async def search_memory(db_client, description, vendor):
         }).execute()
         return res.data if res.data else []
     except Exception as e:
+        logger.error(f"❌ RAG Memory Search Failed (RPC Error): {e}")
+        # Intenta imprimir el cuerpo del error si disponible
+        if hasattr(e, 'response') and hasattr(e.response, 'text'):
+             logger.error(f"   RPC Response Body: {e.response.text}")
         return []
 
 # ==========================================
