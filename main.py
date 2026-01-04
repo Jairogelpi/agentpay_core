@@ -11,6 +11,17 @@ from loguru import logger
 import os
 import sys
 import json
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+# --- RATE LIMITING ---
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=os.environ.get("REDIS_URL", "redis://localhost:6379"),
+    strategy="fixed-window" 
+)
 
 from datetime import datetime
 from engine import UniversalEngine
@@ -120,6 +131,12 @@ sentry_sdk.init(
     ],
 )
 app = FastAPI(title="AgentPay Production Server")
+
+# Rate Limiting Setup
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 FastAPIInstrumentor.instrument_app(app) # <--- Instrumentación de FastAPI
 security = HTTPBearer()
 engine = UniversalEngine()
@@ -525,8 +542,10 @@ async def check_kyc_status(agent_id: str):
 from fastapi import Request, Header, BackgroundTasks # <--- Importar Header y BackgroundTasks
 
 @app.post("/v1/pay")
+@limiter.limit("5/minute") # 🛡️ ESCUDO: Máx 5 pagos/min por IP. Frena ataques de fuerza bruta.
 async def pay(
     req: dict, 
+    request: Request, # <--- Necesario para slowapi
     background_tasks: BackgroundTasks,
     agent_id: str = Depends(verify_api_key)
 ):
@@ -711,7 +730,8 @@ async def download_invoice(req: dict):
     return engine.get_invoice_url(req.get("transaction_id"))
 
 @app.post("/v1/agent/register")
-async def register_agent(req: dict):
+@limiter.limit("20/minute") # 🛡️ Antispam de cuentas
+async def register_agent(req: dict, request: Request):
     # Extraemos el país (con soporte para ambos nombres 'country' y 'country_code')
     country = req.get("country") or req.get("country_code", "US")
     # FIX: Pass agent_role to the engine
