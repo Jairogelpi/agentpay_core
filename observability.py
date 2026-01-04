@@ -1,7 +1,11 @@
 import os
+import sys
 import sentry_sdk
 from loguru import logger
 from logtail import LogtailHandler
+
+# TUS CREDENCIALES REALES (Ahora vía Variables de Entorno)
+LOGTAIL_TOKEN = os.getenv("LOGTAIL_TOKEN")
 
 # Helper para conectar Loguru -> Sentry
 class SentrySink:
@@ -11,6 +15,8 @@ class SentrySink:
         if level in ["ERROR", "CRITICAL"]:
             # Captura el mensaje estructurado en Sentry
             sentry_sdk.capture_message(record["message"], level=level.lower())
+
+def setup_observability():
     """
     Configura el pipeline de logs 'Grado Bancario'.
     Conecta Loguru con Better Stack (Logtail).
