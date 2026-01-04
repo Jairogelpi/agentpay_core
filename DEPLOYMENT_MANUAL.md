@@ -7,7 +7,7 @@ We have simplified the Observability configuration to rely on standard OpenTelem
 
 | Variable | Value (Example) | Description |
 |----------|---------------|-------------|
-| `OTLP_ENDPOINT` | `https://otlp-gateway-prod-eu-central-0.grafana.net/otlp` | **HTTP**: The base OTLP/HTTP endpoint. |
+| `OTLP_ENDPOINT` | `https://otlp-gateway-prod-eu-central-0.grafana.net/otlp/v1/traces` | **HTTP**: MUST end in `/v1/traces`. |
 | `OTLP_HEADERS` | `Authorization=Basic YTE...` | **CRITICAL**: The full Authorization header key-value pair. |
 | `OTEL_SERVICE_NAME` | `AgentPay-Core` | Service Identifier in Tempo. |
 | `ENVIRONMENT` | `production` | Tag to filter production traces. |
