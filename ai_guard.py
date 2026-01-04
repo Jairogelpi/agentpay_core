@@ -133,6 +133,8 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     suspicion_level = "NEUTRAL"
     if past_approvals >= 3:
         suspicion_level = "VERY LOW (TRUSTED PATTERN)"
+    elif past_approvals > 0:
+        suspicion_level = "LOW (KNOWN PRECEDENT FOUND)"
     elif sensitivity == "CRITICAL":
         suspicion_level = "HIGH (PARANOID MODE)"
 
