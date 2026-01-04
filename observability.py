@@ -24,8 +24,8 @@ def setup_observability():
 
     # 3. Handler de Better Stack (La Nube)
     try:
-        # Host de ingesta explícito (EU Region - Basado en tu config anterior)
-        LOGTAIL_HOST = "https://in.eu.logs.betterstack.com"
+        # Host de ingesta explícito (Global - corregido tras fallo de EU)
+        LOGTAIL_HOST = "https://in.logs.betterstack.com"
         
         # Instanciamos el handler con host explícito
         handler = LogtailHandler(source_token=LOGTAIL_TOKEN, host=LOGTAIL_HOST)
