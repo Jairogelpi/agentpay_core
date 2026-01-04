@@ -1,28 +1,24 @@
-# AgentPay Production Deployment Guide (2026 Observability)
+# AgentPay Production Deployment Guide (Simplified OTLP/HTTP - 2026)
 
 ## 1. Environment Configuration (Render Dashboard)
-To enable the Banking-Grade Observability stack with Better Stack (Logs) and Grafana Cloud (Traces), configure the following Environment Variables in Render.
+We have simplified the Observability configuration to rely on standard OpenTelemetry environment variables.
 
-| Variable | Value Example | Description |
+### Required Environment Variables
+
+| Variable | Value (Example) | Description |
 |----------|---------------|-------------|
-| `OTLP_ENDPOINT` | `https://otlp-gateway-prod-eu-central-0.grafana.net/v1/traces` | **HTTP**: Full URL ending in `/v1/traces`. |
-| `GRAFANA_API_TOKEN` | `glc_eyJ...`| Your Grafana Cloud Access Policy Token. |
-| `OTEL_SERVICE_NAME` | `AgentPay-Core` | Service Identifier for traces in Tempo. |
-| `LOGURU_SERIALIZE` | `TRUE` | Forces JSON logging output (Legacy, now handled by Logtail). |
+| `OTLP_ENDPOINT` | `https://otlp-gateway-prod-eu-central-0.grafana.net/otlp` | **HTTP**: The base OTLP/HTTP endpoint. |
+| `OTLP_HEADERS` | `Authorization=Basic YTE...` | **CRITICAL**: The full Authorization header key-value pair. |
+| `OTEL_SERVICE_NAME` | `AgentPay-Core` | Service Identifier in Tempo. |
 | `ENVIRONMENT` | `production` | Tag to filter production traces. |
-| `SENTRY_DSN` | `https://x@y.ingest.sentry.io/z` | Error Tracking. |
 
-## 2. Grafana Cloud Integration (Traces)
-We are using the **HTTP/Proto** export protocol.
+### How to get `OTLP_HEADERS`
+1. Go to **Grafana Cloud** > **OpenTelemetry**.
+2. Find the section for **Environment Variables**.
+3. Copy the value for `OTEL_EXPORTER_OTLP_HEADERS` (it will look like `Authorization=Basic ...`).
+4. Paste this entire string as the value for `OTLP_HEADERS` in Render.
 
-### Setup Steps
-1. Log in to your Grafana Cloud account.
-2. Go to **"OpenTelemetry"** or **"Integrations"**.
-3. Look for the **OTLP/HTTP** endpoint URL.
-4. It MUST end in `/v1/traces`. Example: `https://otlp-gateway-prod-eu-central-0.grafana.net/v1/traces`.
-5. Set this URL as `OTLP_ENDPOINT` in Render.
-
-## 3. Vertification
-Once deployed:
+## 2. Verification
+Once user credentials are set:
 1. **Logs (Better Stack)**: Check Better Stack Live Tail.
-2. **Traces (Tempo)**: Go to "Explore" > "Tempo". Filter by Service Name `AgentPay-Core`.
+2. **Traces (Tempo)**: Search for service `AgentPay-Core` in Tempo Explore.

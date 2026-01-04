@@ -11,7 +11,7 @@ from loguru import logger
 import os
 import sys
 import json
-import base64 # <--- Added for Auth
+
 from datetime import datetime
 from engine import UniversalEngine
 from models import TransactionRequest, CreditNoteRequest
@@ -48,29 +48,21 @@ resource = Resource.create({
     "deployment.environment": os.getenv("ENVIRONMENT", "production")
 })
 
-# Endpoint correcto para Grafana Cloud (HTTP/HTTPS)
-otlp_endpoint = os.getenv("OTLP_ENDPOINT", "https://otlp-gateway-prod-eu-central-0.grafana.net/v1/traces")
+# Endpoint OTLP (HTTP/HTTPS) definido por variable de entorno
+# Default: Grafana Cloud EU (http exporter usa endpoint base /v1/traces o /otlp)
+otlp_endpoint = os.getenv("OTLP_ENDPOINT", "https://otlp-gateway-prod-eu-central-0.grafana.net/otlp")
 
+# Helper para parsear headers (Grafana entrega string "k=v,k2=v2", OTel espera Dict)
+def parse_otlp_headers(headers_str):
+    if not headers_str: return {}
+    headers = {}
+    for pair in headers_str.split(','):
+        if '=' in pair:
+            key, value = pair.split('=', 1)
+            headers[key.strip()] = value.strip()
+    return headers
 
-
-# Autenticación para tokens glc_
-grafana_token = os.getenv("GRAFANA_API_TOKEN")
-otlp_headers = {}
-
-if grafana_token:
-    # Tokens glc_ usan Bearer, no Basic, y no requieren Instance ID
-    otlp_headers = {"Authorization": f"Bearer {grafana_token}"}
-else:
-    # Fallback legacy
-    def parse_otlp_headers(headers_str):
-        if not headers_str: return {}
-        headers = {}
-        for pair in headers_str.split(','):
-            if '=' in pair:
-                key, value = pair.split('=', 1)
-                headers[key.strip()] = value.strip()
-        return headers
-    otlp_headers = parse_otlp_headers(os.getenv("OTLP_HEADERS"))
+otlp_headers = parse_otlp_headers(os.getenv("OTLP_HEADERS", ""))
 
 # TracerProvider CON Resource
 provider = TracerProvider(resource=resource)
@@ -79,7 +71,6 @@ processor = BatchSpanProcessor(
         endpoint=otlp_endpoint,
         headers=otlp_headers
     ),
-
     schedule_delay_millis=5000 
 )
 provider.add_span_processor(processor)
