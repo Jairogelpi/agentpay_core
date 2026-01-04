@@ -148,24 +148,23 @@ CORPORATE EXPENSE POLICIES (OFFICIAL COMPANY RULES):
         {policy_context}
         
         INSTRUCTIONS:
-        1. DETECT 'TECHNOBABBLE': Is the user using complex technical words to hide a consumer purchase? (e.g. calling a PlayStation a "GPU Cluster" or a Rolex a "Precision Timing Instrument").
-        2. ANALYZE VENDOR MATCH: A Backend Dev buys from AWS/Azure/DigitalOcean, NOT from Sony/Nintendo/Netflix. A Lawyer buys LexisNexis, NOT Sephora.
+        1. DETECT 'TECHNOBABBLE': Is the user using complex technical words to hide a consumer purchase? (e.g. calling a PlayStation a "GPU Cluster" -> FRAUD). But if a DevOps Engineer buys AWS/Serverless, that is NORMAL.
+        2. ANALYZE VENDOR MATCH: A Backend Dev buys from AWS/Azure/DigitalOcean = VALID. A Lawyer buys LexisNexis = VALID.
         3. ALTERNATIVES: If they are buying Consumer Hardware/Goods for a Professional Role -> HIGH PROBABILITY OF FRAUD.
         4. POLICY VIOLATION: Check if the vendor is in the RESTRICTED VENDORS list. If so, this is a CRITICAL violation.
         5. CATEGORY MISMATCH: Check if the purchase category matches the ALLOWED CATEGORIES in the policy.
         
-        TASK: Destroy the Proponent's argument. Be extremely suspicious of:
-        - Vendors in the restricted list
-        - Purchases that violate company spending policies
-        - 'Entertainment' or 'Luxury' vendors disguised as 'Infrastructure'
+        TASK: Scrutinize the Proponent's argument.
+        - If the Role + Vendor match is logical (e.g. Tech Role + Cloud Vendor), do NOT flag as high risk just because policies are generic.
+        - Focus on detecting REAL consumer fraud (Gaming, Gambling, Luxury), not blocking business tools.
         
         OBLIGATORY JSON STRUCTURE:
-        {{
+        {
             "vulnerabilities": ["List specific doubts"],
             "policy_violations": ["List any policy violations detected"],
             "fraud_probability": 0-100,
             "adversarial_comment": "Direct accusation if applicable"
-        }}
+        }
         """
         stage2_raw = await _oracle_call("You are the Adversary Forensic Auditor.", adversary_prompt, temperature=0.4, model=model_to_use)
         
@@ -191,9 +190,9 @@ CORPORATE EXPENSE POLICIES (OFFICIAL COMPANY RULES):
         CRITICAL RULES (IN ORDER OF PRIORITY):
         1. If vendor is in RESTRICTED VENDORS list -> AUTOMATIC REJECT (Policy Override)
         2. If amount exceeds Max Per Item in policy -> REJECT
-        3. If Fraud Probability > 60% -> REJECT
+        3. If Fraud Probability > 80% -> REJECT (Increased threshold to avoid false positives)
         4. If the Vendor is clearly Entertainment/Luxury/Gaming and Role is Technical/Professional -> REJECT
-        5. Better to have a False Positive than to allow a Trojan Horse attack (Personal use disguised as business).
+        5. REALISM CLAUSE: If the Role and Vendor are naturally compatible (e.g. DevOps + AWS), APPROVE even if policies are generic. Do NOT block valid business operations out of paranoia.
         
         OBLIGATORY JSON STRUCTURE:
         {{
