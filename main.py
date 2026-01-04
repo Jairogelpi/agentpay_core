@@ -137,6 +137,28 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
+# --- SECURITY HEADERS MIDDLEWARE ---
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        # HSTS: Forzar HTTPS por 2 años, incluyendo subdominios
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+        # Anti-MIME Sniffing
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # Anti-Clickjacking (Denegar iframes)
+        response.headers["X-Frame-Options"] = "DENY"
+        # Anti-XSS (Legacy pero útil)
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # Referrer Policy (Privacidad)
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # CSP: Bloquear todo script/style inline (API pura)
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
+
 FastAPIInstrumentor.instrument_app(app) # <--- Instrumentación de FastAPI
 security = HTTPBearer()
 engine = UniversalEngine()
