@@ -24,8 +24,13 @@ def setup_observability():
 
     # 3. Handler de Better Stack (La Nube)
     try:
-        # Instanciamos el handler usando el endpoint default de Better Stack
-        handler = LogtailHandler(source_token=LOGTAIL_TOKEN)
+        # Host de ingesta explícito (Global/EU compatible)
+        LOGTAIL_HOST = "https://in.logs.betterstack.com"
+        
+        # Instanciamos el handler con host explícito
+        handler = LogtailHandler(source_token=LOGTAIL_TOKEN, host=LOGTAIL_HOST)
+        
+        print(f"🔌 [DEBUG] Intentando conectar a Better Stack ({LOGTAIL_HOST})...") 
         
         # Conectamos Loguru al handler de Logtail
         logger.add(
