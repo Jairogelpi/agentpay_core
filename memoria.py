@@ -1,112 +1,103 @@
-import sys
-import os
+import requests
+import time
 import json
-from unittest.mock import MagicMock, patch
+import sys
 
-# Colores para la terminal
+# --- CONFIGURACIÓN ---
+BASE_URL = "https://agentpay-core.onrender.com" 
+
+# Colores
+CYAN = "\033[96m"
 GREEN = "\033[92m"
+YELLOW = "\033[93m"
 RED = "\033[91m"
 RESET = "\033[0m"
 
-def print_pass(msg):
-    print(f"{GREEN}[PASS] {msg}{RESET}")
+def print_step(msg):
+    print(f"\n{CYAN}➤ {msg}{RESET}")
 
-def print_fail(msg):
-    print(f"{RED}[FAIL] {msg}{RESET}")
+def run_test():
+    print(f"{GREEN}🧠 INICIANDO DIAGNÓSTICO DEL SISTEMA (DEBUG MODE){RESET}")
+    print(f"📡 Conectando a: {BASE_URL}\n")
 
-print("🔍 INICIANDO AUDITORÍA DE INTEGRACIÓN SENTRY...\n")
-
-# --- PASO 1: Verificación de Dependencias ---
-try:
-    import sentry_sdk
-    from sentry_sdk import Hub
-    print_pass("Librería 'sentry-sdk' instalada correctamente.")
-except ImportError:
-    print_fail("Falta 'sentry-sdk'. Ejecuta: pip install sentry-sdk")
-    sys.exit(1)
-
-# --- PASO 2: Verificación de Variables de Entorno ---
-dsn = os.environ.get("SENTRY_DSN")
-if dsn:
-    print_pass(f"SENTRY_DSN detectado: {dsn[:10]}...******")
-else:
-    print_fail("SENTRY_DSN no encontrado en variables de entorno.")
-    print("      >> Configúralo con: export SENTRY_DSN='tu_url_aqui'")
-    # Continuamos para probar la lógica, aunque el envío real fallaría
-
-# --- PASO 3: Verificación de Inicialización en Main (FastAPI) ---
-print("\n--- Probando Inicialización en main.py ---")
-try:
-    # Intentamos importar app para ver si dispara sentry_sdk.init()
-    from agentpay_core.main import app
+    # ---------------------------------------------------------
+    # PASO 1: CREAR AGENTE (CON CAPTURA DE ERROR)
+    # ---------------------------------------------------------
+    print_step("Creando Agente de Prueba...")
     
-    if Hub.current.client:
-        print_pass("Sentry inicializado correctamente en main.py (Client activo).")
-    else:
-        print_fail("Sentry NO está activo. ¿Llamaste a sentry_sdk.init() antes de 'app = FastAPI'?")
-except Exception as e:
-    print_fail(f"Error importando main.py: {e}")
+    reg_payload = {
+        "client_name": "Neo Debugger",
+        "country_code": "US",
+        "agent_role": "Software Engineer"
+    }
 
-# --- PASO 4: Verificación de Captura Manual en Server (MCP Tools) ---
-print("\n--- Probando Captura de Errores en server.py (MCP) ---")
-try:
-    from agentpay_core import server
-    
-    # Mockeamos (simulamos) el engine para que falle a propósito
-    original_engine = server.engine
-    mock_engine = MagicMock()
-    mock_engine.evaluate.side_effect = Exception("🔥 ERROR DE PRUEBA SIMULADO POR EL TEST 🔥")
-    server.engine = mock_engine
-
-    # Mockeamos Sentry para ver si intenta capturar el error
-    with patch('sentry_sdk.capture_exception') as mock_capture:
-        print("   >> Ejecutando tool 'request_payment' con fallo simulado...")
+    try:
+        res = requests.post(f"{BASE_URL}/v1/agent/register", json=reg_payload)
         
-        # Ejecutamos la función que debería fallar
-        response_json = server.request_payment("VendorTest", 100.0, "Test Desc", "agent_test")
-        response = json.loads(response_json)
+        # Intentamos leer el JSON
+        try:
+            data = res.json()
+        except:
+            print(f"{RED}❌ El servidor no devolvió JSON válido.{RESET}")
+            print(f"Respuesta cruda: {res.text}")
+            return
 
-        # Verificaciones
-        if response.get("status") == "ERROR":
-            print_pass("El servidor manejó la excepción y devolvió JSON válido al agente.")
-        else:
-            print_fail("El servidor no devolvió el JSON de error esperado.")
+        # VERIFICACIÓN DE ERROR INTERNO
+        if res.status_code != 200 or data.get("status") == "ERROR":
+            print(f"{RED}❌ FALLO CRÍTICO AL CREAR AGENTE.{RESET}")
+            print(f"👉 EL SERVIDOR DIJO: {YELLOW}{data.get('message')}{RESET}")
+            print("-" * 40)
+            print("Causas probables:")
+            print("1. STRIPE_SECRET_KEY no es válida o falta en Render.")
+            print("2. SUPABASE_URL / SUPABASE_KEY faltan o son incorrectas.")
+            print("3. Tu cuenta de Stripe no tiene activadas las capacidades 'transfers' o 'issuing'.")
+            return
 
-        if mock_capture.called:
-            print_pass("¡ÉXITO! sentry_sdk.capture_exception() fue llamado dentro del bloque except.")
-            print(f"      (Excepción capturada: {mock_capture.call_args[0][0]})")
-        else:
-            print_fail("Sentry NO capturó el error. Verifica que añadiste 'sentry_sdk.capture_exception(e)' en el bloque except.")
-
-    # Restauramos el engine original
-    server.engine = original_engine
-
-except ImportError:
-    print_fail("No se pudo importar agentpay_core.server.")
-except Exception as e:
-    print_fail(f"Error inesperado durante el test: {e}")
-
-# --- PASO 5: Verificación de Loguru (Breadcrumbs) ---
-print("\n--- Probando Integración Loguru -> Sentry ---")
-try:
-    from loguru import logger
-    
-    # Verificamos si hay algún handler que parezca de Sentry
-    # Esto es difícil de inspeccionar, así que probaremos interceptando capture_message
-    with patch('sentry_sdk.capture_message') as mock_msg:
-        logger.error("TEST DE LOGURU: Esto debería ir a Sentry")
+        agent_id = data["agent_id"]
+        api_key = data["api_key"]
         
-        # Damos un pequeño margen o verificamos llamadas
-        if mock_msg.called:
-            print_pass("Loguru envió el error a Sentry (capture_message llamado).")
-        else:
-            print("⚠️ [WARNING] No se detectó llamada automática de Loguru a Sentry.")
-            print("      (Esto es normal si no configuraste el 'SentryHandler' personalizado, pero idealmente deberías tenerlo).")
+        print(f"   ✅ Agente Creado: {agent_id}")
+        
+    except Exception as e:
+        print(f"{RED}❌ Error de conexión fatal: {e}{RESET}")
+        return
 
-except ImportError:
-    print("Saltando test de Loguru (librería no instalada).")
+    # Headers
+    headers = {"Authorization": f"Bearer {api_key}"}
 
-print("\n" + "="*40)
-print("🏁 RESULTADO FINAL")
-print("Si viste todos los [PASS] en verde, tu integración es sólida.")
-print("Ahora, fuerza un error real en producción y revisa tu panel de Sentry.")
+    # ---------------------------------------------------------
+    # PASO 2: INTENTAR OPERAR (Si llegamos aquí)
+    # ---------------------------------------------------------
+    print_step("Prueba de Fuego: Compra con IA")
+    
+    tx_payload = {
+        "vendor": "Test Vendor AI",
+        "amount": 10.00,
+        "description": "System Diagnostics",
+        "justification": "Testing AI Guard"
+    }
+    
+    # Recarga rápida (intento)
+    requests.post(f"{BASE_URL}/v1/topup/auto", json={"amount": 100.0}, headers=headers)
+    
+    start_t = time.time()
+    tx_res = requests.post(f"{BASE_URL}/v1/pay", json=tx_payload, headers=headers)
+    duration = time.time() - start_t
+    
+    try:
+        tx_data = tx_res.json()
+        status = tx_data.get("status")
+        reason = tx_data.get("reason") or tx_data.get("message")
+        
+        print(f"   ⏱️ Tiempo: {duration:.2f}s")
+        print(f"   📊 Estado: {GREEN if status == 'APPROVED' else RED}{status}{RESET}")
+        print(f"   🧠 Razón:  {reason}")
+        
+        if "RAG" in str(reason) or "History" in str(reason):
+            print(f"\n{GREEN}🎉 ¡GOD MODE ACTIVO! La memoria RAG está funcionando.{RESET}")
+            
+    except:
+        print(f"   ⚠️ Respuesta cruda: {tx_res.text}")
+
+if __name__ == "__main__":
+    run_test()

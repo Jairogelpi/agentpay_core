@@ -851,13 +851,7 @@ class UniversalEngine:
         if "restaurant" in v or "food" in v:
             return "5200", True # Meals
         return "0000", False # Uncategorized / Personal
-        vendor_str = vendor_str.lower().strip()
-        if not vendor_str.startswith(('http://', 'https://')):
-            vendor_str = 'https://' + vendor_str
-        parsed = urlparse(vendor_str)
-        domain = parsed.netloc or parsed.path
-        if domain.startswith("www."): domain = domain[4:]
-        return domain
+
 
     def report_fraud(self, agent_id, vendor, reason):
         """
@@ -2343,38 +2337,7 @@ class UniversalEngine:
             "reason": "Fondos liberados por confirmación del Agente."
         }).eq("id", transaction_id).execute()
         return {"status": "PAID", "message": "Garantía liberada. Pago procesado."}
-        """
-        Procesa la aprobación manual de una transacción desde el email.
-        """
-        try:
-             # Aquí deberías validar el token (JWT)
-             # Por simplicidad, asumimos que el token es el ID de transacción directo o un JWT decodificado
-             transaction_id = token 
-             
-             # 1. Recuperar Transacción
-             tx = self.db.table("transaction_logs").select("*").eq("id", transaction_id).single().execute()
-             if not tx.data: return {"error": "Transacción no encontrada"}
-             
-             tx_data = tx.data
-             
-             # 2. Aprobar
-             self.db.table("transaction_logs").update({
-                 "status": "APPROVED",
-                 "reason": "Aprobado manualmente por el propietario."
-             }).eq("id", transaction_id).execute()
-             
-             # 3. APRENDIZAJE AUTOMÁTICO (Hive Mind)
-             # Si el humano aprueba, el vendedor se vuelve de confianza
-             agent_id = tx_data.get('agent_id')
-             vendor = tx_data.get('vendor')
-             
-             if vendor and agent_id:
-                 self.add_to_trusted_services(agent_id, vendor)
-             
-             return {"status": "APPROVED", "message": "Transacción aprobada y vendedor añadido a whitelist."}
-             
-        except Exception as e:
-            return {"status": "ERROR", "message": str(e)}
+
 
     # =========================================================================
     # CORPORATE EXPENSE POLICY ENGINE (The 4 Fundamental Rules)
