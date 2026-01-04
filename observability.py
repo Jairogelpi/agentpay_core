@@ -1,9 +1,16 @@
 import os
+import sentry_sdk
+from loguru import logger
+from logtail import LogtailHandler
 
-# TUS CREDENCIALES REALES (Ahora vía Variables de Entorno)
-LOGTAIL_TOKEN = os.getenv("LOGTAIL_TOKEN")
-
-def setup_observability():
+# Helper para conectar Loguru -> Sentry
+class SentrySink:
+    def write(self, message):
+        record = message.record
+        level = record["level"].name
+        if level in ["ERROR", "CRITICAL"]:
+            # Captura el mensaje estructurado en Sentry
+            sentry_sdk.capture_message(record["message"], level=level.lower())
     """
     Configura el pipeline de logs 'Grado Bancario'.
     Conecta Loguru con Better Stack (Logtail).
@@ -32,9 +39,7 @@ def setup_observability():
         # Instanciamos el handler con host explícito
         handler = LogtailHandler(source_token=LOGTAIL_TOKEN, host=LOGTAIL_HOST)
         
-        print(f"🔌 [DEBUG] Intentando conectar a Better Stack ({LOGTAIL_HOST})...") 
-        
-        # Conectamos Loguru al handler de Logtail
+        # Conectamos Loguru al handler de Logtail (Info +)
         logger.add(
             handler,
             format="{message}", 
@@ -44,7 +49,10 @@ def setup_observability():
             serialize=False # LogtailHandler ya serializa el JSON internamente
         )
         
-        logger.success(f"✅ Better Stack Conectado")
+        # Conectamos Loguru a Sentry (Error +)
+        logger.add(SentrySink(), level="ERROR") # <--- AHORA SÍ: Logs de error van a Sentry
+        
+        logger.success(f"✅ Better Stack & Sentry Pipes Conectados")
         
     except Exception as e:
         logger.error(f"❌ Error conectando a Better Stack: {e}")
