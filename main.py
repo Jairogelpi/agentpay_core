@@ -99,36 +99,13 @@ def inject_trace_data(record):
         record["extra"]["span_id"] = format(span.get_span_context().span_id, "16x")
     return True
 
-logger.remove() # Eliminar manejador default
-logger.configure(patcher=inject_trace_data) # <--- Global Context Patcher
+# [OBSERVABILITY FIX]
+# La configuración de Loguru se ha centralizado en `observability.py`.
+# Se eliminan los handlers duplicados que borraban la conexión a Better Stack.
+# El patcher de traces también se maneja globalmente ahora.
 
-# Configuración JSON para Ficheros (Rotación)
-if not os.path.exists("logs"):
-    os.makedirs("logs")
-
-logger.add(
-    "logs/agentpay_structured.log", 
-    rotation="500 MB", 
-    serialize=True, # <--- JSON Format
-    level="INFO"
-)
-
-# Configuración para Stdout (Humano/Cliente - Limpio)
-logger.add(
-    sys.stdout, 
-    serialize=False, # <--- 5. Cliente ve texto limpio, no JSON
-    format="{time:HH:mm:ss} | {level} | {message}",
-    level="INFO"
-)
-
-class SentryHandler:
-    def write(self, message):
-        record = message.record
-        level = record["level"].name
-        if level in ["ERROR", "CRITICAL"]:
-            sentry_sdk.capture_message(record["message"], level=level.lower())
-
-logger.add(SentryHandler(), level="ERROR")
+# Sentry Handler simplificado (Integrado en observability pipeline si fuera necesario, 
+# pero aquí dejamos que Sentry SDK maneje sus integraciones nativas)
 from legal import LegalWrapper
 
 # Inicializamos Sentry (Coexistencia con OTel)
