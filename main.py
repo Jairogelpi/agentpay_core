@@ -30,20 +30,30 @@ from opentelemetry.instrumentation.logging import LoggingInstrumentor
 
 # --- 1. CONFIGURACIÓN DE TRACING (OPENTELEMETRY) ---
 # Debe inicializarse ANTES de crear la app FastAPI
-otlp_endpoint = os.getenv("OTLP_ENDPOINT", "localhost:4317")
 
-# Configuración de Autenticación (Prioridad: ID+Token > Headers explícitos)
+from opentelemetry.sdk.resources import Resource # <--- Added Resource
+
+# Resource con los atributos que buscas
+resource = Resource.create({
+    "service.name": os.getenv("OTEL_SERVICE_NAME", "AgentPay-Core"),
+    "service.namespace": "agentpay-production",
+    "deployment.environment": os.getenv("ENVIRONMENT", "production")
+})
+
+# Endpoint correcto para Grafana Cloud (HTTP/HTTPS)
+otlp_endpoint = os.getenv("OTLP_ENDPOINT", "https://tempo-prod-eu-central-0.grafana.net/otlp/v1/traces")
+
+# Autenticación
 grafana_user = os.getenv("GRAFANA_INSTANCE_ID")
 grafana_token = os.getenv("GRAFANA_API_TOKEN")
 otlp_headers = {}
 
 if grafana_user and grafana_token:
-    # Auto-generación de cabecera Basic Auth
     auth_string = f"{grafana_user}:{grafana_token}"
     b64_auth = base64.b64encode(auth_string.encode()).decode()
     otlp_headers = {"Authorization": f"Basic {b64_auth}"}
 else:
-    # Helper para parsear headers (Grafana entrega string "k=v,k2=v2", OTel espera Dict)
+    # Fallback legacy
     def parse_otlp_headers(headers_str):
         if not headers_str: return {}
         headers = {}
@@ -52,16 +62,16 @@ else:
                 key, value = pair.split('=', 1)
                 headers[key.strip()] = value.strip()
         return headers
-    
     otlp_headers = parse_otlp_headers(os.getenv("OTLP_HEADERS"))
 
-provider = TracerProvider()
+# TracerProvider CON Resource
+provider = TracerProvider(resource=resource)
 processor = BatchSpanProcessor(
     OTLPSpanExporter(
         endpoint=otlp_endpoint,
         headers=otlp_headers
     ),
-    schedule_delay_millis=5000 # 2. Silenciar Telemetría (No bloquear pagos)
+    schedule_delay_millis=5000 
 )
 provider.add_span_processor(processor)
 trace.set_tracer_provider(provider)
