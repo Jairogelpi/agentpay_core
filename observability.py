@@ -37,7 +37,7 @@ def setup_observability():
             serialize=False # LogtailHandler ya serializa el JSON internamente
         )
         
-        logger.success(f"✅ Better Stack Conectado: {LOGTAIL_HOST}")
+        logger.success(f"✅ Better Stack Conectado")
         
     except Exception as e:
         logger.error(f"❌ Error conectando a Better Stack: {e}")
