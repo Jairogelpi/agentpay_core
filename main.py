@@ -49,9 +49,17 @@ resource = Resource.create({
 })
 
 # Endpoint OTLP (HTTP/HTTPS) definido por variable de entorno
-# Default: Grafana Cloud EU (http exporter usa endpoint base /v1/traces o /otlp)
 otlp_endpoint = os.getenv("OTLP_ENDPOINT", "https://otlp-gateway-prod-eu-central-0.grafana.net/otlp/v1/traces")
 
+# [DEFENSIVE FIX] Grafana Cloud requiere el path completo para HTTP exporter
+if "grafana.net" in otlp_endpoint and not otlp_endpoint.endswith("/v1/traces"):
+    # Si el usuario puso la base URL sin el path, lo corregimos
+    if not otlp_endpoint.endswith("/otlp"):
+        if not otlp_endpoint.endswith("/"): otlp_endpoint += "/"
+        otlp_endpoint += "otlp"
+    
+    otlp_endpoint = f"{otlp_endpoint.rstrip('/')}/v1/traces"
+    logger.warning(f"🔧 OTLP Endpoint corregido automáticamente a: {otlp_endpoint}")
 
 # Helper para parsear headers (Grafana entrega string "k=v,k2=v2", OTel espera Dict)
 def parse_otlp_headers(headers_str):
