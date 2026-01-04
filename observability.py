@@ -4,7 +4,7 @@ from logtail import LogtailHandler
 
 # TUS CREDENCIALES REALES (No las compartas públicamente)
 # TUS CREDENCIALES REALES
-LOGTAIL_TOKEN = "U9uJndRo8hPrgj1grS5yCRci"
+LOGTAIL_TOKEN = "pc6CoVu2PTxUdGcbWDwWpUu1"
 # LOGTAIL_HOST eliminado para usar el endpoint de ingestión por defecto (in.logs.betterstack.com)
 
 def setup_observability():
@@ -24,8 +24,8 @@ def setup_observability():
 
     # 3. Handler de Better Stack (La Nube)
     try:
-        # Host de ingesta explícito (Global - corregido tras fallo de EU)
-        LOGTAIL_HOST = "https://in.logs.betterstack.com"
+        # Host de ingesta explícito (Cluster EU-NBG-2 Específico)
+        LOGTAIL_HOST = "https://s1661963.eu-nbg-2.betterstackdata.com"
         
         # Instanciamos el handler con host explícito
         handler = LogtailHandler(source_token=LOGTAIL_TOKEN, host=LOGTAIL_HOST)
