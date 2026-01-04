@@ -27,11 +27,17 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
+from observability import setup_observability 
 
-# --- 1. CONFIGURACIÓN DE TRACING (OPENTELEMETRY) ---
+
+# --- 1. CONFIGURACIÓN DE OBSERVABILIDAD ---
+# Inicializar Better Stack antes que nada
+setup_observability()
+
+# --- 2. CONFIGURACIÓN DE TRACING (OPENTELEMETRY) ---
 # Debe inicializarse ANTES de crear la app FastAPI
 
-from opentelemetry.sdk.resources import Resource # <--- Added Resource
+from opentelemetry.sdk.resources import Resource
 
 # Resource con los atributos que buscas
 resource = Resource.create({
@@ -43,15 +49,13 @@ resource = Resource.create({
 # Endpoint correcto para Grafana Cloud (HTTP/HTTPS)
 otlp_endpoint = os.getenv("OTLP_ENDPOINT", "https://tempo-prod-eu-central-0.grafana.net/otlp/v1/traces")
 
-# Autenticación
-grafana_user = os.getenv("GRAFANA_INSTANCE_ID")
+# Autenticación para tokens glc_
 grafana_token = os.getenv("GRAFANA_API_TOKEN")
 otlp_headers = {}
 
-if grafana_user and grafana_token:
-    auth_string = f"{grafana_user}:{grafana_token}"
-    b64_auth = base64.b64encode(auth_string.encode()).decode()
-    otlp_headers = {"Authorization": f"Basic {b64_auth}"}
+if grafana_token:
+    # Tokens glc_ usan Bearer, no Basic, y no requieren Instance ID
+    otlp_headers = {"Authorization": f"Bearer {grafana_token}"}
 else:
     # Fallback legacy
     def parse_otlp_headers(headers_str):

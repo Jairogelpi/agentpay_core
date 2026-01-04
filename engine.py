@@ -415,6 +415,11 @@ class UniversalEngine:
             return False
 
     async def evaluate(self, request: TransactionRequest, idempotency_key: str = None) -> TransactionResult:
+        with logger.contextualize(agent_id=request.agent_id, vendor=request.vendor, amount=request.amount, tx_type="evaluation"):
+            logger.info(f"🚀 Iniciando evaluación de transacción: {request.description}")
+            return await self._evaluate_implementation(request, idempotency_key)
+
+    async def _evaluate_implementation(self, request: TransactionRequest, idempotency_key: str = None) -> TransactionResult:
         # --- CAPA 0: POLÍTICAS CORPORATIVAS (Rule-Based) ---
         # "El Manual del Empleado" - Reglas duras antes de gastar tokens de IA
         compliance_ok, compliance_reason = self.check_corporate_compliance(str(request.agent_id), request)
@@ -608,6 +613,16 @@ class UniversalEngine:
             corporate_policies = wallet.get('corporate_policies', {})
             audit = await audit_transaction(request.vendor, request.amount, request.description, request.agent_id, agent_role, history, request.justification, sensitivity=sensitivity, domain_status=domain_status, osint_report=osint_report, trusted_context=trusted_context, corporate_policies=corporate_policies, db_client=self.db)
             
+            # [OBSERVABILITY] Voto de la Junta
+            logger.bind(
+                event="board_vote",
+                decision=audit['decision'],
+                reasoning=audit.get('reasoning'),
+                risk_score=audit.get('risk_score', 'N/A'),
+                intent_hash=audit.get('intent_hash'),
+                accounting_code=audit.get('accounting', {}).get('gl_code')
+            ).info(f"🗳️ Voto de la Junta Emitido: {audit['decision']}")
+
             intent_hash = audit.get('intent_hash', 'N/A')
             mcc_category = audit.get('mcc_category', 'services')
             risk_reason = audit.get('reasoning', audit.get('short_reason', 'N/A'))
@@ -620,9 +635,11 @@ class UniversalEngine:
             log_message = f"{risk_reason} [INTENT_HASH: {intent_hash}]"
             
             if audit['decision'] == 'REJECTED':
+                  logger.bind(event="security_block").error(f"Transacción bloqueada por seguridad: {audit.get('reasoning')}")
                   return self._result(False, "REJECTED", f"Bloqueado por The Oracle ({sensitivity}): {log_message}", request, mcc_category=mcc_category, intent_hash=intent_hash, gl_code=gl_code, deductible=is_deductible)
 
             if audit['decision'] == 'FLAGGED' and sensitivity != "LOW":
+                  logger.bind(event="security_flag").warning("Transacción marcada para revisión.")
                   return self._create_approval_request(request, clean_vendor, reason_prefix=f"Alerta de Seguridad ({sensitivity}): {log_message}")
         else:
             mcc_category = 'services' # Default
@@ -715,6 +732,7 @@ class UniversalEngine:
         if idempotency_key and self.redis_enabled:
              self.redis.setex(f"idempotency:{idempotency_key}", 86400, result.model_dump_json())
 
+        logger.bind(event="payment_success", tx_id=result.transaction_id).success(f"✅ Transacción completada: Approved")
         return result
 
     def _execute_stripe_charge(self, amount, vendor_desc, invisible_context=None):
