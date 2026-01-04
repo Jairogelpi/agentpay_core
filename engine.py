@@ -1951,7 +1951,7 @@ class UniversalEngine:
             logger.error(f"⚠️ Auth Error: {e}")
             return None
 
-    def register_new_agent(self, client_name, country_code="US"):
+    def register_new_agent(self, client_name, country_code="US", agent_role="Asistente General"):
         """
         REGISTRO SILENCIOSO Y AUTOMÁTICO:
         Crea la cuenta activando 'transfers' y 'card_payments' al instante.
@@ -2006,7 +2006,8 @@ class UniversalEngine:
                 "api_secret_hash": secret_hash,
                 "balance": 0.0,
                 "stripe_account_id": account.id,
-                "kyc_status": "ACTIVE"
+                "kyc_status": "ACTIVE",
+                "agent_role": agent_role
             }).execute()
             
             logger.success(f"✅ Agente {agent_id} creado y activo con Stripe Account ID: {account.id}")
