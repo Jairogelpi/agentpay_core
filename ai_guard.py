@@ -190,9 +190,9 @@ CORPORATE EXPENSE POLICIES (OFFICIAL COMPANY RULES):
         CRITICAL RULES (IN ORDER OF PRIORITY):
         1. If vendor is in RESTRICTED VENDORS list -> AUTOMATIC REJECT (Policy Override)
         2. If amount exceeds Max Per Item in policy -> REJECT
-        3. If Fraud Probability > 80% -> REJECT (Increased threshold to avoid false positives)
-        4. If the Vendor is clearly Entertainment/Luxury/Gaming and Role is Technical/Professional -> REJECT
-        5. REALISM CLAUSE: If the Role and Vendor are naturally compatible (e.g. DevOps + AWS), APPROVE even if policies are generic. Do NOT block valid business operations out of paranoia.
+        3. If Fraud Probability > 95% -> REJECT (Extreme threshold: Only blocking certain fraud)
+        4. "IN DUBIO PRO REO": If there is doubt, or the Fraud Probability is < 95%, you MUST APPROVE (or FLAG if 80-94%).
+        5. DO NOT BLOCK valid work. Unless you have PROOF of fraud (Gaming/Luxury/Illegal), the verdict must be APPROVED.
         
         OBLIGATORY JSON STRUCTURE:
         {{
