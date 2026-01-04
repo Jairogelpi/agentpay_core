@@ -30,8 +30,13 @@ from opentelemetry.instrumentation.logging import LoggingInstrumentor
 # --- 1. CONFIGURACIÓN DE TRACING (OPENTELEMETRY) ---
 # Debe inicializarse ANTES de crear la app FastAPI
 otlp_endpoint = os.getenv("OTLP_ENDPOINT", "localhost:4317")
+otlp_headers = os.getenv("OTLP_HEADERS")
+
 provider = TracerProvider()
-processor = BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True))
+processor = BatchSpanProcessor(OTLPSpanExporter(
+    endpoint=otlp_endpoint,
+    headers=otlp_headers
+))
 provider.add_span_processor(processor)
 trace.set_tracer_provider(provider)
 
@@ -49,7 +54,8 @@ def inject_trace_data(record):
         record["extra"]["span_id"] = format(span.get_span_context().span_id, "16x")
     return True
 
-logger.remove() # Eliminar manejador default (texto plano)
+logger.remove() # Eliminar manejador default
+logger.configure(patcher=inject_trace_data) # <--- Global Context Patcher
 
 # Configuración JSON para Ficheros (Rotación)
 if not os.path.exists("logs"):
@@ -59,15 +65,13 @@ logger.add(
     "logs/agentpay_structured.log", 
     rotation="500 MB", 
     serialize=True, # <--- JSON Format
-    filter=inject_trace_data, 
     level="INFO"
 )
 
-# Configuración JSON para Stdout (Docker/Kubernetes/Render Friendly)
+# Configuración JSON para Stdout
 logger.add(
     sys.stdout, 
     serialize=True, 
-    filter=inject_trace_data, 
     level="INFO"
 )
 
@@ -465,33 +469,41 @@ async def pay(
     background_tasks: BackgroundTasks,
     agent_id: str = Depends(verify_api_key)
 ):
-    # 🛡️ ESCUDO DE SEGURIDAD: Verificar baneo antes de procesar
-    agent_check = engine.db.table("wallets").select("status").eq("agent_id", agent_id).single().execute()
-    
-    if agent_check.data and agent_check.data.get("status") == "BANNED":
-        return {"status": "REJECTED", "message": "Acceso denegado: Cuenta suspendida."}
-
-    # Lock de Auditoría Activa (Redis)
-    try:
-        if engine.redis_enabled and engine.redis.get(f"audit_lock:{agent_id}"):
-            return {"status": "REJECTED", "message": "Operación bloqueada: Revisión de seguridad en curso."}
-    except: pass
-
-    # Inyectamos el ID autenticado para asegurar que TransactionRequest sea válido
-    req["agent_id"] = agent_id
-
-    # Proceder con el pago rápido si el agente está activo
-    real_req = TransactionRequest(**req)
-    result = await engine.process_instant_payment(real_req)
-    
-    if result.get("status") == "APPROVED_PENDING_AUDIT":
-        # Inyectamos el ID real de la base de datos para que la auditoría pueda actualizar el log
-        task_data = real_req.model_dump()
-        task_data['id'] = result.get('db_log_id')
+    tracer = trace.get_tracer(__name__)
+    with tracer.start_as_current_span("engine.evaluate_transaction") as span:
+        span.set_attribute("agent.id", agent_id)
         
-        background_tasks.add_task(engine.run_background_audit, task_data)
+        # 🛡️ ESCUDO DE SEGURIDAD: Verificar baneo antes de procesar
+        agent_check = engine.db.table("wallets").select("status").eq("agent_id", agent_id).single().execute()
         
-    return result
+        if agent_check.data and agent_check.data.get("status") == "BANNED":
+            span.set_attribute("error", True)
+            span.set_attribute("error.message", "BANNED_AGENT")
+            return {"status": "REJECTED", "message": "Acceso denegado: Cuenta suspendida."}
+
+        # Lock de Auditoría Activa (Redis)
+        try:
+            if engine.redis_enabled and engine.redis.get(f"audit_lock:{agent_id}"):
+                span.add_event("audit_lock_hit")
+                return {"status": "REJECTED", "message": "Operación bloqueada: Revisión de seguridad en curso."}
+        except: pass
+
+        # Inyectamos el ID autenticado para asegurar que TransactionRequest sea válido
+        req["agent_id"] = agent_id
+
+        # Proceder con el pago rápido si el agente está activo
+        real_req = TransactionRequest(**req)
+        result = await engine.process_instant_payment(real_req)
+        
+        if result.get("status") == "APPROVED_PENDING_AUDIT":
+            # Inyectamos el ID real de la base de datos para que la auditoría pueda actualizar el log
+            task_data = real_req.model_dump()
+            task_data['id'] = result.get('db_log_id')
+            
+            background_tasks.add_task(engine.run_background_audit, task_data)
+            
+        span.set_attribute("transaction.status", result.get("status"))
+        return result
 
 @app.post("/v1/identity/create")
 async def create_id(req: dict, agent_id: str = Depends(verify_api_key)):
