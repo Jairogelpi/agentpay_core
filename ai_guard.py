@@ -186,12 +186,12 @@ CORPORATE EXPENSE POLICIES (OFFICIAL COMPANY RULES):
         - Focus on detecting REAL consumer fraud (Gaming, Gambling, Luxury), not blocking business tools.
         
         OBLIGATORY JSON STRUCTURE:
-        {
+        {{
             "vulnerabilities": ["List specific doubts"],
             "policy_violations": ["List any policy violations detected"],
             "fraud_probability": 0-100,
             "adversarial_comment": "Direct accusation if applicable"
-        }
+        }}
         """
         stage2_raw = await _oracle_call("You are the Adversary Forensic Auditor.", adversary_prompt, temperature=0.4, model=model_to_use)
         
@@ -251,4 +251,4 @@ CORPORATE EXPENSE POLICIES (OFFICIAL COMPANY RULES):
 
     except Exception as e:
         logger.error(f"❌ Oracle Failure: {e}")
-        return {"decision": "REJECTED", "reason": f"Oracle Internal Conflict: {str(e)}"}
+        return {"decision": "REJECTED", "reasoning": f"Oracle Internal Conflict: {str(e)}", "risk_score": 100}
