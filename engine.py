@@ -1281,10 +1281,10 @@ class UniversalEngine:
         if request.amount <= 0.50:
              return {"status": "REJECTED", "reason": "Monto inválido (<$0.50)"}
 
-        # 1.1 FAST-WALL (NUEVO): Filtro de ráfaga síncrono
+        # 1.1 FAST-WALL (NUEVO): Filtro de ráfaga ASÍNCRONO (Real AI)
         from ai_guard import fast_risk_check
         logger.info(f"🔍 [FAST-WALL] Escaneando: '{request.description}' en '{request.vendor}'...")
-        fast_check = fast_risk_check(request.description, request.vendor)
+        fast_check = await fast_risk_check(request.description, request.vendor)
         if fast_check['risk'] == "CRITICAL":
             logger.critical(f"🛑 [FAST-WALL] Bloqueo inmediato: {fast_check['reason']}")
             

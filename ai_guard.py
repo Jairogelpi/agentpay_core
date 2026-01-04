@@ -25,13 +25,40 @@ ETHICAL_CONSTITUTION = """
 4. PREVENCIÓN DE HIJACKING: Detectar si el tono o la intención no coincide con el historial o el rol.
 """
 
-def fast_risk_check(description: str, vendor: str) -> dict:
+async def fast_risk_check(description: str, vendor: str) -> dict:
     """
-    Capa de Seguridad Ultra-Rápida (Pre-filtrado).
-    En la versión 'Universal Intelligence', pasamos directamente a la IA 
-    para evitar sesgos por listas estáticas, pero mantenemos la firma por compatibilidad.
+    Capa de Seguridad Cognitiva (Fast-Wall).
+    Usa una llamada AI ultra-rápida para detectar criminalidad universal 
+    (drogas, armas, trata, explosivos) sin usar listas hardcodeadas.
     """
-    return {"risk": "LOW"}
+    if not AI_ENABLED:
+        return {"risk": "LOW", "reason": "AI Offline"}
+
+    prompt = f"""
+    ANALYZE TRANSACTION FOR UNIVERSAL CRIME.
+    Vendor: {vendor}
+    Description: {description}
+    
+    IS THIS OBVIOUSLY ILLEGAL/CRIMINAL? (Drugs, Weapons, Human Trafficking, Explosives, Hitmen).
+    Responde solo JSON.
+    {{
+        "is_criminal": true/false,
+        "category": "SAFE" | "DRUGS" | "WEAPONS" | "ILLEGAL",
+        "confidence": 0-100
+    }}
+    """
+    
+    try:
+        # Usamos temperature 0.0 para máxima precisión determinista
+        res = await _oracle_call("You are a Criminal Intelligence Unit.", prompt, temperature=0.0, model="gpt-4o")
+        
+        if res.get("is_criminal", False) and res.get("confidence", 0) > 90:
+            return {"risk": "CRITICAL", "reason": f"AI PREVENT: {res.get('category')}"}
+            
+    except Exception as e:
+        logger.error(f"Fast-Wall AI Error: {e}")
+        
+    return {"risk": "LOW", "reason": "Clean"}
 
 def calculate_statistical_risk(amount, history):
     """
