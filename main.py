@@ -14,6 +14,8 @@ from identity import IdentityManager
 from mcp.server.fastmcp import FastMCP
 
 # Configuración de Logs (Rotación y Persistencia)
+if not os.path.exists("logs"):
+    os.makedirs("logs")
 logger.add("logs/agentpay.log", rotation="500 MB", level="INFO")
 from legal import LegalWrapper
 
