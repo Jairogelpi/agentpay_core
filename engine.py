@@ -341,6 +341,18 @@ class UniversalEngine:
                         reason=f"⚠️ ALERTA: Al ritmo actual (${daily_burn:.0f}/día), riesgo de Muerte Súbita el fin de semana. Faltan ${shortfall:.2f}."
                     )
                 
+                # Alerta Email (CRITICAL)
+                admin_email = os.environ.get("ADMIN_EMAIL")
+                if admin_email:
+                    from notifications import send_treasury_alert_email
+                    send_treasury_alert_email(
+                        to_email=admin_email,
+                        balance=available_usd,
+                        burn_rate=daily_burn,
+                        shortfall=shortfall,
+                        reason=f"⚠️ Predictive AI detected Insolvency Risk. Current Burn Rate: ${daily_burn:.0f}/day."
+                    )
+                
                 return {
                     "status": "WARNING", 
                     "balance": available_usd, 

@@ -180,3 +180,63 @@ def send_ban_alert_to_owner(to_email, agent_id, vendor, amount, reason):
     except Exception as e:
         logger.error(f"❌ [BAN EMAIL ERROR] {e}")
         return False  # No raise - el baneo ya está hecho
+
+def send_treasury_alert_email(to_email, balance, burn_rate, shortfall, reason):
+    """
+    Envía ALERTA DE TESORERÍA (Muerte Súbita Inminente).
+    Prioridad MÁXIMA.
+    """
+    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_port = os.environ.get("SMTP_PORT")
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_pass = os.environ.get("SMTP_PASS")
+    
+    if not smtp_host:
+        logger.warning("⚠️ No SMTP config for Treasury Alert")
+        return False
+
+    from datetime import datetime
+    
+    subject = f"🚨 URGENT: TREASURY LIQUIDITY ALERT (${balance:,.2f})"
+    body = f"""
+    <div style="font-family: 'Courier New', monospace; max-width: 600px; margin: 0 auto; background: #000; color: #0f0; padding: 20px;">
+        <h1 style="color: #f00; border-bottom: 2px solid #f00;">⚠️ LIQUIDITY CRUNCH DETECTED</h1>
+        
+        <p style="font-size: 18px;">
+            PREDICTIVE AI HAS DETECTED A HIGH RISK OF INSOLVENCY.
+        </p>
+        
+        <table style="width: 100%; border: 1px solid #0f0; margin-top: 20px; color: #0f0;">
+            <tr><td style="padding: 10px; border-bottom: 1px solid #0f0;">REAL STRIPE BALANCE</td><td style="font-weight: bold; color: #fff;">${balance:,.2f}</td></tr>
+            <tr><td style="padding: 10px; border-bottom: 1px solid #0f0;">CURRENT BURN RATE (7D)</td><td style="font-weight: bold; color: #fff;">${burn_rate:,.2f} / day</td></tr>
+            <tr><td style="padding: 10px; border-bottom: 1px solid #0f0;">PROJECTED SHORTFALL</td><td style="font-weight: bold; color: #f00;">-${shortfall:,.2f}</td></tr>
+            <tr><td style="padding: 10px; border-bottom: 1px solid #0f0;">TIMESTAMP</td><td>{datetime.utcnow().isoformat()} UTC</td></tr>
+        </table>
+
+        <div style="margin-top: 20px; border: 1px solid #f00; padding: 10px; color: #f00;">
+            <strong>AI REASONING:</strong><br>
+            {reason}
+        </div>
+        
+        <p style="text-align: center; margin-top: 30px;">
+            <a href="https://dashboard.stripe.com/topups" style="background: #f00; color: #fff; text-decoration: none; padding: 15px 30px; font-weight: bold;">>>> EXECUTE EMERGENCY TOP-UP <<<</a>
+        </p>
+    </div>
+    """
+
+    msg = MIMEMultipart()
+    msg['From'] = BREVO_VERIFIED_SENDER
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'html'))
+    
+    try:
+        with smtplib.SMTP(smtp_host, int(smtp_port), timeout=15) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_user, to_email, msg.as_string())
+        logger.critical(f"📨 [TREASURY ALERT] Sent to {to_email}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ [TREASURY EMAIL ERROR] {e}")
+        return False
