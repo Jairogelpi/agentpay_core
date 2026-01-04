@@ -2162,12 +2162,12 @@ class UniversalEngine:
                 "status": "CREATED",
                 "agent_id": agent_id,
                 "api_key": raw_secret,
-                "stripe_account_id": account.id,
+            "stripe_account_id": account.id,
                 "message": "Agente listo y activo para recibir dinero automáticamente."
             }
 
         except Exception as e:
-            logger.error(f"❌ Error creando agente: {e}")
+            logger.bind(event="topup_failed", agent_id=agent_id).error(f"❌ Error en recarga automática: {e}")
             return {"status": "ERROR", "message": str(e)}
 
     def update_agent_settings(self, agent_id, webhook_url=None, owner_email=None, agent_role=None, corporate_policies=None):
