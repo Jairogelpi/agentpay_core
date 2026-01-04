@@ -1,5 +1,8 @@
 from fastapi import FastAPI, Request, HTTPException, Depends, Security, Header, Form
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.starlette import StarletteIntegration
 import csv
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -17,9 +20,28 @@ from mcp.server.fastmcp import FastMCP
 if not os.path.exists("logs"):
     os.makedirs("logs")
 logger.add("logs/agentpay.log", rotation="500 MB", level="INFO")
+
+class SentryHandler:
+    def write(self, message):
+        record = message.record
+        level = record["level"].name
+        if level in ["ERROR", "CRITICAL"]:
+            sentry_sdk.capture_message(record["message"], level=level.lower())
+
+logger.add(SentryHandler(), level="ERROR")
 from legal import LegalWrapper
 
 # Inicializamos
+sentry_sdk.init(
+    dsn=os.environ.get("SENTRY_DSN"),
+    traces_sample_rate=1.0,
+    profiles_sample_rate=1.0,
+    environment="production",
+    integrations=[
+        StarletteIntegration(transaction_style="endpoint"),
+        FastApiIntegration(transaction_style="endpoint"),
+    ],
+)
 app = FastAPI(title="AgentPay Production Server")
 security = HTTPBearer()
 engine = UniversalEngine()
