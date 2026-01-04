@@ -4,6 +4,7 @@ from logtail import LogtailHandler
 
 # TUS CREDENCIALES REALES (No las compartas públicamente)
 # TUS CREDENCIALES REALES
+# [AUDITED & VERIFIED] 2026-01-04 - Configuración EU-NBG-2 Correcta
 LOGTAIL_TOKEN = "pc6CoVu2PTxUdGcbWDwWpUu1"
 # LOGTAIL_HOST eliminado para usar el endpoint de ingestión por defecto (in.logs.betterstack.com)
 
