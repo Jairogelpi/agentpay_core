@@ -303,6 +303,43 @@ from mcp.server.fastmcp import Context
 from starlette.requests import Request as StarletteRequest
 
 # Usamos la integración oficial de FastMCP para montar el transporte SSE
+# --- 3. HEALTH CHECK (UPTIME MONITORING) ---
+@app.get("/health")
+async def health_check():
+    """
+    Endpoint CRÍTICO para Better Stack Uptime.
+    Si esto devuelve 200 OK -> El sistema está VIVO.
+    Si devuelve 500 o Timeout -> Better Stack te envía SMS de alerta.
+    """
+    health_status = {"status": "ok", "components": {}}
+    
+    # Check 1: Redis (Caché y Locks)
+    try:
+        if engine.redis_enabled:
+            engine.redis.ping()
+            health_status["components"]["redis"] = "up"
+        else:
+             health_status["components"]["redis"] = "disabled"
+    except Exception as e:
+        health_status["status"] = "degraded"
+        health_status["components"]["redis"] = f"down: {str(e)}"
+        # No hacemos raise 500 aquí para que la app siga reportando "viva" aunque sin caché
+        
+    # Check 2: Supabase (Data Core)
+    try:
+        # Consulta ligera (Keep-alive)
+        engine.db.table("wallets").select("count", count="exact").limit(1).execute()
+        health_status["components"]["database"] = "up"
+    except Exception as e:
+        logger.critical(f"🔥 DATABASE DOWN: {e}")
+        # Si falla la DB, el sistema NO sirve. Devolvemos 503 Service Unavailable.
+        raise HTTPException(status_code=503, detail=f"Database Disconnected: {e}")
+
+    return health_status
+
+
+# --- 4. ENDPOINTS PRINCIPALES ---
+
 @app.get("/sse")
 async def handle_sse(request: StarletteRequest):
     async with mcp_server.run_sse_async(request.scope, request.receive, request.send) as (read, write):
