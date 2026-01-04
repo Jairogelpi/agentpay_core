@@ -1,18 +1,17 @@
-import sys
-from loguru import logger
-from logtail import LogtailHandler
+import os
 
-# TUS CREDENCIALES REALES (No las compartas públicamente)
-# TUS CREDENCIALES REALES
-# [AUDITED & VERIFIED] 2026-01-04 - Configuración EU-NBG-2 Correcta
-LOGTAIL_TOKEN = "pc6CoVu2PTxUdGcbWDwWpUu1"
-# LOGTAIL_HOST eliminado para usar el endpoint de ingestión por defecto (in.logs.betterstack.com)
+# TUS CREDENCIALES REALES (Ahora vía Variables de Entorno)
+LOGTAIL_TOKEN = os.getenv("LOGTAIL_TOKEN")
 
 def setup_observability():
     """
     Configura el pipeline de logs 'Grado Bancario'.
     Conecta Loguru con Better Stack (Logtail).
     """
+    if not LOGTAIL_TOKEN:
+        logger.warning("⚠️ LOGTAIL_TOKEN no encontrado. Los logs no se enviarán a Better Stack.")
+        return logger
+
     # 1. Limpiar handlers por defecto para evitar duplicados
     logger.remove()
 
@@ -25,8 +24,10 @@ def setup_observability():
 
     # 3. Handler de Better Stack (La Nube)
     try:
-        # Host de ingesta explícito (Cluster EU-NBG-2 Específico)
-        LOGTAIL_HOST = "https://s1661963.eu-nbg-2.betterstackdata.com"
+        # Host de ingesta explícito (Global/EU compatible)
+        # Default: Cluster EU-NBG-2 que sabemos que funciona
+        default_host = "https://s1661963.eu-nbg-2.betterstackdata.com"
+        LOGTAIL_HOST = os.getenv("LOGTAIL_HOST", default_host)
         
         # Instanciamos el handler con host explícito
         handler = LogtailHandler(source_token=LOGTAIL_TOKEN, host=LOGTAIL_HOST)
