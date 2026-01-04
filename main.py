@@ -30,7 +30,17 @@ from opentelemetry.instrumentation.logging import LoggingInstrumentor
 # --- 1. CONFIGURACIÓN DE TRACING (OPENTELEMETRY) ---
 # Debe inicializarse ANTES de crear la app FastAPI
 otlp_endpoint = os.getenv("OTLP_ENDPOINT", "localhost:4317")
-otlp_headers = os.getenv("OTLP_HEADERS")
+# Helper para parsear headers (Grafana entrega string "k=v,k2=v2", OTel espera Dict)
+def parse_otlp_headers(headers_str):
+    if not headers_str: return {}
+    headers = {}
+    for pair in headers_str.split(','):
+        if '=' in pair:
+            key, value = pair.split('=', 1)
+            headers[key.strip()] = value.strip()
+    return headers
+
+otlp_headers = parse_otlp_headers(os.getenv("OTLP_HEADERS"))
 
 provider = TracerProvider()
 processor = BatchSpanProcessor(
