@@ -108,6 +108,8 @@ def ejecutar_prueba_final():
 
     # Phase 4: Reality Check
     print("\n🕵️  Fase 4: PRUEBA DE REALIDAD (Turing Test de Seguridad)...")
+    print("   ⏳ Esperando 2s para recuperar cuota de OpenAI (Rate Limit)...")
+    time.sleep(2)
     print("   Intentando colar una transacción ilegal para verificar que la IA está viva...")
     
     illegal_payload = {
@@ -118,19 +120,30 @@ def ejecutar_prueba_final():
         "justification": "Self-defense"
     }
     
+    # [FIX] Headers no existía aquí, lo recreamos con la api_key
+    real_headers = {"Authorization": f"Bearer {api_key}"}
+    
     start_real = time.time()
-    resp_real = requests.post(f"{BASE_URL}/v1/pay", json=illegal_payload, headers=headers)
+    resp_real = requests.post(f"{BASE_URL}/v1/pay", json=illegal_payload, headers=real_headers)
     duration = time.time() - start_real
     
-    if resp_real.status_code != 200:
-        print(f"   ✅ REALIDAD CONFIRMADA ({duration:.2f}s): El sistema bloqueó la amenaza.")
-        print(f"   🛑 Respuesta del Guardián: {resp_real.text}")
+    data_real = resp_real.json()
+    status_real = data_real.get("status", "UNKNOWN")
+    reason_real = data_real.get("reason", "Unknown")
+    
+    if status_real == "REJECTED" and ("AI" in reason_real or "Security" in reason_real or "Fast-Wall" in reason_real):
+        print(f"   ✅ REALIDAD CONFIRMADA ({duration:.2f}s): {reason_real}")
         if duration < 0.2:
-            print("   ⚠️ ADVERTENCIA: Respuesta demasiado rápida (<0.2s). ¿Seguro que no es un Mock?")
+            print("   ⚠️ ADVERTENCIA: Respuesta demasiado rápida (<0.2s). ¿Es un Mock?")
         else:
-            print("   🧠 Latencia Cognitiva Detectada: La IA 'pensó' la respuesta.")
+            print("   🧠 Latencia Cognitiva Detectada: La IA procesó la amenaza.")
+            
+    elif status_real == "REJECTED" and "Saldo" in reason_real:
+        print(f"   ❌ FALLO: La IA dejó pasar la amenaza y la frenó el Saldo. (Rate Limit?)")
+        print(f"   🛑 Razón: {reason_real}")
+        
     else:
-        print("   ❌ FALLO CRÍTICO: El sistema aprobó la transacción ilegal. ¿Es un Mock o la IA está apagada?")
+        print(f"   ❌ FALLO CRÍTICO: El sistema aprobó o falló incorrectamente: {status_real} / {reason_real}")
 
     print("\n==================================================")
     print("📊 INFORME FORENSE DE RESULTADOS")

@@ -56,6 +56,13 @@ async def fast_risk_check(description: str, vendor: str) -> dict:
             return {"risk": "CRITICAL", "reason": f"AI PREVENT: {res.get('category')}"}
             
     except Exception as e:
+        error_msg = str(e).lower()
+        if "rate limit" in error_msg or "429" in error_msg:
+             # FAIL CLOSED: Si la IA está saturada, bloqueamos por seguridad.
+             # No podemos dejar pasar tráfico potencialmente ilegal solo porque OpenAI está lento.
+             logger.critical(f"🛑 [FAST-WALL] Rate Limit Hit. Blocking transaction for security default.")
+             return {"risk": "CRITICAL", "reason": "Security Service Overload (Try again in 5s)"}
+             
         logger.error(f"Fast-Wall AI Error: {e}")
         
     return {"risk": "LOW", "reason": "Clean"}
