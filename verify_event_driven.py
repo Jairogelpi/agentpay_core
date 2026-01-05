@@ -17,7 +17,7 @@ def verify_remote():
     log("📝 Registering new Test Agent...")
     reg_payload = {
         "client_name": "EventDrivenTester",
-        "country": "US",
+        "country": "ES",
         "agent_role": "QA Automation"
     }
     
@@ -27,7 +27,7 @@ def verify_remote():
         agent_data = reg_resp.json()
         
         agent_id = agent_data.get("agent_id")
-        api_secret = agent_data.get("api_secret")
+        api_secret = agent_data.get("api_key")
         
         if not agent_id or not api_secret:
             log("❌ Registration Failed: Missing credentials", "ERROR")
