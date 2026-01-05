@@ -27,7 +27,7 @@ from datetime import datetime
 from engine import UniversalEngine
 from models import TransactionRequest, CreditNoteRequest
 from identity import IdentityManager
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 # --- OPENTELEMETRY IMPORTS ---
 from opentelemetry import trace

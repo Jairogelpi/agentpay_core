@@ -2,7 +2,7 @@
 AgentPay MCP Server - God Mode (Header Secured)
 Enterprise-grade security: HTTP Header Auth + ContextVars + Native Middleware
 """
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 import sentry_sdk
 import json
 import os
