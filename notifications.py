@@ -26,7 +26,7 @@ def send_approval_email(to_email, agent_id, vendor, amount, tx_id):
     # IMPORTANTE: codificar vendor si tiene espacios
     from urllib.parse import quote
     vendor_safe = quote(vendor)
-    url_aprobacion = f"https://agentpay-core.onrender.com/v1/approve?tx_id={tx_id}&agent_id={agent_id}&vendor={vendor_safe}"
+    url_aprobacion = f"https://www.agentpay.it.com/v1/approve?tx_id={tx_id}&agent_id={agent_id}&vendor={vendor_safe}"
 
     body = f"""
     <html>

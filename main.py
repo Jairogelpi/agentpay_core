@@ -915,7 +915,7 @@ async def generate_credit_note(request: CreditNoteRequest, agent_id: str = Depen
         )
         
         # En prod: subir a S3
-        return {"status": "GENERATED", "credit_note_url": f"https://agentpay-core.onrender.com/v1/invoices/{os.path.basename(path)}"}
+        return {"status": "GENERATED", "credit_note_url": f"https://www.agentpay.it.com/v1/invoices/{os.path.basename(path)}"}
     except Exception as e:
         logger.error(f"Error generando Credit Note: {e}")
         raise HTTPException(status_code=500, detail=str(e))

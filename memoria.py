@@ -4,7 +4,7 @@ import json
 import sys
 
 # --- CONFIGURACIÓN ---
-BASE_URL = "https://agentpay-core.onrender.com" 
+BASE_URL = "https://www.agentpay.it.com" 
 
 # Colores
 CYAN = "\033[96m"
