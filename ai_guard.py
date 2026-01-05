@@ -86,7 +86,7 @@ def _tier1_fast_audit(vendor, amount, description):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Vendor: {vendor} | Amount: ${amount} | Desc: {description}"}
             ],
-            model="llama3-8b-8192", # Modelo ultrarrápido
+            model="llama-3.3-70b-versatile", # Modelo ultrarrápido y potente (Actualizado 2026)
             temperature=0.0,
             response_format={"type": "json_object"}
         )
