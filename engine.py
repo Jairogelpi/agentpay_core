@@ -677,6 +677,13 @@ class UniversalEngine:
             "forensic_hash": audit.get('intent_hash')
         }).execute()
 
+        logger.success(f"✅ [WORKER] TX {tx_id} completada exitosamente.")
+        
+        # Trigger Webhook to Client (Important for Async!)
+        if wallet_res.data.get('webhook_url'):
+             # Send webhook confirming final status
+             pass
+
     def _reverse_transaction(self, agent_id, amount):
         """Refunds both Redis and DB balances."""
         try:
@@ -687,29 +694,11 @@ class UniversalEngine:
                 logger.info(f"🔄 Redis Refund: +${amount}")
             
             # 2. DB Refund
-            # Using RPC add_funds or a negative deduct? 
-            # Assuming we can just add funds or reverse whatever we did.
-            # If deduct_balance takes p_amount, we can pass negative? Or use a refund RPC.
-            # Let's assume we have an 'add_balance' RPC or similar logic. 
-            # If not, we fall back to a direct specific logic.
-            # WAIT: deduct_balance usually does: balance = balance - amount.
-            # So passing negative amount: balance = balance - (-amount) = balance + amount.
             self.db.rpc("deduct_balance", {"p_agent_id": agent_id, "p_amount": -amount}).execute()
             logger.info(f"🔄 DB Refund: +${amount}")
             
         except Exception as e:
             logger.error(f"⚠️ Refund Error: {e}")
-            "created_at": datetime.now().isoformat(),
-            "invoice_url": invoice_path,
-            "forensic_hash": audit.get('intent_hash')
-        }).execute()
-        
-        logger.success(f"✅ [WORKER] TX {tx_id} completada exitosamente.")
-        
-        # Trigger Webhook to Client (Important for Async!)
-        if wallet_res.data.get('webhook_url'):
-             # Send webhook confirming final status
-             pass
 
     async def _evaluate_implementation(self, request: TransactionRequest, idempotency_key: str = None) -> TransactionResult:
         # --- CAPA 0: POLÍTICAS CORPORATIVAS (Rule-Based) ---
