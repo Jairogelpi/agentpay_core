@@ -137,7 +137,7 @@ app = FastAPI(title="AgentPay Production Server")
 # Rate Limiting Setup
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
+# app.add_middleware(SlowAPIMiddleware) # COMENTADO: Rompe SSE (Streaming). Usar límites por @decorator.
 
 @app.on_event("startup")
 async def startup_event():
@@ -163,51 +163,70 @@ async def startup_event():
     logger.success("✅ Embedded Worker Thread Started")
 
 # --- SECURITY HEADERS MIDDLEWARE ---
-from starlette.middleware.base import BaseHTTPMiddleware
+# --- SECURITY HEADERS MIDDLEWARE (PURE ASGI) ---
+# Reescrito para evitar BaseHTTPMiddleware y conflictos con SSE
+class SecurityHeadersMiddleware:
+    def __init__(self, app: ASGIApp):
+        self.app = app
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        # HSTS: Forzar HTTPS por 2 años, incluyendo subdominios
-        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
-        # Anti-MIME Sniffing
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        # Anti-Clickjacking (Denegar iframes)
-        response.headers["X-Frame-Options"] = "DENY"
-        # Anti-XSS (Legacy pero útil)
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        # Referrer Policy (Privacidad)
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        # CSP: Bloquear todo script/style inline (API pura)
-        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
-        return response
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
 
-# --- ZERO TRUST MIDDLEWARE (ORIGIN LOCKDOWN) ---
-class ZeroTrustMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # Solo activamos el candado si existe la llave en el entorno
-        server_secret = os.getenv("SOURCE_TOKEN")
-        
-        if server_secret:
-            # Buscamos la contraseña en la cabecera
-            request_secret = request.headers.get("X-Origin-Secret")
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = dict(message.get("headers", []))
+                # Security Headers
+                headers[b"strict-transport-security"] = b"max-age=63072000; includeSubDomains; preload"
+                headers[b"x-content-type-options"] = b"nosniff"
+                headers[b"x-frame-options"] = b"DENY"
+                headers[b"x-xss-protection"] = b"1; mode=block"
+                headers[b"referrer-policy"] = b"strict-origin-when-cross-origin"
+                headers[b"content-security-policy"] = b"default-src 'none'; frame-ancestors 'none'"
+                
+                # Reconstruir mensaje
+                message["headers"] = list(headers.items())
             
-            # Si no coincide (y no es el health check interno de Render/Uptime)
-            # Nota: Si usas BetterStack Uptime, configura ahí también la cabecera o añade excepción aquí.
-            if request_secret != server_secret:
-                # Permitir /health para monitores básicos que no soportan headers (opcional)
-                if request.url.path == "/health":
-                    return await call_next(request)
-                    
-                return JSONResponse(
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+# --- ZERO TRUST MIDDLEWARE (PURE ASGI) ---
+class ZeroTrustMiddleware:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+        self.server_secret = os.getenv("SOURCE_TOKEN")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+            
+        # Bypass 1: Health Check (Render/Uptime)
+        if scope["path"] == "/health":
+             return await self.app(scope, receive, send)
+             
+        # Bypass 2: SSE Endpoint (Protegido por MCPAuthMiddleware, el ZeroTrust global a veces rompe el handshake)
+        # Opcional: si queremos que Cloudflare proteja /sse también, lo dejamos activo.
+        # Pero si ZeroTrust usa lectura de body/headers compleja, pure ASGI es seguro.
+        
+        # Lógica Zero Trust
+        if self.server_secret:
+            headers = dict(scope.get("headers", []))
+            request_secret_bytes = headers.get(b"x-origin-secret")
+            request_secret = request_secret_bytes.decode("latin-1") if request_secret_bytes else None
+
+            if request_secret != self.server_secret:
+                # 403 Forbidden (Raw ASGI)
+                response = JSONResponse(
                     status_code=403, 
                     content={"status": "FORBIDDEN", "message": "Direct Access Not Allowed. Use Cloudflare."}
                 )
-        
-        return await call_next(request)
+                return await response(scope, receive, send)
 
-app.add_middleware(ZeroTrustMiddleware) # <--- 1er Muro de Defensa
-app.add_middleware(SecurityHeadersMiddleware) # <--- 2do Muro (Headers)
+        await self.app(scope, receive, send)
+
+app.add_middleware(ZeroTrustMiddleware) # <--- 1er Muro (Pure ASGI)
+app.add_middleware(SecurityHeadersMiddleware) # <--- 2do Muro (Pure ASGI)
 security = HTTPBearer()
 engine = UniversalEngine()
 identity_mgr = IdentityManager(engine.db)
