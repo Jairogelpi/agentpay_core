@@ -111,10 +111,7 @@ async def auth_middleware(request, call_next):
         return {"error": "INTERNAL_ERROR", "message": "An unexpected error occurred.", "code": 500}
 
 # Initialize Server
-mcp = FastMCP(
-    "AgentPay God Mode",
-    dependencies=["stripe", "supabase", "networkx", "boto3", "openai"]
-)
+mcp = FastMCP("AgentPay God Mode")
 
 # Register the middleware for logging & rate limiting
 mcp.add_middleware(auth_middleware)
