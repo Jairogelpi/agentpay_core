@@ -5,13 +5,22 @@ import statistics
 import time
 from loguru import logger
 from openai import AsyncOpenAI
+from groq import Groq
 
-# Configuración
+# Configuración OpenAI (Nivel 2 - El Cerebro)
 try:
     client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     AI_ENABLED = True
 except:
     AI_ENABLED = False
+
+# Configuración Groq (Nivel 1 - El Portero Rápido)
+try:
+    groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    GROQ_ENABLED = True
+except:
+    GROQ_ENABLED = False
+    logger.warning("⚠️ Groq API Key faltante. El sistema funcionará solo con OpenAI (más lento).")
 
 EMBEDDING_MODEL = "text-embedding-3-small"
 ORACLE_MODEL = "gpt-4o"
@@ -40,6 +49,51 @@ def calculate_statistical_risk(amount, history):
     except Exception as e:
         logger.error(f"Stats Error: {e}")
         return 0.0, "ERROR"
+
+# ==========================================
+# NUEVA FUNCIÓN: NIVEL 1 (GROQ / LLAMA 3)
+# ==========================================
+def _tier1_fast_audit(vendor, amount, description):
+    """
+    Inferencia ultrarrápida (~200ms) usando LPU de Groq.
+    Solo aprueba lo OBVIO. Ante la duda, delega.
+    """
+    if not GROQ_ENABLED:
+        return None
+        
+    # REGLA DE ORO: El dinero grande va al cerebro grande.
+    # Si es > $50, nos saltamos a Groq por seguridad.
+    if amount > 50.0:
+        return None
+
+    system_prompt = """
+    You are a Tier-1 Risk Filter. Analyze this transaction for FRAUD or PERSONAL CONSUMPTION disguised as business.
+    CRITERIA FOR 'SAFE':
+    1. Known SaaS/Business tool (AWS, Google, Slack, Notion, etc.).
+    2. Description matches the vendor nature.
+    3. Low value (<$50).
+    
+    OUTPUT JSON ONLY:
+    {
+        "risk": "LOW" | "HIGH" | "UNCERTAIN",
+        "reason": "short explanation"
+    }
+    """
+    
+    try:
+        completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Vendor: {vendor} | Amount: ${amount} | Desc: {description}"}
+            ],
+            model="llama3-8b-8192", # Modelo ultrarrápido
+            temperature=0.0,
+            response_format={"type": "json_object"}
+        )
+        return json.loads(completion.choices[0].message.content)
+    except Exception as e:
+        logger.warning(f"⚠️ Tier 1 (Groq) Error: {e}")
+        return None
 
 # ==========================================
 # CAPA 2: FAST-WALL (EXISTENTE - NO TOCAR)
@@ -75,7 +129,7 @@ async def fast_risk_check(description: str, vendor: str) -> dict:
     return {"risk": "LOW", "reason": "Clean"}
 
 # ==========================================
-# CAPA 3: MEMORIA RAG (NUEVA CAPA)
+# CAPA 3: MEMORIA RAG (EXISTENTE)
 # ==========================================
 async def get_embedding(text: str):
     """Genera vector de memoria para guardar/buscar."""
@@ -104,21 +158,49 @@ async def search_memory(db_client, description, vendor):
         return res.data if res.data else []
     except Exception as e:
         logger.error(f"❌ RAG Memory Search Failed (RPC Error): {e}")
-        # Intenta imprimir el cuerpo del error si disponible
         if hasattr(e, 'response') and hasattr(e.response, 'text'):
              logger.error(f"   RPC Response Body: {e.response.text}")
         return []
 
 # ==========================================
-# CAPA 4: THE ORACLE v5 (INTEGRACIÓN TOTAL)
+# CAPA 4: THE ORACLE (MODIFICADA - HIBRIDA)
 # ==========================================
 async def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", osint_report=None, corporate_policies=None, db_client=None, screenshot_base64=None, domain_status=None, trusted_context=None):
     """
-    Versión HÍBRIDA: Usa todo (Stats + Policies + RAG + Visión).
+    Versión HÍBRIDA TIERED: Intenta aprobar rápido con Groq, si no, escala a OpenAI.
     """
     if not AI_ENABLED:
         return {"decision": "FLAGGED", "reasoning": "AI Offline", "risk_score": 50}
 
+    # ---------------------------------------------------------
+    # PASO 0: NIVEL 1 - INFERENCIA RÁPIDA (GROQ) [NUEVO]
+    # ---------------------------------------------------------
+    # Solo intentamos el "Fast Path" si no es un caso crítico (paranoia alta)
+    if sensitivity != "CRITICAL":
+        tier1_verdict = _tier1_fast_audit(vendor, amount, description)
+        
+        if tier1_verdict and tier1_verdict.get("risk") == "LOW":
+            # ✅ APROBACIÓN RÁPIDA (Speed-run)
+            logger.info(f"⚡ [TIER 1] Aprobado por Groq (Llama 3). Ahorrando llamada a GPT-4.")
+            
+            # Generamos estructura compatible
+            forensic_str = f"{agent_id}|{vendor}|{amount}|APPROVED_TIER1"
+            return {
+                "decision": "APPROVED",
+                "reasoning": f"Fast-Track (Groq): {tier1_verdict.get('reason')}",
+                "risk_score": 10,
+                "mcc_category": "services", # Default seguro
+                "intent_hash": hashlib.sha256(forensic_str.encode()).hexdigest(),
+                "short_reason": tier1_verdict.get('reason')
+            }
+        else:
+            # Si Groq dice HIGH o UNCERTAIN, o falla -> SEGUIMOS AL NIVEL 2 (No hacemos nada aquí)
+            logger.info(f"🤔 [TIER 1] Groq dudó ({tier1_verdict}). Escalando a The Oracle (GPT-4)...")
+
+    # ---------------------------------------------------------
+    # PASO 1, 2, 3, 4: LÓGICA EXISTENTE (NIVEL 2 - GPT-4o)
+    # ---------------------------------------------------------
+    
     # 1. RECUPERAR MEMORIA (RAG)
     memory_txt = "No history."
     past_approvals = 0
@@ -129,7 +211,6 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
             memory_txt = f"FOUND {len(similar_txs)} SIMILAR PAST CASES. Approved: {past_approvals}. Examples: {[t['description'] for t in similar_txs[:2]]}"
 
     # 2. CALIBRAR PARANOIA
-    # Si ya lo aprobamos 3 veces, la IA debe relajarse.
     suspicion_level = "NEUTRAL"
     if past_approvals >= 3:
         suspicion_level = "VERY LOW (TRUSTED PATTERN)"
@@ -144,7 +225,7 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         limits = corporate_policies.get('spending_limits', {})
         policy_txt = f"Max Item: ${limits.get('max_per_item', 'Unlimited')}. Restricted: {corporate_policies.get('restricted_vendors', [])}"
 
-    # 4. PROMPT MAESTRO
+    # 4. PROMPT MAESTRO (GPT-4o)
     system_prompt = f"""
     YOU ARE 'THE ORACLE', an elite AI Financial Auditor.
     
@@ -182,7 +263,6 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         """}
     ]
 
-    # Inyección de Visión (Si el Engine nos pasa la captura)
     if screenshot_base64:
         user_content.append({
             "type": "image_url",
@@ -203,18 +283,15 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
         
         result = json.loads(response.choices[0].message.content)
         
-        # Override de Memoria (Red de Seguridad Final)
-        # Si la IA duda pero el historial dice que es seguro, forzamos aprobación.
         if result['decision'] != 'APPROVED' and past_approvals >= 3:
             result['decision'] = 'APPROVED'
             result['reasoning'] = f"Auto-Approved based on {past_approvals} past precedents (RAG Override)."
             result['risk_score'] = 10
 
-        # Generar hash forense
         forensic_str = f"{agent_id}|{vendor}|{amount}|{result['decision']}"
         result['intent_hash'] = hashlib.sha256(forensic_str.encode()).hexdigest()
         result['mcc_category'] = result.get('category_mcc', 'services')
-        result['short_reason'] = result['reasoning'] # Compatibilidad
+        result['short_reason'] = result['reasoning']
         
         return result
 
