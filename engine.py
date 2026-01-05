@@ -465,15 +465,15 @@ class UniversalEngine:
         # 5. EVENT QUEUEING (Redis Stream)
         tx_id = str(uuid.uuid4())
         event_payload = {
-            "tx_id": tx_id,
-            "agent_id": request.agent_id,
-            "vendor": request.vendor,
-            "amount": request.amount,
-            "description": request.description,
-            "justification": request.justification,
-            "vendor_url": request.vendor_url,
-            "fee_locked": fee,
-            "timestamp": time.time()
+            "tx_id": str(tx_id),
+            "agent_id": str(request.agent_id),
+            "vendor": str(request.vendor),
+            "amount": str(request.amount),
+            "description": str(request.description),
+            "justification": str(request.justification or ""),
+            "vendor_url": str(request.vendor_url or ""),
+            "fee_locked": str(fee),
+            "timestamp": str(time.time())
         }
         
         if self.redis_enabled:
