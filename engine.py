@@ -440,8 +440,9 @@ class UniversalEngine:
             return TransactionResult(authorized=False, status="CIRCUIT_OPEN", reason="Fusible activado (Rate Limit)")
 
         clean_vendor = self._normalize_domain(request.vendor)
-        if self.redis_enabled and self.redis.get(f"blacklist:{clean_vendor}"):
-             return TransactionResult(authorized=False, status="REJECTED", reason="Bloqueado por Mente Colmena")
+        # 2.5 Global Blacklist (Redis Set - O(1) Check)
+        if self.redis_enabled and self.redis.sismember("security:global_blacklist", clean_vendor):
+             return TransactionResult(authorized=False, status="REJECTED", reason="Bloqueado por Mente Colmena (Global Blacklist)")
 
         # 3. P2P Check (DB Read - Fast)
         # (Simplified for brevity: P2P logic here would return immediately if internal)
@@ -2274,13 +2275,26 @@ class UniversalEngine:
             # 1. Hasheamos el token entrante
             token_hash = self._hash_key(token)
             
-            # 2. Buscamos en la DB
+            # --- PHASE 1: REDIS CACHE (Zero Latency Auth) ---
+            if self.redis_enabled:
+                cached_id = self.redis.get(f"auth:api_key:{token_hash}")
+                if cached_id:
+                    # logger.debug(f"⚡ Auth Cache Hit: {cached_id}") # Too noisy for prod
+                    return str(cached_id) # Redis returns bytes usually
+
+            # 2. Buscamos en la DB (Slow Path)
             # Importante: Buscamos por el HASH, nunca por el token plano
             resp = self.db.table("wallets").select("agent_id").eq("api_secret_hash", token_hash).execute()
             
             if resp.data and len(resp.data) > 0:
-                logger.info(f"🔐 Acceso Autorizado: {resp.data[0]['agent_id']}")
-                return resp.data[0]['agent_id']
+                agent_id = resp.data[0]['agent_id']
+                logger.info(f"🔐 Acceso Autorizado (DB Hit): {agent_id}")
+                
+                # Cache result in Redis for 1 hour
+                if self.redis_enabled:
+                    self.redis.setex(f"auth:api_key:{token_hash}", 3600, agent_id)
+                    
+                return agent_id
                 
             logger.warning(f"🛑 Acceso Denegado: Token inválido")
             return None
