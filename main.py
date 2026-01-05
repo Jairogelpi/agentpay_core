@@ -59,28 +59,7 @@ resource = Resource.create({
     "deployment.environment": os.getenv("ENVIRONMENT", "production")
 })
 
-@app.on_event("startup")
-async def startup_event():
-    logger.info("🚀 Starting AgentPay Core API...")
-    if os.getenv("ENVIRONMENT", "development") == "production":
-        logger.info("🔧 Production Mode: Initializing Sentry & OTEL...")
-    
-    # START BACKGROUND WORKER (Event-Driven Consumer)
-    # This runs the worker loop in a separate thread so it doesn't block the API
-    import threading
-    import worker
-    
-    def run_worker():
-        try:
-            logger.info("👷 Starting Embedded Worker Thread...")
-            worker.process_stream()
-        except Exception as e:
-            logger.error(f"🔥 Embedded Worker Failed: {e}")
 
-    # Daemon thread ensures it dies when the main process dies
-    worker_thread = threading.Thread(target=run_worker, daemon=True)
-    worker_thread.start()
-    logger.success("✅ Embedded Worker Thread Started")
 
 # Endpoint OTLP (HTTP/HTTPS) definido por variable de entorno
 otlp_endpoint = os.getenv("OTLP_ENDPOINT", "https://otlp-gateway-prod-eu-central-0.grafana.net/otlp/v1/traces")
@@ -159,6 +138,29 @@ app = FastAPI(title="AgentPay Production Server")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🚀 Starting AgentPay Core API...")
+    if os.getenv("ENVIRONMENT", "development") == "production":
+        logger.info("🔧 Production Mode: Initializing Sentry & OTEL...")
+    
+    # START BACKGROUND WORKER (Event-Driven Consumer)
+    # This runs the worker loop in a separate thread so it doesn't block the API
+    import threading
+    import worker
+    
+    def run_worker():
+        try:
+            logger.info("👷 Starting Embedded Worker Thread...")
+            worker.process_stream()
+        except Exception as e:
+            logger.error(f"🔥 Embedded Worker Failed: {e}")
+
+    # Daemon thread ensures it dies when the main process dies
+    worker_thread = threading.Thread(target=run_worker, daemon=True)
+    worker_thread.start()
+    logger.success("✅ Embedded Worker Thread Started")
 
 # --- SECURITY HEADERS MIDDLEWARE ---
 from starlette.middleware.base import BaseHTTPMiddleware
