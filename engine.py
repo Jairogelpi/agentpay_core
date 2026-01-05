@@ -27,8 +27,8 @@ from lawyer import AutoLawyer
 from forensic_auditor import ForensicAuditor
 import redis
 from integrations import send_slack_approval
-# import boto3   <-- REMOVED GLOBAL IMPORT
-import sys     # Used for lazy loading check
+import boto3
+import sys
 from loguru import logger
 import json 
 import jwt 
@@ -67,7 +67,6 @@ class UniversalEngine:
         
         # --- INICIO BLOQUE KMS (FIRMA DIGITAL) ---
         try:
-            import boto3 # <--- LAZY LOAD
             self.kms_client = boto3.client(
                 'kms', 
                 region_name=os.getenv("AWS_REGION", "eu-north-1"),
