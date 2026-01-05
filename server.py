@@ -109,8 +109,11 @@ async def auth_middleware(request, call_next):
         _log_mcp_call(agent_id, request.name, args, "OK")
         return result
     except Exception as e:
-        _log_mcp_call(agent_id, request.name, args, f"ERROR: {str(e)[:100]}")
-        raise
+        # Log full error to Sentry for debugging (NOT exposed to user)
+        sentry_sdk.capture_exception(e)
+        _log_mcp_call(agent_id, request.name, args, f"ERROR: {type(e).__name__}")
+        # Return generic error message (no stack trace leakage)
+        return {"error": "INTERNAL_ERROR", "message": "An unexpected error occurred. Please try again.", "code": 500}
 
 # Initialize Server WITH Middleware
 mcp = FastMCP(

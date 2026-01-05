@@ -323,50 +323,15 @@ async def get_forensic_bundle(agent_id: str):
     return auditor.generate_agent_bundle(agent_id)
 
 # --- CONFIGURACIÓN MCP (MODEL CONTEXT PROTOCOL) ---
-# Creamos el servidor MCP con el nombre del proyecto
-mcp_server = FastMCP("AgentPay")
-
-@mcp_server.tool()
-def request_payment(vendor: str, amount: float, description: str, agent_id: str) -> str:
-    """Solicita un pago real. Devuelve veredicto de The Oracle y datos de tarjeta."""
-    req = TransactionRequest(agent_id=agent_id, vendor=vendor, amount=amount, description=description)
-    try:
-        # 3. Span Personalizado para Auditoría Interna
-        tracer = trace.get_tracer(__name__)
-        with tracer.start_as_current_span("engine.evaluate") as span:
-             span.set_attribute("agent.id", agent_id)
-             span.set_attribute("transaction.amount", amount)
-             result = engine.evaluate(req)
-             span.set_attribute("transaction.status", result.status)
-        
-        # 4. Interfaz de Respuesta (JSON Limpio)
-        return json.dumps({
-            "success": result.authorized, 
-            "status": result.status,
-            "card": result.card_details.__dict__ if result.card_details else None,
-            # "message": result.reason # Opcional: Ocultar razón técnica si se desea
-        })
-    except Exception as e: return json.dumps({"success": False, "status": "ERROR", "error": str(e)})
-
-@mcp_server.tool()
-def get_dashboard(agent_id: str) -> str:
-    """Consulta métricas de ROI, salud financiera y saldo del agente."""
-    try: return json.dumps(engine.get_dashboard_metrics(agent_id))
-    except Exception as e: return json.dumps({"error": str(e)})
-
-@mcp_server.tool()
-def create_topup(agent_id: str, amount: float) -> str:
-    """Genera un link de recarga de saldo real mediante Stripe Checkout."""
-    try: return json.dumps({"url": engine.create_topup_link(agent_id, amount)})
-    except Exception as e: return json.dumps({"error": str(e)})
+# IMPORTAMOS la instancia asegurada con middleware desde server.py
+# Esto elimina duplicación y garantiza que se use el MCP con autenticación
+from server import mcp as mcp_server
 
 # --- INTEGRACIÓN MCP + FASTAPI (SSE) ---
-# Montamos el servidor MCP dentro de la app de FastAPI
-# Esto genera automáticamente los endpoints /sse y /messages
+# Los endpoints /sse y /messages usarán la instancia importada
 from mcp.server.fastmcp import Context
 from starlette.requests import Request as StarletteRequest
 
-# Usamos la integración oficial de FastMCP para montar el transporte SSE
 # --- 3. HEALTH CHECK (UPTIME MONITORING) ---
 @app.get("/health")
 async def health_check():
