@@ -26,7 +26,7 @@ class CardDetails(BaseModel):
 
 class TransactionResult(BaseModel):
     authorized: bool
-    status: Literal["APPROVED", "REJECTED", "PENDING_APPROVAL", "CIRCUIT_OPEN"]
+    status: Literal["APPROVED", "REJECTED", "PENDING_APPROVAL", "CIRCUIT_OPEN", "PROCESSING"]
     transaction_id: Optional[str] = None
     new_remaining_balance: Optional[float] = None
     reason: Optional[str] = None

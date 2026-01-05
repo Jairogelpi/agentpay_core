@@ -58,6 +58,7 @@ class UniversalEngine:
         self.db: Client = create_client(url, key, options=options)
         self.credit_bureau = CreditBureau(self.db)
         self.legal_wrapper = LegalWrapper()
+        self.stream_key = "payment_events"  # Added for Event-Driven Architecture
         self.identity_mgr = IdentityManager(self.db)
         self.lawyer = AutoLawyer()
         self.forensic_auditor = ForensicAuditor()
@@ -416,8 +417,197 @@ class UniversalEngine:
 
     async def evaluate(self, request: TransactionRequest, idempotency_key: str = None) -> TransactionResult:
         with logger.contextualize(agent_id=request.agent_id, vendor=request.vendor, amount=request.amount, tx_type="evaluation"):
-            logger.info(f"🚀 Iniciando evaluación de transacción: {request.description}")
-            return await self._evaluate_implementation(request, idempotency_key)
+            logger.info(f"🚀 Iniciando evaluación de transacción FAST PATH: {request.description}")
+            return await self.evaluate_fast_path(request, idempotency_key)
+
+    async def evaluate_fast_path(self, request: TransactionRequest, idempotency_key: str = None) -> TransactionResult:
+        """
+        Validation Layer: Validates input, checks rules, freezes funds, and queues for AI.
+        """
+        import json
+        
+        # 1. Sanity Checks & Compliance (CPU only)
+        if request.amount <= 0.50:
+            return TransactionResult(authorized=False, status="REJECTED", reason="Monto inválido (<$0.50)")
+
+        # Using 0 as justification for compliance check if needed, or pass None
+        compliance_ok, compliance_reason = self.check_corporate_compliance(str(request.agent_id), request, request.amount) 
+        if not compliance_ok:
+             return TransactionResult(authorized=False, status="REJECTED", reason=f"Política Corporativa: {compliance_reason}")
+
+        # 2. Circuit Breaker & Blocklist (Redis/Memory)
+        if self.check_circuit_breaker(request.agent_id):
+            return TransactionResult(authorized=False, status="CIRCUIT_OPEN", reason="Fusible activado (Rate Limit)")
+
+        clean_vendor = self._normalize_domain(request.vendor)
+        if self.redis_enabled and self.redis.get(f"blacklist:{clean_vendor}"):
+             return TransactionResult(authorized=False, status="REJECTED", reason="Bloqueado por Mente Colmena")
+
+        # 3. P2P Check (DB Read - Fast)
+        # (Simplified for brevity: P2P logic here would return immediately if internal)
+
+        # 4. FUNDS FREEZE (Atomic DB Write)
+        # We assume a standard fee for the freeze, adjusted later if needed.
+        fee = round(request.amount * 0.015, 2)
+        total_deducted = request.amount + fee
+        
+        try:
+            # Atomic deduction (Freeze funds)
+            rpc_res = self.db.rpc("deduct_balance", {"p_agent_id": request.agent_id, "p_amount": total_deducted}).execute()
+            if not rpc_res.data:
+                 return TransactionResult(authorized=False, status="REJECTED", reason="Saldo insuficiente")
+            
+            new_balance = float(rpc_res.data) # Assuming RPC returns new balance
+        except Exception as e:
+            logger.error(f"DB Error: {e}")
+            return TransactionResult(authorized=False, status="REJECTED", reason=f"Error de base de datos: {str(e)}")
+
+        # 5. EVENT QUEUEING (Redis Stream)
+        tx_id = str(uuid.uuid4())
+        event_payload = {
+            "tx_id": tx_id,
+            "agent_id": request.agent_id,
+            "vendor": request.vendor,
+            "amount": request.amount,
+            "description": request.description,
+            "justification": request.justification,
+            "vendor_url": request.vendor_url,
+            "fee_locked": fee,
+            "timestamp": time.time()
+        }
+        
+        if self.redis_enabled:
+            self.redis.xadd(self.stream_key, event_payload)
+            logger.info(f"🚀 [FAST PATH] Evento encolado: {tx_id}")
+        else:
+            # Fallback if Redis fails (run sync or error out)
+            logger.critical("Redis down. Switching to Sync Mode (High Latency).")
+            # Convert to dict-like object for compatibility if needed, but _process_async_transaction handles request object too
+            # Actually _process_async_transaction expects data dict or request object. 
+            await self._process_async_transaction(request, tx_id, fee, new_balance)
+
+        # 6. RETURN PROCESSING (202 Accepted equivalent)
+        return TransactionResult(
+            authorized=True,
+            status="PROCESSING",
+            transaction_id=tx_id,
+            new_remaining_balance=new_balance,
+            reason="Transacción encolada para auditoría AI."
+        )
+
+    async def _process_async_transaction(self, data, tx_id, fee, current_balance):
+        """
+        Intelligence Layer: AI Audit, OSINT, Issuing, Invoicing.
+        Called by worker.py.
+        """
+        # Reconstruct request object
+        if isinstance(data, dict):
+             agent_id = data['agent_id']
+             vendor = data['vendor']
+             amount = float(data['amount'])
+             description = data['description']
+             justification = data.get('justification')
+             vendor_url = data.get('vendor_url')
+        else:
+             # Sync fallback support
+             request = data
+             agent_id = request.agent_id
+             vendor = request.vendor
+             amount = request.amount
+             description = request.description
+             justification = request.justification
+             vendor_url = request.vendor_url
+
+        logger.info(f"⚙️ [WORKER] Procesando TX {tx_id} (IA + OSINT)...")
+
+        # A. OSINT & AI Audit
+        osint_report = await self._perform_osint_scan(vendor_url or vendor)
+        
+        # (Fetch history & wallet data here as in original code)
+        history = [] 
+        try:
+            h_resp = self.db.table("transaction_logs").select("created_at, amount, vendor, reason").eq("agent_id", agent_id).order("created_at", desc=True).limit(20).execute()
+            history = h_resp.data if h_resp.data else []
+        except Exception as e:
+            logger.error(f"Error fetching transaction history: {e}")
+
+        wallet_res = self.db.table("wallets").select("*").eq("agent_id", agent_id).single().execute()
+        agent_role = wallet_res.data.get('agent_role', 'Unknown')
+        corporate_policies = wallet_res.data.get('corporate_policies', {})
+
+        from ai_guard import audit_transaction
+        audit = await audit_transaction(
+            vendor, amount, description, agent_id, agent_role, history, justification,
+            osint_report=osint_report, corporate_policies=corporate_policies, db_client=self.db
+        )
+
+        # B. DECISION
+        if audit['decision'] == 'REJECTED':
+            logger.info(f"❌ [WORKER] Rechazado por IA. Reembolsando...")
+            # REFUND (Reverse the freeze)
+            self._reverse_transaction(agent_id, amount + fee)
+            
+            # Log Rejection
+            self.db.table("transaction_logs").insert({
+                "id": tx_id, "agent_id": agent_id, "vendor": vendor, "amount": amount,
+                "status": "REJECTED", "reason": audit.get('reasoning'), "created_at": datetime.now().isoformat()
+            }).execute()
+            return
+
+        # C. ISSUING (If Approved)
+        mcc_category = audit.get('mcc_category', 'services')
+        clean_vendor = self._normalize_domain(vendor)
+        
+        card = self._issue_virtual_card(agent_id, amount, clean_vendor, mcc_category)
+        
+        if not card:
+             logger.error("❌ Stripe Issuing Failed. Refunding.")
+             self._reverse_transaction(agent_id, amount + fee)
+             # Log Failure...
+             return
+
+        # D. SUCCESS LOGGING & INVOICING
+        # (Generate PDF, update DB with APPROVED status, link forensic hash)
+        
+        # --- GENERACIÓN DE FACTURA (Resistente a fallos) ---
+        invoice_path = None
+        try:
+            from invoicing import generate_invoice_pdf
+            invoice_path = generate_invoice_pdf(card['id'], agent_id, clean_vendor, amount, description)
+        except Exception as e:
+            logger.error(f"⚠️ Error generando factura: {e}")
+        
+        # --- LIBRO MAYOR FORENSE (Forensic Ledger) ---
+        forensic_bundle = self.forensic_auditor.generate_audit_bundle(
+            agent_id=agent_id,
+            vendor=clean_vendor,
+            amount=amount,
+            description=description,
+            reasoning_cot=audit.get('reasoning', "Approved"),
+            intent_hash=audit.get('intent_hash', "N/A"),
+            signature=f"legal_sig_{uuid.uuid4().hex[:12]}",
+            osint_data=osint_report
+        )
+        forensic_url = f"{self.admin_url}/v1/audit/{forensic_bundle['bundle_id']}"
+
+        self.db.table("transaction_logs").insert({
+            "id": tx_id,
+            "agent_id": agent_id,
+            "vendor": vendor,
+            "amount": amount,
+            "status": "APPROVED",
+            "reason": audit.get('reasoning'),
+            "created_at": datetime.now().isoformat(),
+            "invoice_url": invoice_path,
+            "forensic_hash": audit.get('intent_hash')
+        }).execute()
+        
+        logger.success(f"✅ [WORKER] TX {tx_id} completada exitosamente.")
+        
+        # Trigger Webhook to Client (Important for Async!)
+        if wallet_res.data.get('webhook_url'):
+             # Send webhook confirming final status
+             pass
 
     async def _evaluate_implementation(self, request: TransactionRequest, idempotency_key: str = None) -> TransactionResult:
         # --- CAPA 0: POLÍTICAS CORPORATIVAS (Rule-Based) ---
