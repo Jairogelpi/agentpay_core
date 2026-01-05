@@ -415,6 +415,7 @@ class MCPAuthMiddleware(BaseHTTPMiddleware):
 # Importante: FastMCP 2.x gestiona las rutas internas (GET / para stream, POST / para mensajes)
 mcp_sse_app = mcp_server.http_app(
     transport='sse',
+    path="/", # Force SSE endpoint to be at the root of this sub-app
     middleware=[Middleware(MCPAuthMiddleware)]
 )
 
