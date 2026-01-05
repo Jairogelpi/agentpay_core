@@ -309,6 +309,20 @@ class IdentityManager:
             except: return False
         return False
 
+    def update_session_data(self, identity_id, session_data):
+        """Wrapper para actualizar sesión (llamado desde API)"""
+        # Resolvimos que identity_id podría ser agent_id si no hay lookup.
+        # Intentamos buscar el agent_id si empieza por "cert_"
+        agent_id = identity_id
+        if identity_id.startswith("cert_"):
+             # Lookup agent_id
+             try:
+                 res = self.db.table("identities").select("agent_id").eq("identity_id", identity_id).execute()
+                 if res.data: agent_id = res.data[0]['agent_id']
+             except: pass
+        
+        return self.save_session_state(agent_id, session_data)
+
     def recover_session(self, agent_id):
         if self.db:
             try:

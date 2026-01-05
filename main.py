@@ -772,6 +772,16 @@ async def sign_contract(req: dict):
     """Wrapper Legal: Firma contratos en nombre del agente"""
     return legal_wrapper.sign_contract(req.get("agent_id"), req.get("contract_hash"))
 
+@app.post("/v1/legal/sign_tos")
+async def sign_tos(req: dict, agent_id: str = Depends(verify_api_key)):
+    """Firma Términos de Servicio con Hardware AWS KMS (Verification Only)"""
+    # Usamos forensic_hash aleatorio si no se provee
+    return engine.sign_terms_of_service(
+        agent_id, 
+        req.get("platform_url", "https://agentpay.it.com"), 
+        req.get("forensic_hash", "VERIFY-KMS-TEST")
+    )
+
 @app.post("/v1/legal/passport")
 async def get_passport(req: dict):
     """KYC: Emite Pasaporte Digital para User-Agent"""

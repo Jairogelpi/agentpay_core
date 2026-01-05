@@ -53,76 +53,94 @@ def verify_remote():
     # So if balance is 0, it will return REJECTED immediately and NOT queue to Redis.
     # We MUST top up.
     
+    # 2. TOP UP BALANCE
     log("💰 Topping up balance (Test Mode)...")
     headers = {"Authorization": f"Bearer {api_secret}"}
     try:
-        # Try the auto topup if it works, or maybe /v1/topup/direct_charge?
-        # /v1/topup/auto takes agent_id and amount, and requires auth.
-        topup_resp = requests.post(f"{BASE_URL}/v1/topup/auto", json={"amount": 100.0}, headers=headers)
+        # Top up $500 to cover all tests
+        topup_resp = requests.post(f"{BASE_URL}/v1/topup/auto", json={"amount": 500.0}, headers=headers)
         if topup_resp.status_code == 200:
-            log("✅ Topup Successful: $100.00")
+            log("✅ Topup Successful: $500.00")
         else:
-            log(f"⚠️ Topup Failed ({topup_resp.status_code}). Proceeding anyway (might fail due to funds).", "WARNING")
+            log(f"⚠️ Topup Failed ({topup_resp.status_code}). Proceeding...", "WARNING")
     except Exception as e:
          log(f"⚠️ Topup Error: {e}", "WARNING")
 
-    # 3. REQUEST PAYMENT
-    log("💸 Requesting Payment (Async Check)...")
-    pay_payload = {
-        "vendor": "openai.com",
-        "amount": 5.00,
-        "description": "Async Architecture Verification",
-        "justification": "Testing Redis Streams Worker"
-    }
-    
-    start_time = time.time()
-    try:
-        pay_resp = requests.post(f"{BASE_URL}/v1/pay", json=pay_payload, headers=headers)
-        latency = (time.time() - start_time) * 1000
-        
-        log(f"⏱️ API Latency: {latency:.2f}ms")
-        
-        if pay_resp.status_code != 200:
-             log(f"❌ Payment Request Failed: {pay_resp.text}", "ERROR")
-             return
+    # 3. TEST SCENARIOS
+    scenarios = [
+        {
+            "name": "TIER 1 (GROQ) - Low Value Safe",
+            "vendor": "slack.com",
+            "amount": 12.50,
+            "description": "Monthly Request for Slack Standard",
+            "justification": "Communication tool",
+            "expect_tier": "TIER 1"
+        },
+        {
+            "name": "TIER 2 (ORACLE) - High Value Safe",
+            "vendor": "aws.amazon.com",
+            "amount": 155.00,
+            "description": "Monthly AWS EC2 Hosting Bill",
+            "justification": "Infrastructure costs",
+            "expect_tier": "TIER 2"
+        },
+        {
+            "name": "RISK CHECK - Gambling",
+            "vendor": "pokerstars.com",
+            "amount": 25.00,
+            "description": "Buying chips",
+            "justification": "Team building",
+            "expect_tier": "REJECTED"
+        }
+    ]
 
-        result = pay_resp.json()
-        status = result.get("status")
+    for i, test in enumerate(scenarios):
+        log(f"\n--- TEST {i+1}: {test['name']} ---")
+        pay_payload = {
+            "vendor": test['vendor'],
+            "amount": test['amount'],
+            "description": test['description'],
+            "justification": test['justification']
+        }
         
-        log(f"📋 Initial Status: {status}")
-        
-        if status == "PROCESSING":
-            log("✅ SUCCESS: Received PROCESSING status immediately (Fast Path Active).")
-        elif status == "APPROVED_PENDING_AUDIT":
-            log("✅ SUCCESS: Approved Pending Audit (This might be the synchronous fallback or fast pass return).")
-        elif status == "REJECTED":
-            log(f"⚠️ Transaction Rejected: {result.get('message')}")
-            return
-        else:
-            log(f"⚠️ Unexpected Status: {status}")
+        start_time = time.time()
+        try:
+            pay_resp = requests.post(f"{BASE_URL}/v1/pay", json=pay_payload, headers=headers)
+            latency = (time.time() - start_time) * 1000
+            
+            if pay_resp.status_code != 200:
+                log(f"❌ Payment Request Failed: {pay_resp.text}", "ERROR")
+                continue
 
-        # 4. POLL FOR COMPLETION (If Processing)
-        tx_id = result.get("transaction_id") or result.get("db_log_id")
-        
-        if status == "PROCESSING" and tx_id:
-            log(f"⏳ Polling for final status (TX: {tx_id})...")
-            for i in range(10):
-                time.sleep(2)
-                try:
+            result = pay_resp.json()
+            status = result.get("status")
+            tx_id = result.get("transaction_id") or result.get("db_log_id")
+            
+            log(f"⏱️ Latency: {latency:.2f}ms | Initial Status: {status}")
+            
+            final_status = status
+            # Poll if processing
+            if status in ["PROCESSING", "APPROVED_PENDING_AUDIT"] and tx_id:
+                log(f"⏳ Polling (TX: {tx_id})...")
+                for _ in range(12): # Wait up to 24s
+                    time.sleep(2)
                     status_resp = requests.post(f"{BASE_URL}/v1/transactions/status", json={"transaction_id": tx_id}, headers=headers)
                     current_status = status_resp.json().get("status")
-                    log(f"   Attempt {i+1}: {current_status}")
-                    
                     if current_status in ["APPROVED", "REJECTED"]:
-                        log(f"✅ Final Status Reached: {current_status}")
+                        final_status = current_status
+                        log(f"   => Final: {final_status}")
                         break
-                except Exception as e:
-                    pass
-            else:
-                log("⚠️ Polling timed out. Worker might be slow or ID mismatch.", "WARNING")
+                else:
+                    log("⚠️ Timed out waiting for worker.", "WARNING")
 
-    except Exception as e:
-        log(f"❌ Error during payment request: {e}", "ERROR")
+            log(f"✅ Test Complete. Result: {final_status}")
+            
+        except Exception as e:
+            log(f"❌ Error in test {i+1}: {e}", "ERROR")
+        
+        time.sleep(1) # Brief pause between tests
+
+    log("\n✨ All tests completed.")
 
 if __name__ == "__main__":
     verify_remote()
