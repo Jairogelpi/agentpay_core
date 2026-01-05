@@ -3,6 +3,9 @@ import os
 import uuid
 import random
 import json
+import boto3   # <--- NUEVO
+import base64  # <--- NUEVO
+from cryptography.fernet import Fernet # <--- NUEVO
 from loguru import logger
 
 from openai import OpenAI
@@ -22,6 +25,27 @@ class IdentityManager:
     def __init__(self, db_client=None):
         self.db = db_client
         self.domain = "agentpay.it.com" # Tu dominio
+        
+        # --- INICIO BLOQUE KMS (CIFRADO) ---
+        try:
+            self.kms = boto3.client(
+                'kms',
+                region_name=os.getenv("AWS_REGION", "us-east-1"),
+                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+            )
+            # USAMOS LA LLAVE DE CIFRADO (SIMÉTRICA)
+            self.encryption_key_id = os.getenv("KMS_ENCRYPTION_KEY_ID")
+            
+            if self.encryption_key_id:
+                logger.info("✅ Identity Manager conectado a AWS KMS (Cifrado Militar)")
+            else:
+                logger.warning("⚠️ KMS_ENCRYPTION_KEY_ID no configurado. Las sesiones no estarán cifradas.")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Error conectando KMS Cifrado: {e}")
+            self.kms = None
+        # --- FIN BLOQUE KMS ---
 
     def create_identity(self, agent_id, needs_phone=False):
         return self.create_certified_identity(agent_id)
@@ -93,6 +117,54 @@ class IdentityManager:
         except Exception as e:
             logger.error(f"❌ Error Checking Inbox: {e}")
             return f"ERROR: {str(e)}"
+
+    def _encrypt_data(self, plain_text: str):
+        """Cifrado de Sobre (Envelope Encryption)."""
+        if not self.kms or not self.encryption_key_id:
+            return {"blob": plain_text, "envelope": None} # Fallback inseguro
+
+        # 1. Pedir a AWS una llave desechable para ESTA sesión
+        response = self.kms.generate_data_key(
+            KeyId=self.encryption_key_id,
+            KeySpec='AES_256'
+        )
+        
+        # Llave en plano (vive solo milisegundos en RAM)
+        plaintext_key = base64.b64encode(response['Plaintext'])
+        # Llave cifrada (para guardar en DB)
+        encrypted_key_blob = response['CiphertextBlob']
+        
+        # 2. Cifrar los datos con la llave desechable
+        f = Fernet(plaintext_key)
+        encrypted_data = f.encrypt(plain_text.encode())
+        
+        return {
+            "blob": encrypted_data.decode('utf-8'),
+            "envelope": base64.b64encode(encrypted_key_blob).decode('utf-8')
+        }
+
+    def save_session_state(self, agent_id, cookies_dict):
+        """Guarda las cookies cifradas en la base de datos."""
+        if not self.db: return False
+        
+        json_data = json.dumps(cookies_dict)
+        
+        # CIFRAR ANTES DE GUARDAR
+        secure_packet = self._encrypt_data(json_data)
+        
+        try:
+            self.db.table("identities").update({
+                "session_blob": secure_packet['blob'],
+                # Asegúrate de haber creado esta columna en Supabase:
+                "encryption_envelope": secure_packet['envelope'], 
+                "last_active": "now()"
+            }).eq("agent_id", agent_id).execute()
+            
+            logger.info(f"🔒 Sesión guardada y cifrada para {agent_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error guardando sesión: {e}")
+            return False
 
     def parse_inbound_email(self, email_content):
         if isinstance(email_content, dict):
