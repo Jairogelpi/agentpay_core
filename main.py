@@ -633,58 +633,7 @@ async def debug_stripe():
             "error_detail": str(e)
         }
 
-@app.get("/v1/debug/kms")
-async def debug_kms_endpoint():
-    """Diagnóstico remoto de AWS KMS (para cuando no hay acceso CLI local)"""
-    import boto3
-    
-    region = os.getenv("AWS_REGION", "eu-north-1")
-    report = {
-        "configured_region": region,
-        "env_keys": {
-            "sign_id": os.getenv("KMS_SIGNING_KEY_ID"),
-            "encrypt_id": os.getenv("KMS_ENCRYPTION_KEY_ID")
-        },
-        "identity": "UNKNOWN",
-        "keys_found": [],
-        "errors": []
-    }
-    
-    try:
-        # Check Identity
-        sts = boto3.client('sts', region_name=region)
-        caller = sts.get_caller_identity()
-        report["identity"] = caller['Arn']
-        
-        # List Keys
-        kms = boto3.client('kms', region_name=region)
-        paginator = kms.get_paginator('list_keys')
-        keys_list = []
-        for page in paginator.paginate():
-            for k in page['Keys']:
-                keys_list.append(f"{k['KeyId']} ({k['KeyArn']})")
-        report["keys_found"] = keys_list
-        
-        # Check Specific Configured Keys
-        status_checks = {}
-        for k_type, k_id in report["env_keys"].items():
-            if not k_id:
-                status_checks[k_type] = "MISSING_ENV"
-                continue
-                
-            try:
-                # Intenta obtener detalles
-                kms.describe_key(KeyId=k_id)
-                status_checks[k_type] = "FOUND_AND_ACCESSIBLE"
-            except Exception as e:
-                status_checks[k_type] = f"ERROR: {str(e)}"
-        
-        report["key_checks"] = status_checks
-        
-    except Exception as e:
-        report["errors"].append(str(e))
-        
-    return report
+
 
 @app.get("/v1/agent/check-kyc")
 async def check_kyc_status(agent_id: str):
