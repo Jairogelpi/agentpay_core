@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from supabase.client import ClientOptions
 from models import TransactionRequest, TransactionResult, CardDetails
 from ai_guard import audit_transaction, calculate_statistical_risk, get_embedding
 from security_utils import check_domain_age
@@ -27,10 +26,11 @@ from lawyer import AutoLawyer
 from forensic_auditor import ForensicAuditor
 import redis
 from integrations import send_slack_approval
-import boto3   # <--- NUEVO
+# import boto3   <-- REMOVED GLOBAL IMPORT
+import sys     # Used for lazy loading check
 from loguru import logger
-import json # Added for json.loads if needed, though model_validate_json is used
-import jwt # <--- JWT Support
+import json 
+import jwt 
 
 load_dotenv()
 
@@ -66,6 +66,7 @@ class UniversalEngine:
         
         # --- INICIO BLOQUE KMS (FIRMA DIGITAL) ---
         try:
+            import boto3 # <--- LAZY LOAD
             self.kms_client = boto3.client(
                 'kms', 
                 region_name=os.getenv("AWS_REGION", "eu-north-1"),
