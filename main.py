@@ -384,18 +384,42 @@ async def health_check():
 
 # --- 4. ENDPOINTS MCP (TRANSPORT SSE) ---
 
-@app.get("/sse")
-async def handle_sse(request: StarletteRequest, authorization: str = Header(None)):
-    """Transporte SSE para MCP. Autenticado vía Header."""
-    authenticate_and_set_context(authorization)
-    async with mcp_server.run_sse_async(request.scope, request.receive, request.send) as (read, write):
-        pass
+# --- 4. ENDPOINTS MCP (TRANSPORT SSE - FastMCP 2.x) ---
 
-@app.post("/messages")
-async def handle_messages(request: StarletteRequest, authorization: str = Header(None)):
-    """Transporte de mensajes para MCP. Autenticado vía Header."""
-    authenticate_and_set_context(authorization)
-    return await mcp_server.handle_sse_message(request.scope, request.receive, request.send)
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class MCPAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # 1. Extraer Header
+        auth_header = request.headers.get("Authorization")
+        
+        # 2. Autenticar y Setear Contexto
+        try:
+            # Reutilizamos la lógica existente. Si falla, lanza HTTPException
+            authenticate_and_set_context(auth_header)
+        except HTTPException as exc:
+            # Retornamos respuesta JSON directa si hay error de auth
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+        except Exception as e:
+            from fastapi.responses import JSONResponse
+            logger.error(f"Auth Middleware Error: {e}")
+            return JSONResponse(status_code=401, content={"error": "Authentication Failed"})
+
+        # 3. Continuar
+        response = await call_next(request)
+        return response
+
+# Creamos la sub-aplicación de MCP con transporte SSE
+# Importante: FastMCP 2.x gestiona las rutas internas (GET / para stream, POST / para mensajes)
+mcp_sse_app = mcp_server.http_app(
+    transport='sse',
+    middleware=[Middleware(MCPAuthMiddleware)]
+)
+
+# Montamos la app en /sse
+app.mount("/sse", mcp_sse_app)
 
 @app.get("/v1/security/pulse")
 async def get_security_pulse():
@@ -416,7 +440,7 @@ async def home():
             <h1>🛡️ AgentPay Active</h1>
             <p>Financial Security Infrastructure for AI Agents.</p>
             <p>System Status: 🟢 ONLINE</p>
-```
+            <p>MCP SSE Endpoint: /sse</p> 
     </html>
     """
 
