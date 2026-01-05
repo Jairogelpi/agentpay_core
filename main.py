@@ -638,7 +638,7 @@ async def debug_kms_endpoint():
     """Diagnóstico remoto de AWS KMS (para cuando no hay acceso CLI local)"""
     import boto3
     
-    region = os.getenv("AWS_REGION", "us-east-1")
+    region = os.getenv("AWS_REGION", "eu-north-1")
     report = {
         "configured_region": region,
         "env_keys": {
