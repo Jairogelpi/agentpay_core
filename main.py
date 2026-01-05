@@ -646,15 +646,19 @@ async def pay(
 
         # Proceder con el pago rápido si el agente está activo
         real_req = TransactionRequest(**req)
-        result = await engine.process_instant_payment(real_req)
         
-        if result.get("status") == "APPROVED_PENDING_AUDIT":
-            # Inyectamos el ID real de la base de datos para que la auditoría pueda actualizar el log
-            task_data = real_req.model_dump()
-            task_data['id'] = result.get('db_log_id')
-            
-            background_tasks.add_task(engine.run_background_audit, task_data)
+        # EVENT DRIVEN ARCHITECTURE UPDATE:
+        # Use evaluate() which triggers Fast Path -> Redis Stream -> Worker
+        result_obj = await engine.evaluate(real_req)
+        
+        # Convert Pydantic model to dict for response compatibility
+        # Support both Pydantic v1 and v2 just in case, though v2 is installed
+        if hasattr(result_obj, 'model_dump'):
+            result = result_obj.model_dump()
+        else:
+            result = result_obj.dict()
 
+        # No manual background_tasks needed here anymore; blocking synchronous fallback or Redis async handles it.
             
         span.set_attribute("transaction.status", result.get("status"))
         
@@ -663,7 +667,8 @@ async def pay(
             "success": result.get("authorized", False),
             "status": result.get("status", "UNKNOWN"),
             "card_details": result.get("card_details"), 
-            "message": result.get("reason") # Feedback mínimo para el humano
+            "message": result.get("reason"), # Feedback mínimo para el humano
+            "transaction_id": result.get("transaction_id") or result.get("db_log_id") # Useful for polling
         }
 
 
