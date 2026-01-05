@@ -672,6 +672,10 @@ class UniversalEngine:
             "amount": amount,
             "status": "APPROVED",
             "reason": audit.get('reasoning'),
+            "created_at": datetime.now().isoformat(),
+            "invoice_url": invoice_path,
+            "forensic_hash": audit.get('intent_hash')
+        }).execute()
 
     def _reverse_transaction(self, agent_id, amount):
         """Refunds both Redis and DB balances."""
