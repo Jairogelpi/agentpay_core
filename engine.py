@@ -458,32 +458,51 @@ class UniversalEngine:
         if self.redis_enabled and self.redis.sismember("security:global_blacklist", clean_vendor):
              return TransactionResult(authorized=False, status="REJECTED", reason="Bloqueado por Mente Colmena (Global Blacklist)")
 
-        # 4. FUNDS FREEZE (REDIS ATOMIC WRITE - Write-Behind Pattern)
+        # 4. FUNDS FREEZE (REDIS LUA SCRIPT - Atomic & Optimal)
         fee = round(request.amount * 0.015, 2)
         total_deducted = request.amount + fee
         new_balance = 0.0
 
         if self.redis_enabled:
             try:
-                # A. Ensure Cache Exists
+                # A. Ensure Cache Exists (Hydration must happen before script if Key is missing)
+                # We can try/catch the hydration or do it optimistically.
                 self._ensure_wallet_cached(request.agent_id)
                 
-                # B. Atomic Decrement (Optimistic Locking)
+                # B. LUA SCRIPT (Check & Deduct in 1 Atomic Step - God Mode Optimization)
+                # Keys: [wallet_key]
+                # Args: [amount]
+                lua_script = """
+                local current = redis.call('get', KEYS[1])
+                if not current then return -1 end -- Key Missing (Shouldn't happen due to ensure)
+                
+                local bal = tonumber(current)
+                local deduct = tonumber(ARGV[1])
+                
+                if bal < deduct then return -2 end -- Insufficient Funds
+                
+                return redis.call('incrbyfloat', KEYS[1], -deduct)
+                """
+                
+                script = self.redis.register_script(lua_script)
                 key = f"wallet:{request.agent_id}:balance"
-                new_balance = self.redis.incrbyfloat(key, -total_deducted)
+                res = script(keys=[key], args=[total_deducted])
                 
-                # C. Check Funds
-                if new_balance < 0:
-                    # Rollback
-                    self.redis.incrbyfloat(key, total_deducted)
-                    return TransactionResult(authorized=False, status="REJECTED", reason="Saldo insuficiente (Redis Check)")
+                result_code = float(res)
                 
-                logger.info(f"💰 [FAST PATH] Saldo congelado en Redis: -${total_deducted} | Nuevo: ${new_balance}")
+                if result_code == -1:
+                    # Rare race condition where key expired between ensure and script
+                    self._ensure_wallet_cached(request.agent_id)
+                    result_code = float(script(keys=[key], args=[total_deducted])) # Retry once
+                    
+                if result_code == -2:
+                    return TransactionResult(authorized=False, status="REJECTED", reason="Saldo insuficiente (Redis Atomic Check)")
+                
+                new_balance = result_code
+                logger.info(f"💰 [FAST PATH] Saldo congelado (Lua): -${total_deducted} | Nuevo: ${new_balance}")
 
             except Exception as e:
                 logger.error(f"Redis Wallet Error: {e}")
-                # Fallback to DB check? Or Fail closed?
-                # For 2026 Scale, fail closed or implement DB fallback here.
                 return TransactionResult(authorized=False, status="REJECTED", reason="Error de sistema financiero (Redis)")
         else:
              # Fallback logic for non-Redis environments (Testing)
