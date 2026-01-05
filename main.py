@@ -387,29 +387,36 @@ async def health_check():
 # --- 4. ENDPOINTS MCP (TRANSPORT SSE - FastMCP 2.x) ---
 
 from starlette.middleware import Middleware
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
-class MCPAuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+class MCPAuthMiddleware:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
         # 1. Extraer Header
-        auth_header = request.headers.get("Authorization")
+        headers = dict(scope.get("headers", []))
+        auth_header_bytes = headers.get(b"authorization")
+        auth_header = auth_header_bytes.decode("latin-1") if auth_header_bytes else None
         
         # 2. Autenticar y Setear Contexto
         try:
             # Reutilizamos la lógica existente. Si falla, lanza HTTPException
             authenticate_and_set_context(auth_header)
         except HTTPException as exc:
-            # Retornamos respuesta JSON directa si hay error de auth
-            from fastapi.responses import JSONResponse
-            return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+            # Retornamos respuesta JSON directa si hay error de auth (Raw ASGI Response)
+            response = JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+            return await response(scope, receive, send)
         except Exception as e:
-            from fastapi.responses import JSONResponse
             logger.error(f"Auth Middleware Error: {e}")
-            return JSONResponse(status_code=401, content={"error": "Authentication Failed"})
+            response = JSONResponse(status_code=401, content={"error": "Authentication Failed"})
+            return await response(scope, receive, send)
 
         # 3. Continuar
-        response = await call_next(request)
-        return response
+        await self.app(scope, receive, send)
 
 # Creamos la sub-aplicación de MCP con transporte SSE
 # Importante: FastMCP 2.x gestiona las rutas internas (GET / para stream, POST / para mensajes)
