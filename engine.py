@@ -2655,7 +2655,8 @@ class UniversalEngine:
 
     def _detect_vendor_category(self, vendor):
         """Simple vendor category detection based on domain."""
-        v = vendor.lower()
+        # Fix: handle if vendor is passed as object (though it should be string)
+        v = str(vendor).lower()
         if any(x in v for x in ['aws', 'google', 'azure', 'digitalocean', 'heroku', 'render']):
             return 'cloud_services'
         if any(x in v for x in ['slack', 'notion', 'figma', 'canva', 'asana', 'trello']):
