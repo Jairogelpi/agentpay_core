@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException, Depends, Security, Header, Form
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from starlette.types import ASGIApp, Receive, Scope, Send # <--- REQUIRED GLOBAL IMPORT
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
