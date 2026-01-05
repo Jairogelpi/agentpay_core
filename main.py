@@ -323,14 +323,33 @@ async def get_forensic_bundle(agent_id: str):
     return auditor.generate_agent_bundle(agent_id)
 
 # --- CONFIGURACIÓN MCP (MODEL CONTEXT PROTOCOL) ---
-# IMPORTAMOS la instancia asegurada con middleware desde server.py
-# Esto elimina duplicación y garantiza que se use el MCP con autenticación
-from server import mcp as mcp_server
+# IMPORTAMOS la instancia asegurada y el ContextVar desde server.py
+from server import mcp as mcp_server, current_agent_id
 
 # --- INTEGRACIÓN MCP + FASTAPI (SSE) ---
-# Los endpoints /sse y /messages usarán la instancia importada
 from mcp.server.fastmcp import Context
 from starlette.requests import Request as StarletteRequest
+
+# Función auxiliar para validar y setear contexto de agente vía Header
+def authenticate_and_set_context(authorization: str):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Header Authorization requerido (Bearer sk_...)")
+    
+    try:
+        scheme, token = authorization.split()
+        if scheme.lower() != 'bearer':
+            raise HTTPException(status_code=401, detail="Esquema de autenticación inválido (Use Bearer)")
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Formato de Header Authorization inválido")
+
+    # Validar contra el Engine
+    agent_id = engine.verify_agent_credentials(token)
+    if not agent_id:
+        raise HTTPException(status_code=403, detail="API Key del Agente inválida o expirada")
+
+    # ¡MAGIA! Seteamos el contexto global para esta petición asíncrona
+    current_agent_id.set(agent_id)
+    return agent_id
 
 # --- 3. HEALTH CHECK (UPTIME MONITORING) ---
 @app.get("/health")
@@ -338,44 +357,44 @@ async def health_check():
     """
     Endpoint CRÍTICO para Better Stack Uptime.
     Si esto devuelve 200 OK -> El sistema está VIVO.
-    Si devuelve 500 o Timeout -> Better Stack te envía SMS de alerta.
     """
     health_status = {"status": "ok", "components": {}}
     
-    # Check 1: Redis (Caché y Locks)
+    # Check 1: Redis
     try:
         if engine.redis_enabled:
             engine.redis.ping()
             health_status["components"]["redis"] = "up"
         else:
-             health_status["components"]["redis"] = "disabled"
+            health_status["components"]["redis"] = "disabled"
     except Exception as e:
         health_status["status"] = "degraded"
         health_status["components"]["redis"] = f"down: {str(e)}"
-        # No hacemos raise 500 aquí para que la app siga reportando "viva" aunque sin caché
         
-    # Check 2: Supabase (Data Core)
+    # Check 2: Supabase
     try:
-        # Consulta ligera (Keep-alive)
         engine.db.table("wallets").select("count", count="exact").limit(1).execute()
         health_status["components"]["database"] = "up"
     except Exception as e:
         logger.critical(f"🔥 DATABASE DOWN: {e}")
-        # Si falla la DB, el sistema NO sirve. Devolvemos 503 Service Unavailable.
         raise HTTPException(status_code=503, detail=f"Database Disconnected: {e}")
 
     return health_status
 
 
-# --- 4. ENDPOINTS PRINCIPALES ---
+# --- 4. ENDPOINTS MCP (TRANSPORT SSE) ---
 
 @app.get("/sse")
-async def handle_sse(request: StarletteRequest):
+async def handle_sse(request: StarletteRequest, authorization: str = Header(None)):
+    """Transporte SSE para MCP. Autenticado vía Header."""
+    authenticate_and_set_context(authorization)
     async with mcp_server.run_sse_async(request.scope, request.receive, request.send) as (read, write):
         pass
 
 @app.post("/messages")
-async def handle_messages(request: StarletteRequest):
+async def handle_messages(request: StarletteRequest, authorization: str = Header(None)):
+    """Transporte de mensajes para MCP. Autenticado vía Header."""
+    authenticate_and_set_context(authorization)
     return await mcp_server.handle_sse_message(request.scope, request.receive, request.send)
 
 @app.get("/v1/security/pulse")
