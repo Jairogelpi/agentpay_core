@@ -140,6 +140,54 @@ def verify_remote():
         
         time.sleep(1) # Brief pause between tests
 
+    # --- TEST 4: AWS KMS SECURITY VERIFICATION ---
+    log("\n--- TEST 4: AWS KMS SECURITY VERIFICATION ---")
+    
+    # 4.1 Hardware Signing
+    log("🔐 1. Testing Hardware Signing (ECC)...")
+    try:
+        sign_resp = requests.post(
+            f"{BASE_URL}/v1/legal/sign_tos", 
+            json={"platform_url": "https://kms-verify.test"},
+            headers=headers
+        )
+        if sign_resp.status_code == 200:
+            data = sign_resp.json()
+            sig = data.get("signature")
+            level = data.get("security_level")
+            if sig and level == "BANK_GRADE_HSM":
+                 log(f"✅ Hardware Sign OK! Signature: {sig[:20]}... [Level: {level}]")
+            else:
+                 log(f"❌ Hardware Sign Failed. Response: {data}", "ERROR")
+        else:
+            log(f"❌ Sign Request Failed: {sign_resp.text}", "ERROR")
+    except Exception as e:
+        log(f"❌ Sign Error: {e}", "ERROR")
+
+    # 4.2 Envelope Encryption
+    log("🛡️ 2. Testing Envelope Encryption (Session)...")
+    try:
+        # We assume verify_event_driven registers agent and 'agent_id' is available.
+        # But update_session needs identity_id or agent_id. 
+        # Since I updated identity.py to accept agent_id as fallback, we pass agent_id.
+        session_payload = {
+            "identity_id": agent_id, 
+            "session_data": {"cookie": "yum_yum_encrypted", "secret": "very_secret"}
+        }
+        enc_resp = requests.post(
+            f"{BASE_URL}/v1/identity/update_session", 
+            json=session_payload,
+            headers=headers
+        )
+        if enc_resp.status_code == 200:
+             # Returns boolean or logic likely
+             log("✅ Envelope Encryption Request OK (200 OK)")
+             log("   (Check server logs for '🔒 Sesión guardada y cifrada')")
+        else:
+             log(f"❌ Encryption Request Failed: {enc_resp.text}", "ERROR")
+    except Exception as e:
+        log(f"❌ Encryption Error: {e}", "ERROR")
+
     log("\n✨ All tests completed.")
 
 if __name__ == "__main__":
