@@ -69,9 +69,7 @@ class UniversalEngine:
         try:
             self.kms_client = boto3.client(
                 'kms', 
-                region_name=os.getenv("AWS_REGION", "eu-north-1"),
-                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+                region_name=os.getenv("AWS_REGION", "eu-north-1")
             )
             # USAMOS LA LLAVE DE FIRMA (ECC)
             self.signing_key_id = os.getenv("KMS_SIGNING_KEY_ID")
