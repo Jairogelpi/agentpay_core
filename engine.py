@@ -2370,7 +2370,7 @@ class UniversalEngine:
                 cached_id = self.redis.get(f"auth:api_key:{token_hash}")
                 if cached_id:
                     # logger.debug(f"⚡ Auth Cache Hit: {cached_id}") # Too noisy for prod
-                    return str(cached_id) # Redis returns bytes usually
+                    return cached_id.decode('utf-8') # Redis returns bytes usually
 
             # 2. Buscamos en la DB (Slow Path)
             # Importante: Buscamos por el HASH, nunca por el token plano
