@@ -67,6 +67,7 @@ class UniversalEngine:
         self._lawyer = None
         self._forensic_auditor = None
         self._arbiter = None # Lazy loaded
+        self._ledger = None # Lazy loaded
         
         self.stream_key = "payment_events"  # Added for Event-Driven Architecture
         
@@ -142,6 +143,13 @@ class UniversalEngine:
             from arbitration import AIArbiter
             self._arbiter = AIArbiter(self) # Inject engine (self) for execution power
         return self._arbiter
+
+    @property
+    def ledger(self):
+        if self._ledger is None:
+            from ledger import LedgerManager
+            self._ledger = LedgerManager(self.db)
+        return self._ledger
 
     async def _save_transaction_memory(self, tx_id, text_content):
         """Genera y guarda el embedding para aprendizaje futuro (RAG)."""
@@ -2030,6 +2038,38 @@ class UniversalEngine:
             
             logger.critical(f"CRITICAL ERROR in process_instant_payment: {error_details}")
             return {"status": "REJECTED", "reason": f"Error de Integridad: {error_details}"}
+
+            logger.critical(f"CRITICAL ERROR in process_instant_payment: {error_details}")
+            return {"status": "REJECTED", "reason": f"Error de Integridad: {error_details}"}
+
+        # --- SHADOW LEDGER (DOUBLE ENTRY BOOKKEEPING) ---
+        # Registramos el movimiento en el Libro Mayor (Contabilidad Paralela)
+        # Esto no bloquea la respuesta al usuario, pero asegura integridad posterior.
+        try:
+            # 1. Identificar cuentas
+            agent_acc_id = self.ledger.get_or_create_account(request.agent_id, acc_type="LIABILITY")
+            system_acc_id = self.ledger.get_or_create_account("SYSTEM_CLEARING", name="System Clearing Account", acc_type="ASSET")
+            
+            if agent_acc_id and system_acc_id:
+                # 2. Definir movimiento (Usuario Paga = Debit Liability, Credit Asset/Transit)
+                # Al reducir un pasivo (Liability), se DEBITA.
+                # Al aumentar un activo (dinero en transito/stripe), se ACREDITA (o se debita si entra? No, Asset aumenta con Debit).
+                # ESPERA: Contabilidad Básica.
+                # Asset (Stripe Balance) aumenta -> DEBIT.
+                # Liability (User Deposit) disminuye -> DEBIT.
+                # ESTO NO CUADRA.
+                # Si el usuario gasta dinero:
+                # Su Liability (deuda nuestra con él) DISMINUYE -> DEBIT Liability.
+                # Nuestro Cash/Stripe (Asset) DISMINUYE (porque pagamos al vendor) -> CREDIT Asset.
+                # Entonces: DEBIT Liability (User) / CREDIT Asset (Stripe).
+                # Suma cero. Correcto.
+                
+                self.ledger.record_entry(log_id, [
+                    {"account_id": agent_acc_id, "amount": total_deducted, "type": "DEBIT"},
+                    {"account_id": system_acc_id, "amount": total_deducted, "type": "CREDIT"}
+                ])
+        except Exception as ledger_err:
+             logger.error(f"⚠️ Ledger recording failed (Shadow Mode): {ledger_err}")
 
         # 4. Issue Card (Fast) - Necesario para que el pago funcione
         clean_vendor = self._normalize_domain(request.vendor)
