@@ -99,3 +99,80 @@ class ForensicAuditor:
 
     def export_to_pdf_template(self, bundle):
         return f"AUDIT_CERTIFICATE_{bundle['bundle_id']}.pdf"
+
+
+# ============================================
+# UNIFIED AUDITOR (Single Source of Truth)
+# ============================================
+class UnifiedAuditor:
+    """
+    Fuente Única de Verdad para Auditoría.
+    Reemplaza escritura dispersa en: audit_sessions, audit_trail, compliance_alerts, mcp_audit_log.
+    Todo va a -> unified_audit_logs
+    """
+    
+    def __init__(self, db_client):
+        self.db = db_client
+
+    def log_event(self, agent_id, source, event_type, severity="INFO", details=None, resource_id=None, ip=None):
+        """
+        Registra un evento inmutable en el log unificado.
+        
+        Args:
+            agent_id: ID del agente (puede ser None para eventos de sistema).
+            source: Origen del evento ('SESSION', 'CREDIT', 'AML', 'MCP', 'ENGINE').
+            event_type: Tipo de evento ('LOGIN', 'LOAN_REQUEST', 'TOOL_USE', etc.).
+            severity: Nivel ('INFO', 'WARN', 'ERROR', 'CRITICAL', 'FATAL').
+            details: Dict con payload completo del evento.
+            resource_id: ID de la transacción/sesión/préstamo relacionado.
+            ip: Dirección IP del actor.
+        """
+        from loguru import logger
+        
+        if details is None:
+            details = {}
+
+        # Crear firma anti-tampering básica
+        payload_str = f"{agent_id}:{source}:{event_type}:{str(details)}"
+        signature = hashlib.sha256(payload_str.encode()).hexdigest()
+
+        audit_entry = {
+            "agent_id": agent_id,
+            "event_source": source.upper(),
+            "event_type": event_type.upper(),
+            "severity": severity.upper(),
+            "details": details,
+            "resource_id": resource_id,
+            "ip_address": ip,
+            "hash_signature": signature,
+            "created_at": datetime.utcnow().isoformat()
+        }
+
+        try:
+            self.db.table("unified_audit_logs").insert(audit_entry).execute()
+            logger.debug(f"📝 [AUDIT] {source} -> {event_type} logged.")
+            return True
+        except Exception as e:
+            # NUNCA detener el negocio si falla el log, pero alertar
+            logger.critical(f"🔥 FALLO CRÍTICO DE AUDITORÍA: No se pudo escribir log: {e}")
+            return False
+
+    def log_session(self, agent_id, action, resource_id=None, ip=None):
+        """Helper para eventos de sesión."""
+        return self.log_event(agent_id, "SESSION", action, "INFO", resource_id=resource_id, ip=ip)
+
+    def log_security(self, agent_id, event_type, severity, details, ip=None):
+        """Helper para eventos de seguridad."""
+        return self.log_event(agent_id, "SECURITY", event_type, severity, details, ip=ip)
+
+    def log_aml_alert(self, agent_id, alert_type, details, resource_id=None):
+        """Helper para alertas AML."""
+        return self.log_event(agent_id, "AML", alert_type, "CRITICAL", details, resource_id)
+
+    def log_mcp_tool(self, agent_id, tool_name, parameters, status="SUCCESS"):
+        """Helper para uso de herramientas MCP."""
+        return self.log_event(
+            agent_id, "MCP", tool_name, 
+            "ERROR" if status == "ERROR" else "INFO",
+            {"parameters": parameters, "status": status}
+        )
