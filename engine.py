@@ -2261,7 +2261,7 @@ class UniversalEngine:
             logger.critical(f"🚨 FALLO CRÍTICO DE FIRMA KMS: {e}")
             raise e
 
-    def sign_terms_of_service(self, agent_id, platform_url, forensic_hash="N/A"):
+    def sign_terms_of_service(self, agent_id, platform_url, forensic_hash="N/A", client_ip="0.0.0.0"):
         """
         Firma los términos usando hardware seguro (AWS KMS), VINCULANDO EL TEXTO LEGAL.
         """
@@ -2305,6 +2305,7 @@ class UniversalEngine:
             "signature": signature, 
             "forensic_hash": current_legal_hash, # <--- Guardamos el hash del texto, no un random
             "contract_version": TOS_VERSION,     # <--- Guardamos la versión exacta
+            "client_ip": client_ip,              # <--- EVIDENCIA DE UBICACIÓN
             "status": "ACTIVE_BINDING",
             "identity_email": owner_email,
             "issued_at": datetime.now().isoformat()
@@ -2581,7 +2582,7 @@ class UniversalEngine:
             logger.error(f"⚠️ Auth Error: {e}")
             return None
 
-    def register_new_agent(self, client_name, country_code="US", agent_role="Asistente General"):
+    def register_new_agent(self, client_name, country_code="US", agent_role="Asistente General", client_ip="8.8.8.8"):
         """
         REGISTRO SILENCIOSO Y AUTOMÁTICO:
         Crea la cuenta activando 'transfers' y 'card_payments' al instante.
@@ -2591,12 +2592,10 @@ class UniversalEngine:
         raw_secret = f"sk_live_{secrets.token_urlsafe(32)}"
         secret_hash = self._hash_key(raw_secret)
         
-        # Datos Dummy para pasar validación en Test Mode
-        test_ip = "8.8.8.8"
         timestamp = int(time.time())
 
         try:
-            logger.info(f"🥷 Creando Agente Automático: {client_name}...")
+            logger.info(f"🥷 Creando Agente Automático: {client_name} - IP: {client_ip}...")
 
             # 1. CREAR CUENTA PRE-ACTIVADA
             account = stripe.Account.create(
@@ -2612,7 +2611,7 @@ class UniversalEngine:
                 # ESTO ES LO QUE FALTA PARA EVITAR EL ERROR DE CAPABILITIES:
                 tos_acceptance={
                     "date": timestamp,
-                    "ip": test_ip, 
+                    "ip": client_ip, 
                 },
             )
 
@@ -2639,7 +2638,8 @@ class UniversalEngine:
                 "balance": initial_balance,
                 "stripe_account_id": account.id,
                 "kyc_status": "ACTIVE",
-                "agent_role": agent_role
+                "agent_role": agent_role,
+                "compliance_metadata": {"role": agent_role, "registered_ip": client_ip}
             }).execute()
             
             logger.success(f"✅ Agente {agent_id} creado y activo con Stripe Account ID: {account.id} (Balance Inicial: ${initial_balance})")

@@ -732,6 +732,23 @@ async def debug_stripe():
 async def check_kyc_status(agent_id: str):
     return engine.verify_agent_kyc(agent_id)
 
+@app.post("/v1/agent/register")
+@limiter.limit("20/minute")
+async def register_agent(req: dict, request: Request): 
+    # Capturamos la IP real del humano/cliente
+    real_ip = request.client.host
+    
+    # Si estás detrás de un proxy (Cloudflare/Render), usa headers:
+    if request.headers.get("x-forwarded-for"):
+         real_ip = request.headers.get("x-forwarded-for").split(",")[0].strip()
+
+    return engine.register_new_agent(
+        req.get("client_name"), 
+        country_code=req.get("country_code", "US"), 
+        agent_role=req.get("agent_role", "Asistente General"),
+        client_ip=real_ip  # <--- NUEVO PARÁMETRO
+    )
+
 from fastapi import Request, Header, BackgroundTasks # <--- Importar Header y BackgroundTasks
 
 @app.post("/v1/pay")
@@ -1002,9 +1019,19 @@ async def escrow_dispute(req: dict):
     )
 
 @app.post("/v1/legal/sign_tos")
-async def legal_sign_tos(req: dict):
+async def legal_sign_tos(req: dict, request: Request):
     """Firma de TyC con Certificado de Responsabilidad"""
-    return engine.sign_terms_of_service(req.get("agent_id"), req.get("platform_url"), req.get("forensic_hash", "N/A"))
+    # Capturar IP Real
+    real_ip = request.client.host
+    if request.headers.get("x-forwarded-for"):
+         real_ip = request.headers.get("x-forwarded-for").split(",")[0].strip()
+         
+    return engine.sign_terms_of_service(
+        req.get("agent_id"), 
+        req.get("platform_url"), 
+        req.get("forensic_hash", "N/A"),
+        client_ip=real_ip
+    )
 
 @app.post("/v1/legal/issue-certificate")
 async def issue_cert(req: dict):
