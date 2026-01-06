@@ -66,6 +66,7 @@ class UniversalEngine:
         self._identity_mgr = None
         self._lawyer = None
         self._forensic_auditor = None
+        self._arbiter = None # Lazy loaded
         
         self.stream_key = "payment_events"  # Added for Event-Driven Architecture
         
@@ -134,6 +135,13 @@ class UniversalEngine:
             from forensic_auditor import ForensicAuditor
             self._forensic_auditor = ForensicAuditor()
         return self._forensic_auditor
+
+    @property
+    def arbiter(self):
+        if self._arbiter is None:
+            from arbitration import AIArbiter
+            self._arbiter = AIArbiter(self) # Inject engine (self) for execution power
+        return self._arbiter
 
     async def _save_transaction_memory(self, tx_id, text_content):
         """Genera y guarda el embedding para aprendizaje futuro (RAG)."""
@@ -2263,6 +2271,7 @@ class UniversalEngine:
     def raise_escrow_dispute(self, agent_id, transaction_id, issue, evidence):
         """
         El Juez IA entra en acción: Arbitraje Real basado en evidencia técnica.
+        **UPDATED 2026**: Usa AIArbiter con Poder Ejecutivo (Refunds automáticos).
         """
         # 1. Recuperar contexto
         try:
@@ -2272,46 +2281,28 @@ class UniversalEngine:
             logger.error(f"Error retrieving transaction {transaction_id} for dispute: {e}")
             tx = {}
         
-        # 2. Llamar al Tribunal (AutoLawyer)
+        # 2. Llamar al Tribunal (AIArbiter)
         try:
-            verdict = self.lawyer.analyze_case(
-                agent_id=agent_id,
-                vendor=tx.get('vendor', 'Unknown'),
-                amount=float(tx.get('amount', 0)),
+            # judge_dispute ahora EJECUTA el veredicto (refunds, pagos, etc.)
+            verdict = self.arbiter.judge_dispute(
+                transaction=tx,
                 claim_reason=issue,
-                proof_logs=evidence,
-                transaction_context={"tx_id": transaction_id}
+                agent_evidence=evidence
             )
         except Exception as e:
-            logger.error(f"❌ Error llamando al Lawyer: {e}")
-            verdict = None
-
-        # 🛡️ DEFENSA DE MOTOR: Si verdict sigue siendo None, creamos uno por defecto
-        if verdict is None:
+            logger.error(f"❌ Error llamando al Arbiter: {e}")
+            # Fallback seguro
             verdict = {
-                "suggested_action": "REJECT_CLAIM",
-                "judicial_opinion": "Error Interno del Tribunal (Null Verdict).",
-                "viability": "ERROR"
+                "verdict": "ERROR", 
+                "judicial_opinion": f"Fallo del Tribunal: {str(e)}",
+                "confidence": 0.0
             }
-        
-        # 3. Acciones Automáticas
-        action = verdict.get('suggested_action', 'REJECT_CLAIM')
-        status = "REFUNDED" if action == "REFUND" else "DISPUTE_REJECTED"
-        
-        # Actualizar DB
-        try:
-            self.db.table("transaction_logs").update({
-                "status": status, 
-                "reason": f"Arbitraje IA: {verdict.get('judicial_opinion')}"
-            }).eq("id", transaction_id).execute()
-        except Exception as e:
-            logger.error(f"⚠️ Error actualizando DB en disputa: {e}")
-        
-        logger.info(f"Dispute for {transaction_id} processed. Verdict: {verdict.get('judicial_opinion')}, Action: {action}")
+
+        logger.info(f"⚖️ Dispute for {transaction_id} processed by AI Arbiter. Status: {verdict.get('verdict')}")
         return {
-            "status": status,
+            "status": "RESOLVED",
             "verdict": verdict,
-            "action_taken": action
+            "action_taken": verdict.get('verdict', 'UNKNOWN')
         }
 
     # --- AÑADIR EN ENGINE.PY (DENTRO DE LA CLASE UniversalEngine) ---
