@@ -510,6 +510,61 @@ class UniversalEngine:
             logger.error(f"Failed to create topup session: {e}")
             raise e
 
+    def _automate_issuing_balance_sync(self, amount_usd):
+        """
+        Mueve fondos automáticamente para cubrir gastos de Issuing.
+        
+        EN MODO TEST: Simula una entrada de dinero instantánea.
+        EN MODO LIVE: Ejecuta un 'Top-up' que retira dinero de tu cuenta bancaria asociada
+                      hacia el saldo de Stripe Issuing. Tarda 1-3 días hábiles.
+        """
+        try:
+            logger.info(f"💸 [FINTECH] Orquestando traslado de ${amount_usd} al pozo de Issuing...")
+            
+            # 1. Definimos la cantidad (en centavos)
+            amount_cents = int(amount_usd * 100)
+            
+            # 2. Ejecutar Transferencia REAL a Balance Issuing
+            try:
+                topup = stripe.Topup.create(
+                    amount=amount_cents,
+                    currency="usd",
+                    description="Auto-Sync AgentPay Liquidity",
+                    statement_descriptor="AgentPay Funding",
+                    destination_balance="issuing", # <--- CRÍTICO: Envía el dinero al saldo de tarjetas
+                    metadata={"source": "system_auto_sync", "env": os.getenv("FLASK_ENV", "development")}
+                )
+                
+                # Verificar estado inmediato (En Test es 'succeeded', en Prod suele ser 'pending')
+                if topup.status == 'succeeded':
+                    logger.success(f"✅ [STRIPE] Fondos disponibles en Issuing inmediatamente (Topup ID: {topup.id})")
+                elif topup.status == 'pending':
+                    logger.info(f"⏳ [STRIPE] Topup iniciado (Pendiente de compensación bancaria). ID: {topup.id}")
+                else:
+                    logger.warning(f"⚠️ [STRIPE] Estado inusual del Topup: {topup.status}")
+
+            except stripe.error.StripeError as e:
+                # Si falla Stripe, NO debemos registrar el éxito en nuestra DB
+                logger.critical(f"❌ [STRIPE ERROR] Falló la recarga de fondos: {e.user_message}")
+                raise e # Relanzamos para detener el flujo contable abajo
+
+            # 3. Registrar movimiento contable (Solo si Stripe no falló)
+            self.db.table("transaction_logs").insert({
+                "id": str(uuid.uuid4()),
+                "agent_id": "SYSTEM_HOME",
+                "vendor": "AgentPay Treasury",
+                "amount": amount_usd,
+                "status": "APPROVED",
+                "reason": f"Internal Treasury Liquidity (Stripe Topup: {topup.id})"
+            }).execute()
+            
+            return {"status": "SUCCESS", "topup_id": topup.id, "stripe_status": topup.status}
+
+        except Exception as e:
+            logger.error(f"⚠️ Aviso de Orquestación de Tesorería: {e}")
+            # En un sistema real, aquí deberías enviar una alerta crítica a Slack/PagerDuty
+            return {"status": "ERROR", "message": str(e)}
+
     def check_circuit_breaker(self, agent_id, kyc_level="UNVERIFIED"):
         """
         Fusible Financiero Indestructible (Redis)
