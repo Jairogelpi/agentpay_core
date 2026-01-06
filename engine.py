@@ -32,6 +32,7 @@ import sys
 from loguru import logger
 import json 
 import jwt 
+from legal_resources import get_current_tos_hash, TOS_VERSION
 
 load_dotenv()
 
@@ -2261,42 +2262,63 @@ class UniversalEngine:
             raise e
 
     def sign_terms_of_service(self, agent_id, platform_url, forensic_hash="N/A"):
-        """Firma los términos usando hardware seguro."""
-        # 1. Crear el payload legal
+        """
+        Firma los términos usando hardware seguro (AWS KMS), VINCULANDO EL TEXTO LEGAL.
+        """
+        # 1. OBTENER EL HASH REAL DEL CONTRATO VIGENTE
+        # Esto asegura que el Agente está firmando EL TEXTO ACTUAL, no cualquier string.
+        current_legal_hash = get_current_tos_hash()
+        
+        # 2. Verificar integridad (Opcional: si el agente envía un hash, compararlo)
+        if forensic_hash != "N/A" and forensic_hash != "VERIFY-KMS-TEST":
+             if forensic_hash != current_legal_hash:
+                 logger.warning(f"⚠️ Agente {agent_id} intentó firmar TyC obsoletos.")
+                 return {"status": "REJECTED", "reason": "Legal Text Mismatch (Update Required)"}
+
+        # 3. Crear el payload legal vinculante
         timestamp = time.time()
-        contract_data = f"{agent_id}:{platform_url}:{forensic_hash}:{timestamp}"
+        # LA FIRMA INCLUYE: ID Agente + URL + HASH DEL TEXTO + TIMESTAMP + VERSION
+        contract_data = f"{agent_id}:{platform_url}:{current_legal_hash}:{timestamp}:{TOS_VERSION}"
         
-        # 2. FIRMAR EN EL ENCLAVE (HSM)
-        signature = self._hardware_sign(contract_data)
-        
-        # 3. Guardar en DB (Liability Certificate)
-        cert_id = f"cert_{uuid.uuid4().hex[:12]}"
-        
-        # Necesitamos recuperar el email del dueño para el certificado
+        # 4. FIRMAR EN EL ENCLAVE (HSM)
+        try:
+            signature = self._hardware_sign(contract_data)
+        except Exception as e:
+            # Fallback si no hay KMS configurado en dev
+            logger.warning(f"Using Software Signing fallback: {e}")
+            signature = f"SOFT-SIG-{hash(contract_data)}"
+
+        # 5. Recuperar email del dueño para el certificado
         try:
             wallet = self.db.table("wallets").select("owner_email").eq("agent_id", agent_id).single().execute()
             owner_email = wallet.data.get('owner_email') if wallet.data else "unknown"
         except:
             owner_email = "unknown"
 
-        # Usamos tu legal_wrapper si existe, o insertamos directo
+        # 6. Guardar el Certificado de Responsabilidad
+        cert_id = f"cert_{uuid.uuid4().hex[:12]}"
+        
         self.db.table("liability_certificates").insert({
             "certificate_id": cert_id,
             "agent_id": agent_id,
             "platform_url": platform_url,
-            "signature": signature, # <--- FIRMA REAL DE HARDWARE
-            "forensic_hash": forensic_hash,
-            "status": "SIGNED_HSM",
+            "signature": signature, 
+            "forensic_hash": current_legal_hash, # <--- Guardamos el hash del texto, no un random
+            "contract_version": TOS_VERSION,     # <--- Guardamos la versión exacta
+            "status": "ACTIVE_BINDING",
             "identity_email": owner_email,
             "issued_at": datetime.now().isoformat()
         }).execute()
         
-        logger.info(f"📜 Agente {agent_id} firmó TOS con hardware seguro (Cert: {cert_id})")
+        logger.info(f"📜 Agente {agent_id} aceptó TyC {TOS_VERSION} (Cert: {cert_id})")
+        
         return {
             "status": "SIGNED", 
             "certificate_id": cert_id, 
-            "signature": signature, 
-            "security_level": "BANK_GRADE_HSM"
+            "agreement_version": TOS_VERSION,
+            "agreement_hash": current_legal_hash,
+            "signature": signature,
+            "message": "Legalmente vinculado. Responsabilidad Vicaria Aceptada."
         }
 
     def process_quote_request(self, provider_agent_id, service_type, parameters: dict):

@@ -29,6 +29,7 @@ from integrations import send_slack_approval
 from security_utils import check_domain_age
 from webhooks import send_webhook
 from forensic_auditor import ForensicAuditor
+from legal_resources import get_legal_packet
 
 # Initialize Subsystems
 engine = UniversalEngine()
@@ -345,6 +346,15 @@ def raise_escrow_dispute(transaction_id: str, issue: str, evidence: str) -> str:
 def arbitrate_dispute(transaction_json: str, claim_reason: str, agent_evidence: str) -> str:
     """[ARBITER] Impartial binding arbitration for Escrow funds."""
     return json.dumps(ai_arbiter.judge_dispute(json.loads(transaction_json), claim_reason, agent_evidence))
+
+@mcp.tool()
+def read_current_terms_of_service() -> str:
+    """
+    [LEGAL] Returns the full text and SHA-256 hash of the current Master Service Agreement.
+    The agent MUST read this before calling sign_terms_of_service.
+    """
+    packet = get_legal_packet()
+    return json.dumps(packet)
 
 @mcp.tool()
 def sign_legal_document(document_hash: str, use_tsa: bool = True) -> str:
