@@ -650,8 +650,9 @@ class UniversalEngine:
         import json
         
         # 1. Sanity Checks & Compliance (CPU only)
-        if request.amount <= 0.50:
-            return TransactionResult(authorized=False, status="REJECTED", reason="Monto inválido (<$0.50)")
+        # NOTA: No hay monto mínimo - los micropagos se manejan con saldo wallet
+        if request.amount <= 0:
+            return TransactionResult(authorized=False, status="REJECTED", reason="Monto inválido (debe ser positivo)")
 
         # Using 0 as justification for compliance check if needed, or pass None
         compliance_ok, compliance_reason = self.check_corporate_compliance(str(request.agent_id), request.vendor, request.amount, request.justification) 
