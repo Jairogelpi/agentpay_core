@@ -567,35 +567,61 @@ class UniversalEngine:
 
     def check_circuit_breaker(self, agent_id, kyc_level="UNVERIFIED"):
         """
-        Fusible Financiero Indestructible (Redis)
-        Ajustamos el límite: 10 tx/min para nuevos, 30 tx/min para verificados.
+        Fusible Financiero:
+        - Primario: Redis (Rápido y Atómico).
+        - Fallback: DB Count (Lento pero CONSISTENTE entre workers).
         """
         current_time = int(time.time())
+        limit = 30 if kyc_level == "VERIFIED" else 10
+
         try:
-            limit = 30 if kyc_level == "VERIFIED" else 10
-            
+            # 1. INTENTO PRIMARIO: REDIS (Ideal)
             if self.redis_enabled:
                 key = f"velocity:{agent_id}"
                 pipe = self.redis.pipeline()
                 pipe.zadd(key, {str(current_time): current_time})
-                pipe.zremrangebyscore(key, 0, current_time - 60) # Borrar viejos (>60s)
-                pipe.zcard(key) # Contar actuales
-                pipe.expire(key, 65) # Auto-limpieza
+                pipe.zremrangebyscore(key, 0, current_time - 60)
+                pipe.zcard(key)
+                pipe.expire(key, 65)
                 results = pipe.execute()
                 
                 count = results[2]
-                if count >= limit: # Límite dinámico
-                    return True # 🔥 FUSIBLE ACTIVADO
+                if count >= limit:
+                    return True # 🔥 FUSIBLE ACTIVADO (Redis)
                 return False
+            
+            # 2. FALLBACK ROBUSTO: BASE DE DATOS (Shared State)
             else:
-                 # Fallback RAM
-                if agent_id not in self.transaction_velocity: self.transaction_velocity[agent_id] = []
-                self.transaction_velocity[agent_id] = [t for t in self.transaction_velocity[agent_id] if current_time - t < 60]
-                if len(self.transaction_velocity[agent_id]) >= limit: return True
-                self.transaction_velocity[agent_id].append(current_time)
+                # -----------------------------------------------------------
+                # CORRECCIÓN DE CLUSTER: 
+                # Consultamos la DB global en lugar de la memoria RAM local.
+                # Esto "conecta" a todos los workers contra el mismo límite.
+                # -----------------------------------------------------------
+                from datetime import timezone
+                
+                # Definir ventana de tiempo (últimos 60 segundos)
+                one_minute_ago = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+                
+                # Contamos logs recientes en la DB.
+                # Supabase/Postgres es la única verdad compartida si Redis muere.
+                res = self.db.table("transaction_logs")\
+                    .select("id", count="exact")\
+                    .eq("agent_id", agent_id)\
+                    .gte("created_at", one_minute_ago)\
+                    .execute()
+                
+                # Obtenemos el conteo global real
+                db_count = res.count if res.count is not None else len(res.data)
+                
+                if db_count >= limit:
+                    logger.warning(f"🛡️ [DB FALLBACK] Rate Limit Global excedido para {agent_id} ({db_count}/{limit})")
+                    return True # 🔥 FUSIBLE ACTIVADO (Postgres)
+                
                 return False
+
         except Exception as e:
             logger.error(f"⚠️ Circuit Breaker Error: {e}")
+            # En caso de fallo total (ni Redis ni DB), fallamos "abierto"
             return False
 
     async def evaluate(self, request: TransactionRequest, idempotency_key: str = None) -> TransactionResult:
