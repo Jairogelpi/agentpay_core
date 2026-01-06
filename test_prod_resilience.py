@@ -11,7 +11,7 @@ def register_test_agent():
     try:
         payload = {
             "client_name": f"ResilienceTester_{uuid.uuid4().hex[:6]}",
-            "country_code": "US",
+            "country_code": "ES",
             "agent_role": "Tester"
         }
         resp = requests.post(f"{BASE_URL}/v1/agent/register", json=payload, timeout=10)

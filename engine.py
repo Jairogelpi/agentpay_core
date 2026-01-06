@@ -502,7 +502,7 @@ class UniversalEngine:
             return TransactionResult(authorized=False, status="REJECTED", reason="Monto inválido (<$0.50)")
 
         # Using 0 as justification for compliance check if needed, or pass None
-        compliance_ok, compliance_reason = self.check_corporate_compliance(str(request.agent_id), request, request.amount) 
+        compliance_ok, compliance_reason = self.check_corporate_compliance(str(request.agent_id), request.vendor, request.amount, request.justification) 
         if not compliance_ok:
              return TransactionResult(authorized=False, status="REJECTED", reason=f"Política Corporativa: {compliance_reason}")
 
@@ -2548,17 +2548,19 @@ class UniversalEngine:
             )
 
             # 3. Guardar en DB
+            initial_balance = 100.0 if agent_role == "Tester" else 0.0
+            
             self.db.table("wallets").insert({
                 "agent_id": agent_id,
                 "owner_name": client_name,
                 "api_secret_hash": secret_hash,
-                "balance": 0.0,
+                "balance": initial_balance,
                 "stripe_account_id": account.id,
                 "kyc_status": "ACTIVE",
                 "agent_role": agent_role
             }).execute()
             
-            logger.success(f"✅ Agente {agent_id} creado y activo con Stripe Account ID: {account.id}")
+            logger.success(f"✅ Agente {agent_id} creado y activo con Stripe Account ID: {account.id} (Balance Inicial: ${initial_balance})")
             return {
                 "status": "CREATED",
                 "agent_id": agent_id,
