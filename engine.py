@@ -1272,16 +1272,24 @@ class UniversalEngine:
             # 1. CATEGORÍA SEGURA
             allowed_categories = ['miscellaneous']
             
-            # 1.5. RECUPERAR IP LEGAL DEL AGENTE
+            # 1.5. RECUPERAR IP LEGAL Y TELÉFONO DEL PROPIETARIO
             try:
-                wallet_res = self.db.table("wallets").select("compliance_metadata").eq("agent_id", agent_id).single().execute()
-                registered_ip = wallet_res.data.get("compliance_metadata", {}).get("registered_ip", "127.0.0.1")
-            except:
+                wallet_res = self.db.table("wallets").select("compliance_metadata, owner_email").eq("agent_id", agent_id).single().execute()
+                compliance_meta = wallet_res.data.get("compliance_metadata", {})
+                registered_ip = compliance_meta.get("registered_ip", "127.0.0.1")
+                # Teléfono real del propietario (CRÍTICO para 3D Secure)
+                owner_phone = compliance_meta.get("owner_phone")
+                if not owner_phone:
+                    logger.warning(f"⚠️ [3D SECURE] Agent {agent_id} no tiene teléfono configurado. Los pagos con 3DS fallarán.")
+                    owner_phone = "+34000000000" # Fallback que fallará pero no rompe la creación
+            except Exception as e:
+                logger.error(f"Error fetching wallet data: {e}")
                 registered_ip = "127.0.0.1"
+                owner_phone = "+34000000000"
             
             # 2. DATOS DEL TITULAR (CARDHOLDER)
             holder_email = f"{agent_id[:12]}@agentpay.ai"
-            phone_dummy = "+34612345678" # <--- REQUISITO NUEVO: Teléfono para 3D Secure
+            phone_number = owner_phone # <--- AHORA USA EL TELÉFONO REAL DEL PROPIETARIO
             
             # Buscamos si ya existe el titular
             holders = stripe.issuing.Cardholder.list(limit=1, email=holder_email)
@@ -1294,7 +1302,7 @@ class UniversalEngine:
                     stripe.issuing.Cardholder.modify(
                         cardholder.id,
                         status='active',
-                        phone_number=phone_dummy, # Actualizamos teléfono
+                        phone_number=phone_number, # Usa teléfono real del propietario
                         individual={
                             "first_name": "Agent",
                             "last_name": "User",
@@ -1312,7 +1320,7 @@ class UniversalEngine:
                 cardholder = stripe.issuing.Cardholder.create(
                     name="Agent Pay User",
                     email=holder_email,
-                    phone_number=phone_dummy, # <--- AQUÍ ESTABA EL ERROR
+                    phone_number=phone_number, # <--- AHORA USA TELÉFONO REAL
                     status="active",
                     type="individual",
                     individual={
