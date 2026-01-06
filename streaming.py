@@ -117,31 +117,69 @@ class StreamingMoney:
 
     def _flush_buffer_to_sql(self, agent_id, vendor, amount):
         """
-        Escritura lenta en SQL (Batch Update).
-        Esto ocurre 1 vez cada 50 paquetes, reduciendo la carga de la DB en un 98%.
+        Asentamiento con DOBLE ENTRADA (Contabilidad Real).
+        Usa LedgerManager para registro inmutable y auditable.
         """
+        import uuid
+        from ledger import LedgerManager
+        
         try:
-            logger.info(f"💾 [FLUSH] Asentando ${amount:.4f} a SQL para {vendor}")
+            logger.info(f"💾 [FLUSH] Asentando ${amount:.4f} con doble entrada para {vendor}")
             
-            # 1. Registrar en Ledger (Transaction Log)
+            # 1. Inicializar Ledger Manager
+            ledger = LedgerManager(self.db)
+            
+            # 2. Obtener/Crear cuentas contables
+            agent_acc_id = ledger.get_or_create_account(agent_id, acc_type="LIABILITY")
+            vendor_acc_id = ledger.get_or_create_account(vendor, name=f"Vendor: {vendor}", acc_type="LIABILITY")
+            
+            if not agent_acc_id or not vendor_acc_id:
+                raise Exception("No se pudieron crear cuentas contables")
+            
+            # 3. Generar TX ID único
+            tx_id = f"stream_settle_{str(uuid.uuid4())[:8]}"
+            
+            # 4. REGISTRO INMUTABLE (Doble Entrada)
+            # DEBIT del agente: reduce su pasivo (le quitamos dinero)
+            # CREDIT al vendor: aumenta su pasivo (le damos dinero)
+            ledger.record_entry(
+                transaction_id=tx_id,
+                movements=[
+                    {"account_id": agent_acc_id, "amount": amount, "type": "DEBIT"},
+                    {"account_id": vendor_acc_id, "amount": amount, "type": "CREDIT"}
+                ]
+            )
+            
+            # 5. Registrar en Transaction Log (Vista rápida)
             self.db.table("transaction_logs").insert({
                 "agent_id": agent_id,
                 "vendor": vendor,
                 "amount": amount,
                 "status": "APPROVED",
-                "reason": f"Streaming Batch Settlement (Auto-Flush)",
+                "reason": f"Streaming Batch Settlement (Ledger TX: {tx_id})",
                 "created_at": datetime.utcnow().isoformat()
             }).execute()
             
-            # 2. Actualizar Saldo Real en Wallet (Fuente de Verdad)
+            # 6. Actualizar Wallet (Vista rápida para el usuario)
             current = self.db.table("wallets").select("balance").eq("agent_id", agent_id).single().execute()
             new_bal = float(current.data['balance']) - amount
-            
             self.db.table("wallets").update({"balance": new_bal}).eq("agent_id", agent_id).execute()
+            
+            logger.success(f"📒 [LEDGER] Asentamiento completo: {tx_id}")
             
         except Exception as e:
             logger.critical(f"🔥 FALLO DE ASENTAMIENTO SQL: {e}. El dinero está en el limbo de Redis.")
-            # En producción: Guardar en cola de reintentos (DLQ)
+            # Guardar en Dead Letter Queue para reintento
+            try:
+                self.redis.rpush("failed_settlements_dlq", json.dumps({
+                    "agent_id": agent_id,
+                    "vendor": vendor,
+                    "amount": amount,
+                    "error": str(e),
+                    "timestamp": datetime.utcnow().isoformat()
+                }))
+            except:
+                pass
 
     def end_stream(self, agent_id, vendor):
         """
