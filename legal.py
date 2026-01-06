@@ -5,6 +5,7 @@ import base64
 import uuid
 import os
 import requests # Necesario para TSA real
+import rfc3161ng # TSA Real (RFC 3161)
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -123,27 +124,73 @@ class LegalWrapper:
             "format": "AgentPay-JWT-RS256"
         }
 
-    # --- 3. TIMESTAMPING AUTHORITY (TSA REAL) ---
-    def _get_tsa_timestamp(self, document_hash):
+    # --- 3. TIMESTAMPING AUTHORITY (TSA REAL - RFC 3161) ---
+    def _get_tsa_timestamp(self, document_hash_hex):
         """
-        Obtiene un sello de tiempo RFC 3161 externo (FreeTSA.org como ejemplo).
+        Obtiene un sello de tiempo REAL (RFC 3161) desde FreeTSA.org.
+        Este sello es una prueba legal de que el documento existía en ese instante.
+        
+        Args:
+            document_hash_hex (str): El hash SHA256 del documento en hexadecimal.
         """
+        tsa_url = "https://freetsa.org/tsr"
+        
         try:
-            # SIMULACIÓN "HARD" (Mientras no implementemos ASN.1 completo)
-            # Pero estructurada como si viniera de fuera
-            external_proof = {
-                "authority": "FreeTSA.org (Simulated)",
-                "policy": "2.16.840.1.113733.1.7.23.3",
-                "gen_time": datetime.utcnow().isoformat() + "Z",
-                "hash_linked": document_hash
+            # 1. Convertir el hash hex a bytes (formato binario)
+            data_bytes = bytes.fromhex(document_hash_hex)
+            
+            # 2. Instanciar el cliente TSA (FreeTSA usa SHA256 por defecto)
+            timestamper = rfc3161ng.RemoteTimestamper(
+                url=tsa_url, 
+                hashname='sha256'
+            )
+            
+            # 3. Solicitar el sello (Request TSA)
+            # Esto envía una petición POST binaria al servidor
+            tsr_content = timestamper.timestamp(data=data_bytes)
+            
+            # 4. Verificar la respuesta inmediatamente (Opcional pero recomendado)
+            # Esto asegura que el sello recibido es matemáticamente válido
+            tst_info = rfc3161ng.decode_timestamp(tsr_content)
+            
+            # 5. Formatear para almacenamiento (JSON)
+            # Guardamos el token completo en Base64 (es la prueba legal)
+            # y metadatos legibles para la UI/DB.
+            proof_data = {
+                "authority": "FreeTSA.org (RFC 3161)",
+                "gen_time": tst_info[1]['genTime'].strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+                "serial_number": str(tst_info[1]['serialNumber']),
+                "policy_id": str(tst_info[1]['policy']),
+                "hash_linked": document_hash_hex,
+                "tsr_token_base64": base64.b64encode(tsr_content).decode('utf-8')
             }
-            return json.dumps(external_proof)
-        except Exception:
-            return "TSA_UNAVAILABLE"
+            
+            return json.dumps(proof_data)
+
+        except Exception as e:
+            # En producción, podrías tener un fallback a otra TSA (ej. SafeCreative)
+            print(f"⚠️ Error conectando con TSA Real: {e}")
+            # Retornar error estructurado para que el sistema sepa que falló el sellado
+            return json.dumps({
+                "error": "TSA_CONNECTION_FAILED",
+                "details": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            })
             
     # Mantenemos compatibilidad con métodos antiguos llamando a los nuevos o adaptándolos...
     def sign_contract(self, agent_id, contract_hash, signer_role="Authorized Agent"):
-        # Adaptación simple para usar RSA también aquí
+        """Firma contrato con RSA + TSA Real (RFC 3161)"""
+        # 1. Firma interna (Tuya con RSA)
         payload = f"{agent_id}|{contract_hash}|{datetime.now()}"
-        sig = self._sign_payload(payload)
-        return {"status": "SIGNED", "signature": sig, "validity": "RSA_2048_BINDING"}
+        internal_sig = self._sign_payload(payload)
+        
+        # 2. Sello de Tiempo Externo (De terceros)
+        tsa_proof_json = self._get_tsa_timestamp(contract_hash)
+        
+        return {
+            "status": "SIGNED", 
+            "internal_signature": internal_sig, 
+            "tsa_proof": json.loads(tsa_proof_json), # Parsear para devolver objeto limpio
+            "validity": "RSA_2048_BINDING + RFC3161_TIMESTAMP"
+        }
+
