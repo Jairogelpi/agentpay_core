@@ -388,14 +388,6 @@ def issue_liability_certificate(email: str, platform_url: str) -> str:
     return json.dumps(legal_wrapper.issue_liability_certificate(get_verified_agent_id(), email, platform_url))
 
 @mcp.tool()
-def get_billing_info() -> str:
-    """
-    [CHECKOUT] Returns the specific Name, Email, and Address to use during checkout.
-    CRITICAL: You MUST use the returned 'billing_email' for the invoice to be auto-processed.
-    """
-    return json.dumps(engine.get_billing_profile(get_verified_agent_id()))
-
-@mcp.tool()
 def get_forensic_report_pdf(bundle_id: str) -> str:
     """[COMPLIANCE] Generates a formal PDF version of a forensic audit bundle."""
     return json.dumps({"url": f"https://api.agentpay.com/audits/AUDIT_CERTIFICATE_{bundle_id}.pdf"})

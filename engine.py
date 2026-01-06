@@ -2758,41 +2758,6 @@ class UniversalEngine:
             logger.error(f"❌ Error activando Issuing para {agent_id}: {e}")
             return {"status": "ERROR", "message": str(e)}
 
-    def get_billing_profile(self, agent_id):
-        """
-        Retorna la 'ficha de facturación' que el agente (o humano) debe usar
-        al rellenar formularios en vendors externos.
-        Garantiza que la factura llegue al sistema (Zero-Touch).
-        """
-        try:
-            wallet = self.db.table("wallets").select("*").eq("agent_id", agent_id).single().execute()
-            if not wallet.data:
-                return None
-                
-            data = wallet.data
-            owner_name = data.get("owner_name", "Agent")
-            
-            # El Email Mágico Inbound
-            # Si tienes un dominio configurado, úsalo. Si no, fallback al del registro.
-            # Idealmente: agent_id@inbound.tudominio.com
-            inbound_email = f"{agent_id}@inbound.agentpay.io" # Configurable por ENV
-            
-            return {
-                "billing_name": f"{owner_name} (AgentPay)",
-                "billing_email": inbound_email, # <--- LA CLAVE DE TODO
-                "billing_address": {
-                    "line1": "Calle de la Innovación 1",
-                    "city": "Madrid",
-                    "postal_code": "28001",
-                    "country": "ES"
-                },
-                "vat_number": data.get("tax_id", "EU-VAT-PENDING"),
-                "instructions": "Use ALWAYS this email for invoices. Do not use personal email."
-            }
-        except Exception as e:
-            logger.error(f"Error fetching billing profile: {e}")
-            return None
-
     # --- PILLAR 3: SELF-LEARNING (Auto-Whitelist) ---
     def add_to_trusted_services(self, agent_id, vendor_domain):
         """

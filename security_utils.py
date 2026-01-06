@@ -47,34 +47,3 @@ def check_domain_age(vendor):
     except Exception as e:
         logger.warning(f"   ↳ Error WHOIS: {e}")
         return {"age_days": 0, "status": "HIDDEN", "error": str(e)}
-
-# --- SECURITY UTILS ---
-from cryptography.fernet import Fernet
-import os
-
-def get_cipher():
-    # En producción, esto viene de KMS o ENV
-    key = os.getenv("ENCRYPTION_KEY")
-    if not key:
-        # Fallback para dev (NO USAR EN PROD REAL)
-        # Generamos una clave determinista basada en el secreto de la app
-        base = os.getenv("SUPABASE_KEY", "default-insecure-key-padding-32bytes")[:32]
-        import base64
-        key = base64.urlsafe_b64encode(base.encode().ljust(32)[:32])
-    return Fernet(key)
-
-def encrypt_password(raw_password):
-    try:
-        f = get_cipher()
-        return f.encrypt(raw_password.encode()).decode()
-    except Exception as e:
-        logger.error(f"Encryption error: {e}")
-        return raw_password
-
-def decrypt_password(encrypted_token):
-    try:
-        f = get_cipher()
-        return f.decrypt(encrypted_token.encode()).decode()
-    except Exception as e:
-        logger.error(f"Decryption error: {e}")
-        return encrypted_token
