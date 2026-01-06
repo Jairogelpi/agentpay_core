@@ -2651,8 +2651,7 @@ class UniversalEngine:
                     "status": "COMPLETED"
                 }).execute()
 
-                    "status": "COMPLETED"
-                }).execute()
+
 
         # 2. GASTOS (El dinero sale de la tarjeta)
         elif event['type'] == 'issuing_authorization.request':
