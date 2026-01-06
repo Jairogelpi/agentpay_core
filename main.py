@@ -639,27 +639,64 @@ async def brevo_inbound_webhook(request: Request):
                 }).execute()
                 logger.success(f"✅ Ingested email for {real_agent_id}")
 
-                # [NUEVO] AUTO-MATCHING REAL
-                # Solo procesar si parece una factura y tenemos el ID del agente
-                if real_agent_id and any(x in subject.lower() for x in ["receipt", "invoice", "factura", "pedido"]):
+                # [AUTO-MATCHING] Procesar si parece factura
+                if real_agent_id and any(x in subject.lower() for x in ["receipt", "invoice", "factura", "pedido", "order", "confirmation"]):
                     
                     logger.info(f"📧 Procesando posible factura para {real_agent_id}...")
                     
-                    # Llamada a la IA con los datos REALES
-                    match = await match_receipt_to_transaction(body, real_agent_id, engine.db)
+                    # A. Buscar PDFs adjuntos (Brevo envía downloadToken)
+                    attachments = item.get("Attachments", [])
+                    pdf_url = None
                     
-                    if match.get("match_found"):
-                        tx_id = match.get("transaction_id")
+                    for att in attachments:
+                        filename = att.get("Name", "").lower()
+                        download_token = att.get("DownloadToken")
                         
-                        # Actualizamos la DB real
-                        engine.db.table("transaction_logs").update({
-                            "receipt_status": "VERIFIED",
-                            "receipt_url": "email_content_indexed" # Opcional: guardar el body en otra tabla
-                        }).eq("id", tx_id).execute()
+                        if download_token and (filename.endswith(".pdf") or "invoice" in filename or "receipt" in filename):
+                            # Construir URL de descarga de Brevo
+                            pdf_url = f"https://api.brevo.com/v3/inbound/attachments/{download_token}"
+                            logger.info(f"📎 PDF encontrado: {filename}")
+                            break
+                    
+                    # B. Si hay PDF, usar GPT-4 Vision para analizarlo
+                    if pdf_url:
+                        from ai_guard import verify_invoice_match
                         
-                        logger.success(f"✅ FACTURA ENCONTRADA AUTOMÁTICAMENTE: TX {tx_id}")
+                        # Buscar transacción reciente para comparar
+                        from datetime import datetime, timedelta
+                        yesterday = (datetime.utcnow() - timedelta(days=1)).isoformat()
+                        pending_txs = engine.db.table("transaction_logs").select(
+                            "id, vendor, amount"
+                        ).eq("agent_id", real_agent_id).eq("status", "APPROVED").gte(
+                            "created_at", yesterday
+                        ).limit(1).execute()
+                        
+                        if pending_txs.data:
+                            tx = pending_txs.data[0]
+                            # GPT-4 Vision analiza el PDF
+                            vision_result = await verify_invoice_match(tx['vendor'], float(tx['amount']), pdf_url)
+                            
+                            if vision_result.get("is_match"):
+                                engine.db.table("transaction_logs").update({
+                                    "invoice_status": "VERIFIED",
+                                    "invoice_url": pdf_url
+                                }).eq("id", tx['id']).execute()
+                                logger.success(f"✅ FACTURA PDF VERIFICADA POR VISIÓN: TX {tx['id']}")
+                            else:
+                                logger.warning(f"⚠️ PDF no coincide: {vision_result.get('notes')}")
                     else:
-                        logger.info("ℹ️ Email analizado, pero no coincide con ninguna transacción pendiente.")
+                        # C. Sin PDF, analizar cuerpo de texto
+                        match = await match_receipt_to_transaction(body, real_agent_id, engine.db)
+                        
+                        if match.get("match_found"):
+                            tx_id = match.get("transaction_id")
+                            engine.db.table("transaction_logs").update({
+                                "invoice_status": "VERIFIED",
+                                "invoice_url": "email_text_matched"
+                            }).eq("id", tx_id).execute()
+                            logger.success(f"✅ FACTURA (TEXTO) ENCONTRADA: TX {tx_id}")
+                        else:
+                            logger.info("ℹ️ Email analizado, pero no coincide con ninguna transacción pendiente.")
 
             except Exception as db_err:
                 logger.error(f"⚠️ Error guardando email: {db_err}")
