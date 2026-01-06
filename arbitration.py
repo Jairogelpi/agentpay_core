@@ -1,7 +1,9 @@
 import os
 import json
+import uuid
 from openai import OpenAI
 from loguru import logger
+from datetime import datetime
 
 # Juez Supremo IA
 MODELO_JUEZ = "gpt-4o"
@@ -16,12 +18,15 @@ class AIArbiter:
     """
     Juez Imparcial (The AI Judge).
     Analiza disputas de Escrow y emite veredictos vinculantes.
-    No defiende al agente (eso es el Lawyer), busca la VERDAD contractual.
+    Ahora con PODER EJECUTIVO (Execute Verdict).
     """
+    
+    def __init__(self, engine_instance=None):
+        self.engine = engine_instance # Inyección de dependencia para mover fondos
     
     def judge_dispute(self, transaction, claim_reason, agent_evidence, vendor_rebuttal=None):
         """
-        Analiza el contrato (descripción de transacción) vs la realidad (evidencia).
+        Analiza el contrato y EJECUTA la sentencia.
         """
         if not ARBITER_ENABLED:
             return {"verdict": "ERROR", "reason": "Arbiter AI Offline"}
@@ -33,6 +38,7 @@ class AIArbiter:
         Tu misión es emitir un veredicto justo e imparcial sobre esta disputa de fondos en Escrow.
         
         EL CONTRATO (Transacción):
+        - ID: {transaction.get('id')}
         - Vendor: {transaction.get('vendor')}
         - Item/Servicio: {transaction.get('description')} (= La promesa)
         - Monto: ${transaction.get('amount')}
@@ -70,8 +76,67 @@ class AIArbiter:
             )
             
             judgment = json.loads(response.choices[0].message.content)
+            
+            # --- FASE DE EJECUCIÓN (REAL MONEY MOVEMENT) ---
+            execution_report = self.execute_verdict(transaction.get('id'), transaction.get('agent_id'), transaction.get('amount'), judgment)
+            judgment["execution"] = execution_report
+            
             return judgment
             
         except Exception as e:
             logger.error(f"⚠️ Error en Juicio IA: {e}")
             return {"verdict": "MANUAL_REVIEW", "reason": f"AI Error: {str(e)}"}
+
+    def execute_verdict(self, transaction_id, agent_id, amount, verdict_json):
+        """
+        Ejecuta la sentencia final en la base de datos y pasarelas de pago.
+        """
+        decision = verdict_json.get("verdict")
+        logger.info(f"🔨 [ARBITER EXECUTION] Veredicto: {decision} para TX {transaction_id}")
+        
+        if not self.engine:
+            return {"status": "FAILED", "reason": "No Execution Engine linked."}
+            
+        result = {"status": "PENDING", "action": decision}
+
+        try:
+            if decision == "REFUND_AGENT":
+                # 1. Llamar al Engine para reembolsar (Redis + DB)
+                # OJO: Asumimos que _reverse_transaction maneja la lógica de reembolso
+                # Necesitamos pasar el agent_id y el monto
+                self.engine._reverse_transaction(agent_id, float(amount))
+                
+                # 2. Actualizar estado de disputa en DB
+                self.engine.db.table("disputes").upsert({
+                    "transaction_id": transaction_id,
+                    "status": "RESOLVED_REFUNDED",
+                    "verdict_json": verdict_json,
+                    "resolved_at": datetime.now().isoformat()
+                }).execute()
+                
+                result["status"] = "EXECUTED_REFUND"
+                logger.success(f"   ✅ [JUSTICE] Reembolso de ${amount} ejecutado para {agent_id}")
+
+            elif decision == "PAY_VENDOR":
+                # Liberar fondos al vendedor (En nuestro caso, simplemente marcamos como resuelto y 'Lost' para el agente)
+                # Si tuviéramos Hold en Stripe, aquí haríamos capture. Por ahora el dinero ya salió del wallet.
+                
+                self.engine.db.table("disputes").upsert({
+                    "transaction_id": transaction_id,
+                    "status": "RESOLVED_PAID",
+                    "verdict_json": verdict_json,
+                    "resolved_at": datetime.now().isoformat()
+                }).execute()
+                
+                result["status"] = "EXECUTED_PAYMENT"
+                logger.info(f"   ✅ [JUSTICE] Pago confirmado al vendedor. Reclamo cerrado.")
+
+            else: 
+                result["status"] = "UNKNOWN_VERDICT"
+        
+        except Exception as e:
+            logger.error(f"🔥 Error ejecutando sentencia: {e}")
+            result["status"] = "EXECUTION_ERROR"
+            result["error"] = str(e)
+            
+        return result
