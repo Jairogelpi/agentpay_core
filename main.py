@@ -233,6 +233,14 @@ engine = UniversalEngine()
 identity_mgr = IdentityManager(engine.db)
 legal_wrapper = LegalWrapper(db_client=engine.db)
 
+def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
+    """Dependencia de Seguridad: Valida el Bearer Token contra la DB."""
+    token = credentials.credentials
+    agent_id = engine.verify_agent_credentials(token)
+    if not agent_id:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    return agent_id
+
 # --- ENDPOINT DE VERIFICACIÓN PÚBLICA (JWKS) ---
 @app.get("/.well-known/jwks.json")
 async def jwks_endpoint():
@@ -292,13 +300,7 @@ if not os.path.exists("invoices"):
     os.makedirs("invoices")
 app.mount("/v1/invoices", StaticFiles(directory="invoices"), name="invoices")
 
-def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
-    """Dependencia de Seguridad: Valida el Bearer Token contra la DB."""
-    token = credentials.credentials
-    agent_id = engine.verify_agent_credentials(token)
-    if not agent_id:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
-    return agent_id
+
 
 @app.post("/v1/identity/twilio-webhook")
 async def twilio_webhook(request: Request, From: str = Form(...), Body: str = Form(...), To: str = Form(...)):
