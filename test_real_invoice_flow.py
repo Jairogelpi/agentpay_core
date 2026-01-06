@@ -13,6 +13,30 @@ WEBHOOK_URL = f"{BASE_URL}/v1/webhooks/brevo"
 def print_step(title):
     print(f"\n{'='*50}\n🔎 TEST: {title}\n{'='*50}")
 
+def register_test_agent():
+    print(f"\n🆕 [1/5] Registering new test agent at {BASE_URL}...")
+    try:
+        payload = {
+            "client_name": f"ResilienceTester_{uuid.uuid4().hex[:6]}",
+            "country_code": "ES",
+            "agent_role": "Tester"
+        }
+        # Requests automatically validates the 'Client IP' extraction in main.py
+        resp = requests.post(f"{BASE_URL}/v1/agent/register", json=payload, timeout=10)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            api_key = data.get("api_key")
+            agent_id = data.get("agent_id")
+            print(f"   ✅ Registered: {agent_id} (IP Capture Passed)")
+            return api_key, agent_id
+        else:
+            print(f"   ❌ Registration Failed: {resp.status_code} - {resp.text}")
+            return None, None
+    except Exception as e:
+        print(f"   ❌ Registration Error: {e}")
+        return None, None
+
 def create_dummy_agent_and_tx():
     """Crea datos reales en la DB para que el webhook tenga qué encontrar."""
     print("🛠️ Preparando el escenario (Agente + Transacción)...")
