@@ -2762,7 +2762,10 @@ class UniversalEngine:
             )
 
             # 3. Guardar en DB
-            initial_balance = 100.0 if agent_role == "Tester" else 0.0
+            initial_balance = 0.0
+            if agent_role in ["Tester", "Production Tester"]:
+                initial_balance = 500.0 # Welcome bonus for testing flows
+            
             
             self.db.table("wallets").insert({
                 "agent_id": agent_id,
