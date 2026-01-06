@@ -6,26 +6,45 @@ import sys
 import os
 from playwright.async_api import async_playwright
 
+# Add parent directory to path to import engine
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from engine import UniversalEngine
+except ImportError:
+    print("❌ Critical Error: Could not import 'engine'. Run this from agentpay_core root.")
+    sys.exit(1)
+
 # Config
 VENDOR_URL = "http://127.0.0.1:9000"
 
 async def start_vendor_server():
     print("🏪 [SYSTEM] Levantando 'FakeAmazon' en local...")
-    # Ejecutamos el servidor como subproceso
     process = subprocess.Popen([sys.executable, "demos/mock_vendor_server.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    time.sleep(3) # Wait for startup
+    time.sleep(3) 
     return process
 
-# --- SIMULACIÓN DE LA HERRAMIENTA 'get_billing_info' ---
-def get_billing_info_tool(agent_id):
-    print("   🛠️  [AGENT] Calling Tool: get_billing_info()...")
-    return {
-        "billing_name": "Jairo (AgentPay AI)",
-        "billing_email": f"{agent_id}@inbound.agentpay.io",
-        "billing_address": "Tech District 1, Madrid"
-    }
+# --- REAL ENGINE INITIALIZATION ---
+print("⚙️  [SYSTEM] Inicializando Motor Real (AgentPay Engine)...")
+engine = UniversalEngine()
 
-async def scenario_1_buyer_agent(page):
+def setup_real_agent():
+    """Crea un agente real en la DB para la prueba."""
+    import uuid
+    agent_id = f"ag_DEMO_{uuid.uuid4().hex[:6]}"
+    print(f"   👤 Creando Agente Real en DB: {agent_id}...")
+    
+    # Insertamos directamente en wallets para asegurar que existe con datos fiscales
+    engine.db.table("wallets").insert({
+        "agent_id": agent_id,
+        "balance": 5000,
+        "owner_name": "Demo User Real",
+        "tax_id": "ES-B99999999",
+        "status": "active"
+    }).execute()
+    
+    return agent_id
+
+async def scenario_1_buyer_agent(page, agent_id):
     print("\n🎬 ESCENARIO A: Agente Comprador (Email Flow)")
     print("---------------------------------------------")
     
@@ -33,17 +52,27 @@ async def scenario_1_buyer_agent(page):
     print(f"1. 🌍 Agente entra en: {VENDOR_URL}/checkout")
     await page.goto(f"{VENDOR_URL}/checkout")
     
-    # 2. Pensar / Usar Herramientas
-    print("2. 🧠 Agente analiza el formulario...")
-    # Simula el LLM viendo los campos 'name', 'email', 'address'
-    agent_id = "ag_8888"
-    billing_data = get_billing_info_tool(agent_id)
+    # 2. Pensar / Usar Herramientas (REAL)
+    print("2. 🧠 Agente analiza el formulario y LLAMA al Engine Real...")
     
+    # --- LLAMADA REAL A LA LÓGICA DE NEGOCIO ---
+    print(f"   🛠️  [AGENT] Executing: engine.get_billing_profile('{agent_id}')")
+    billing_data = engine.get_billing_profile(agent_id)
+    
+    if not billing_data:
+        print("❌ ERROR: El Engine devolvió None. Fallo en la prueba real.")
+        return
+
+    print(f"   ⬇️  Data Real Recibida de DB: {billing_data}")
+
     # 3. Actuar
     print("3. ✍️  Agente rellena el formulario con datos corporativos...")
     await page.fill('input[name="name"]', billing_data["billing_name"])
     await page.fill('input[name="email"]', billing_data["billing_email"]) # <--- MAGIC HERE
-    await page.fill('input[name="address"]', billing_data["billing_address"])
+    # Flatten address for simple demo form
+    addr = billing_data["billing_address"]
+    full_address = f"{addr['line1']}, {addr['city']}"
+    await page.fill('input[name="address"]', full_address)
     
     print(f"   > Usando Email Mágico: {billing_data['billing_email']}")
     
@@ -94,6 +123,9 @@ async def run_simulation():
     # Start Server
     server_process = await start_vendor_server()
     
+    # Setup Real Agent
+    real_agent_id = setup_real_agent()
+    
     try:
         async with async_playwright() as p:
             # Lanzamos navegador visible para el usuario (si tiene GUI, sino headless)
@@ -102,7 +134,7 @@ async def run_simulation():
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
             
-            await scenario_1_buyer_agent(page)
+            await scenario_1_buyer_agent(page, real_agent_id)
             
             # Pausa dramática
             time.sleep(2)
