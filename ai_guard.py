@@ -355,3 +355,84 @@ async def verify_invoice_match(vendor: str, amount: float, file_url: str):
     except Exception as e:
         logger.error(f"❌ Invoice Verification Failed: {e}")
         return {"is_match": True, "confidence": 0, "reason": "AI Error - Defaulting to Match"}
+
+
+# ==========================================
+# CAPA 6: AUTO-MATCH RECEIPT TO TRANSACTION
+# ==========================================
+async def match_receipt_to_transaction(email_body: str, agent_id: str, db_client):
+    """
+    Analiza el cuerpo de un email entrante y busca si coincide con 
+    alguna transacción pendiente de ese agente.
+    Retorna el ID de la transacción si hay match.
+    """
+    if not AI_ENABLED:
+        return {"match_found": False, "reason": "AI Offline"}
+    
+    # 1. Buscar transacciones recientes (últimas 24h) con invoice_status PENDING
+    try:
+        from datetime import datetime, timedelta
+        yesterday = (datetime.utcnow() - timedelta(days=1)).isoformat()
+        
+        pending_txs = db_client.table("transaction_logs").select(
+            "id, vendor, amount, description, created_at"
+        ).eq("agent_id", agent_id).eq("status", "APPROVED").gte(
+            "created_at", yesterday
+        ).execute()
+        
+        if not pending_txs.data:
+            logger.info(f"📧 No hay transacciones pendientes para {agent_id}")
+            return {"match_found": False, "reason": "No pending transactions"}
+        
+        # 2. Pedir a la IA que haga el match
+        tx_list = "\n".join([
+            f"- ID: {tx['id']} | Vendor: {tx['vendor']} | Amount: ${tx['amount']}" 
+            for tx in pending_txs.data
+        ])
+        
+        system_prompt = """
+        You are a financial reconciliation AI. 
+        Given an EMAIL BODY (likely a receipt or invoice) and a LIST of PENDING TRANSACTIONS,
+        determine if the email matches any transaction.
+        
+        Return JSON:
+        {
+            "match_found": boolean,
+            "transaction_id": "UUID or null",
+            "confidence": 0-100,
+            "extracted_vendor": "string",
+            "extracted_amount": float or null,
+            "reason": "Short explanation"
+        }
+        """
+        
+        user_prompt = f"""
+        PENDING TRANSACTIONS FOR AGENT {agent_id}:
+        {tx_list}
+        
+        EMAIL BODY:
+        ---
+        {email_body[:2000]}
+        ---
+        
+        Does this email match any of the transactions above?
+        """
+        
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.0
+        )
+        
+        result = json.loads(response.choices[0].message.content)
+        logger.info(f"🔍 AI Match Result: {result}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Receipt Matching Failed: {e}")
+        return {"match_found": False, "reason": str(e)}
+

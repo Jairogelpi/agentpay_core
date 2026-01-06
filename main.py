@@ -29,6 +29,7 @@ from engine import UniversalEngine
 from models import TransactionRequest, CreditNoteRequest
 from identity import IdentityManager
 from fastmcp import FastMCP
+from ai_guard import match_receipt_to_transaction
 
 # --- OPENTELEMETRY IMPORTS ---
 from opentelemetry import trace
