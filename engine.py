@@ -112,7 +112,7 @@ class UniversalEngine:
     def legal_wrapper(self):
         if self._legal_wrapper is None:
             from legal import LegalWrapper 
-            self._legal_wrapper = LegalWrapper()
+            self._legal_wrapper = LegalWrapper(self.db) # Inject DB for revocation checks
         return self._legal_wrapper
 
     @property
