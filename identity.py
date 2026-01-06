@@ -107,12 +107,16 @@ class IdentityManager:
             logger.debug(f"   📬 [IDENTITY] Email encontrado: {last_email.get('subject')}")
 
             # 3. Usar la IA para leerlo
-            extracted_code = self.parse_inbound_email({
+            analysis = self.parse_inbound_email({
                 "subject": last_email.get('subject', ''),
                 "body": last_email.get('body_text', '')
             })
             
-            return extracted_code
+            # Si se solicita solo el código (legacy), devolvemos el valor
+            if isinstance(analysis, dict):
+                return analysis.get("value", "") # Return extracted value directly to keep tools simple
+            
+            return analysis
 
         except Exception as e:
             logger.error(f"❌ Error Checking Inbox: {e}")
@@ -185,25 +189,33 @@ class IdentityManager:
             
         try:
             prompt = f"""
-            Analiza este email y extrae ÚNICAMENTE el código de verificación (OTP) o la URL de aprobación.
+            Analiza este email y extrae DATOS DE ACCIÓN.
+            Prioridad:
+            1. CÓDIGO DE VERIFICACIÓN (OTP) numérico (Ej: 123456).
+            2. ENLACE DE FACTURA/INVOICE (PDF, JPG, Link).
+            3. ENLACE DE APROBACIÓN (approve?token=...).
             
             ASUNTO: {subject}
             CUERPO: {body}
             
-            Si hay un código numérico, responde SOLO con el número.
-            Si hay un enlace de aprobación (approve?token=...), responde SOLO con la URL.
-            Si no hay nada, responde "NO_CODE".
+            Responde en JSON STRICTO:
+            {{
+                "type": "OTP" | "INVOICE" | "APPROVAL" | "NONE",
+                "value": "el código o la url extraída",
+                "confidence": 0-100
+            }}
             """
             
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
                 temperature=0.0
             )
-            return response.choices[0].message.content.strip()
+            return json.loads(response.choices[0].message.content.strip())
         except Exception as e:
             logger.error(f"Error AI Extracting: {e}")
-            return "AI_PARSING_ERROR"
+            return {"type": "ERROR", "value": str(e)}
 
     # --- AÑADIR DENTRO DE class IdentityManager ---
     
