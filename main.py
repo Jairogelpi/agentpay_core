@@ -1105,6 +1105,35 @@ async def generate_credit_note(request: CreditNoteRequest, agent_id: str = Depen
         logger.error(f"Error generando Credit Note: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/v1/accounting/upload_invoice")
+async def upload_invoice(req: dict):
+    """
+    Sube factura de proveedor para conciliación (Base64). 
+    Espera JSON con: transaction_id, file_name, file_base64
+    """
+    import base64
+    try:
+        if not req.get("file_base64") or not req.get("transaction_id"):
+             return {"error": "Missing file_base64 or transaction_id"}
+             
+        file_bytes = base64.b64decode(req["file_base64"])
+        
+        # Determine mime type simplistic check
+        fname = req.get("file_name", "invoice.pdf")
+        mime = "application/pdf"
+        if fname.lower().endswith((".jpg", ".jpeg", ".png")):
+            mime = "image/jpeg"
+            
+        return await engine.attach_vendor_invoice(
+            transaction_id=req["transaction_id"],
+            file_bytes=file_bytes,
+            file_name=fname,
+            content_type=mime
+        )
+    except Exception as e:
+        logger.error(f"Upload error: {e}")
+        return {"error": str(e)}
+
 # --- M2M MARKET API ---
 @app.post("/v1/market/quote")
 async def market_quote(req: dict):

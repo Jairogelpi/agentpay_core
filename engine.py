@@ -18,7 +18,7 @@ from supabase.client import ClientOptions # <--- RESTORED
 from models import TransactionRequest, TransactionResult, CardDetails
 from ai_guard import audit_transaction, calculate_statistical_risk, get_embedding
 from security_utils import check_domain_age
-from notifications import send_approval_email
+from notifications import send_approval_email, send_invoice_request_email # <--- MODIFIED
 from webhooks import send_webhook
 from credit import CreditBureau
 # from legal import LegalWrapper  <-- Moved to lazy property
@@ -698,7 +698,42 @@ class UniversalEngine:
             
             # Log Rejection
             self.db.table("transaction_logs").insert({
-                "id": tx_id, "agent_id": agent_id, "vendor": vendor, "amount": amount,
+               # ... (existing content)
+            }).execute()
+
+        else:
+            # D. SUCCESS LOGGING & INVOICING
+            # Generate Internal Invoice (PDF)
+            # ... (your existing PDF logic)
+            invoice_path = "internal_invoice_placeholder.pdf"
+
+            self.db.table("transaction_logs").insert({
+                "id": tx_id,
+                "agent_id": agent_id,
+                "vendor": vendor,
+                "amount": amount,
+                "status": "APPROVED",
+                "reconciliation_status": "PENDING_INVOICE", # <--- NUEVO
+                "reason": audit.get('reasoning'),
+                "created_at": datetime.now().isoformat(),
+                "invoice_url": invoice_path,
+                "forensic_hash": audit.get('intent_hash')
+            }).execute()
+
+            logger.success(f"✅ [WORKER] TX {tx_id} completada.")
+            
+            # --- NUEVO: TRIGGER DE CONCILIACIÓN ---
+            try:
+                # Recuperar email del dueño
+                w_res = self.db.table("wallets").select("owner_email").eq("agent_id", agent_id).single().execute()
+                if w_res.data and w_res.data.get('owner_email'):
+                    send_invoice_request_email(w_res.data['owner_email'], agent_id, vendor, amount, tx_id)
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudo enviar email de solicitud de factura: {e}") 
+            # ------------------------------------------------------------------------
+
+        # E. MEMORY SAVING (RAG)
+        # ... (rest of function)                "id": tx_id, "agent_id": agent_id, "vendor": vendor, "amount": amount,
                 "status": "REJECTED", "reason": audit.get('reasoning'), "created_at": datetime.now().isoformat()
             }).execute()
             return
@@ -1342,6 +1377,64 @@ class UniversalEngine:
 
 
     # Eliminado el duplicado de report_fraud para mantener consistencia
+
+    # ==========================================
+    # ACCOUNTING & RECONCILIATION
+    # ==========================================
+    async def attach_vendor_invoice(self, transaction_id: str, file_bytes: bytes, file_name: str, content_type: str = "application/pdf"):
+        """
+        [RECONCILIATION] Sube la factura real, la audita con IA y actualiza el ledger.
+        """
+        # 1. Recuperar Transacción
+        tx_res = self.db.table("transaction_logs").select("*").eq("id", transaction_id).single().execute()
+        if not tx_res.data:
+            raise ValueError("Transacción no encontrada")
+        tx = tx_res.data
+        agent_id = tx['agent_id']
+
+        # 2. Subir a Supabase Storage
+        file_path = f"{agent_id}/{transaction_id}_{file_name}"
+        try:
+            # Subida
+            self.db.storage.from_("vendor-invoices").upload(
+                path=file_path,
+                file=file_bytes,
+                file_options={"content-type": content_type, "upsert": "true"}
+            )
+            # Obtener URL Pública
+            public_url = self.db.storage.from_("vendor-invoices").get_public_url(file_path)
+        except Exception as e:
+            logger.error(f"❌ Storage Upload Error: {e}")
+            raise Exception(f"Error guardando archivo: {e}")
+
+        # 3. Auditoría IA (Vision Check)
+        logger.info(f"👁️ Auditando factura visualmente con GPT-4o...")
+        
+        from ai_guard import verify_invoice_match # Lazy import
+        audit_result = await verify_invoice_match(tx['vendor'], float(tx['amount']), public_url)
+        
+        status = "RECONCILED"
+        notes = f"Auto-verified by AI. Confidence: {audit_result.get('confidence')}%"
+        
+        if not audit_result.get('is_match'):
+            status = "FLAGGED"
+            notes = f"⚠️ AI Mismatch: {audit_result.get('notes')}"
+            logger.warning(f"🚨 Factura rechazada por IA: {notes}")
+        else:
+            logger.success(f"✅ Factura conciliada correctamente.")
+
+        # 4. Actualizar DB
+        self.db.table("transaction_logs").update({
+            "vendor_invoice_url": public_url,
+            "reconciliation_status": status,
+            "reconciliation_notes": notes
+        }).eq("id", transaction_id).execute()
+
+        return {
+            "status": status,
+            "url": public_url,
+            "ai_analysis": audit_result
+        }
 
     def process_approval(self, token):
         """

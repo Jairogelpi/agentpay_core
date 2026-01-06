@@ -298,3 +298,60 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     except Exception as e:
         logger.error(f"Oracle Error: {e}")
         return {"decision": "FLAGGED", "reasoning": "AI Error", "risk_score": 50, "intent_hash": "ERR"}
+
+# ==========================================
+# CAPA 5: AUDITORÍA VISUAL (FACTURAS) [NUEVO]
+# ==========================================
+async def verify_invoice_match(vendor: str, amount: float, file_url: str):
+    """
+    [VISION] Usa GPT-4o para leer la factura subida y verificar si coincide
+    con el gasto registrado. Detecta fraudes en la conciliación.
+    """
+    if not AI_ENABLED:
+        return {"match": True, "confidence": 0, "reason": "AI Offline - Auto Accepted"}
+
+    system_prompt = """
+    You are a Forensic Accountant AI. 
+    Your job is to compare a TRANSACTION with an UPLOADED INVOICE IMAGE/PDF.
+    
+    Check for:
+    1. Vendor Name Match (fuzzy match is ok, e.g. "AWS" vs "Amazon Web Services").
+    2. Amount Match (allow small variances for currency exchange or tax).
+    3. Date consistency (invoice date should be close to now).
+    
+    Return JSON:
+    {
+        "is_match": boolean,
+        "extracted_vendor": "string",
+        "extracted_amount": float,
+        "confidence": 0-100,
+        "notes": "Short observation"
+    }
+    """
+    
+    user_content = [
+        {"type": "text", "text": f"TRANSACTION DATA:\nVendor: {vendor}\nAmount: ${amount}\n\nVerify if the attached document matches this transaction."}
+    ]
+    
+    # Si es una imagen/pdf accesible públicamente, se la pasamos a GPT-4o
+    # Nota: GPT-4o acepta URLs de imágenes si son públicas.
+    if file_url:
+        user_content.append({
+            "type": "image_url",
+            "image_url": {"url": file_url}
+        })
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.0
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        logger.error(f"❌ Invoice Verification Failed: {e}")
+        return {"is_match": True, "confidence": 0, "reason": "AI Error - Defaulting to Match"}

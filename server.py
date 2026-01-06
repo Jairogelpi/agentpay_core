@@ -191,6 +191,34 @@ def get_invoice_url(transaction_id: str) -> str:
     return json.dumps(engine.get_invoice_url(transaction_id))
 
 @mcp.tool()
+async def upload_vendor_invoice(transaction_id: str, file_name: str, file_base64: str) -> str:
+    """
+    [ACCOUNTING] Sube un PDF/Imagen de factura real para conciliar una transacción.
+    Recibe el archivo en base64. Ejecuta auditoría visual con IA.
+    """
+    try:
+        # Decodificar archivo
+        file_bytes = base64.b64decode(file_base64)
+        
+        # Determinar mime type básico
+        mime_type = "application/pdf"
+        if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
+            mime_type = "image/jpeg"
+
+        # Llamar al Engine
+        result = await engine.attach_vendor_invoice(
+            transaction_id=transaction_id, 
+            file_bytes=file_bytes, 
+            file_name=file_name,
+            content_type=mime_type
+        )
+        
+        return json.dumps(result)
+    except Exception as e:
+        logger.error(f"Error uploading invoice: {e}")
+        return json.dumps({"error": str(e)})
+
+@mcp.tool()
 def dispute_transaction(transaction_id: str, reason: str) -> str:
     """[DISPUTE] Opens a dispute for a transaction (Agent-Initiated)."""
     return json.dumps(engine.dispute_transaction(get_verified_agent_id(), transaction_id, reason))

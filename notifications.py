@@ -240,3 +240,64 @@ def send_treasury_alert_email(to_email, balance, burn_rate, shortfall, reason):
     except Exception as e:
         logger.error(f"❌ [TREASURY EMAIL ERROR] {e}")
         return False
+
+def send_invoice_request_email(to_email, agent_id, vendor, amount, tx_id):
+    """
+    Envía solicitud de factura real al humano tras un gasto aprobado.
+    """
+    smtp_host = os.environ.get("SMTP_HOST", "smtp-relay.brevo.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", 2525))
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_pass = os.environ.get("SMTP_PASS")
+
+    if not smtp_user: return False
+
+    msg = MIMEMultipart()
+    msg['From'] = BREVO_VERIFIED_SENDER
+    msg['To'] = to_email
+    msg['Subject'] = f"🧾 Factura Requerida: {vendor} (${amount})"
+
+    # Enlace a tu frontend de conciliación
+    upload_link = f"https://dashboard.agentpay.ai/reconcile/{tx_id}"
+
+    body = f"""
+    <html>
+        <body style="font-family: Arial, sans-serif;">
+            <div style="padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
+                <h2 style="color: #2c3e50;">Conciliación de Gastos</h2>
+                <p>Tu agente <b>{agent_id}</b> ha completado un pago correctamente.</p>
+                
+                <table style="width: 100%; margin: 20px 0; border-collapse: collapse;">
+                    <tr style="background: #f8f9fa;">
+                        <td style="padding: 10px;">Proveedor:</td>
+                        <td style="padding: 10px;"><b>{vendor}</b></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px;">Monto:</td>
+                        <td style="padding: 10px;"><b>${amount}</b></td>
+                    </tr>
+                </table>
+
+                <p>Para cumplir con la normativa fiscal, por favor sube la factura original del proveedor.</p>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                    <a href="{upload_link}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                        📤 SUBIR FACTURA ORIGINAL
+                    </a>
+                </div>
+            </div>
+        </body>
+    </html>
+    """
+    msg.attach(MIMEText(body, 'html'))
+    
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        logger.info(f"📧 [INVOICE REQ] Solicitud enviada a {to_email}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ [SMTP ERROR] {e}")
+        return False
