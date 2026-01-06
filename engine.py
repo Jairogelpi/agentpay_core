@@ -2899,6 +2899,15 @@ class UniversalEngine:
                 try:
                     tz = pytz.timezone(tz_name)
                     now = datetime.now(tz)
+                    
+                    # 1. CHECK DE DÍA (Nuevo)
+                    # 0=Lunes, 4=Viernes, 5=Sábado, 6=Domingo
+                    allowed_days = working_hours.get('allowed_days', [0, 1, 2, 3, 4]) # Por defecto L-V
+                    
+                    if now.weekday() not in allowed_days:
+                        logger.warning(f"📅 [POLICY] Intento de gasto en fin de semana/festivo (Día: {now.weekday()})")
+                        return False, "📅 Operación rechazada: Fuera de días laborales permitidos."
+                        
                     start_hour = int(working_hours['start'].split(':')[0])
                     end_hour = int(working_hours['end'].split(':')[0])
                 
