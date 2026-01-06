@@ -456,6 +456,60 @@ class UniversalEngine:
             logger.error(f"❌ Error in treasury guard: {e}")
             return {"status": "ERROR", "message": str(e)}
 
+    def create_topup_session(self, agent_id: str, amount: float, direct_charge_token: str = None) -> dict:
+        """
+        Creates a Stripe Checkout Session OR executes a direct charge (Test Mode).
+        """
+        # A. DIRECT CHARGE (Test Mode / API)
+        if direct_charge_token:
+            try:
+                # 1. Charge
+                intent = stripe.PaymentIntent.create(
+                    amount=int(amount * 100),
+                    currency="usd",
+                    payment_method=direct_charge_token,
+                    confirm=True,
+                    description=f"Agent Topup {agent_id}",
+                    metadata={'agent_id': agent_id, 'type': 'TOPUP_DIRECT'},
+                    automatic_payment_methods={'enabled': True, 'allow_redirects': 'never'}
+                )
+                
+                # 2. Credit Wallet Immediately (Synchronous)
+                if intent.status == 'succeeded':
+                     current = self.db.table("wallets").select("balance").eq("agent_id", agent_id).single().execute()
+                     if current.data:
+                         new_bal = float(current.data['balance']) + amount
+                         self.db.table("wallets").update({"balance": new_bal}).eq("agent_id", agent_id).execute()
+                         logger.success(f"💰 Direct Topup: +${amount} to {agent_id}")
+                         return {"status": "SUCCESS", "new_balance": new_bal, "tx_id": intent.id}
+                
+                return {"status": "PENDING", "tx_id": intent.id}
+            except Exception as e:
+                logger.error(f"Direct Charge Failed: {e}")
+                raise e
+
+        # B. CHECKOUT SESSION (Human UI)
+        try:
+            session = stripe.checkout.Session.create(
+                payment_method_types=['card'],
+                line_items=[{
+                    'price_data': {
+                        'currency': 'usd',
+                        'product_data': {'name': f'Agent Topup ({agent_id})'},
+                        'unit_amount': int(amount * 100)
+                    }, 
+                    'quantity': 1
+                }],
+                mode='payment',
+                metadata={'agent_id': agent_id, 'type': 'TOPUP'},
+                success_url="https://agentpay.ai/success?session_id={CHECKOUT_SESSION_ID}",
+                cancel_url="https://agentpay.ai/cancel"
+            )
+            return {"checkout_url": session.url, "session_id": session.id}
+        except Exception as e:
+            logger.error(f"Failed to create topup session: {e}")
+            raise e
+
     def check_circuit_breaker(self, agent_id, kyc_level="UNVERIFIED"):
         """
         Fusible Financiero Indestructible (Redis)
@@ -2623,6 +2677,9 @@ class UniversalEngine:
                     "agent_id": agent_id,
                     "type": "TOPUP",
                     "amount": session['amount_total'] / 100,
+                    "status": "COMPLETED"
+                }).execute()
+
                     "status": "COMPLETED"
                 }).execute()
 

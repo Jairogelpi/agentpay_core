@@ -11,6 +11,10 @@ load_dotenv()
 BASE_URL = "https://www.agentpay.it.com"
 USER_EMAIL = "gelpierreape@gmail.com"
 
+# SUPABASE ADMIN KEYS (Normally found in local .env)
+# Not needed for API-based topup
+
+
 def run_prod_verification():
     print(f"🌍 CONNECTING TO PRODUCTION: {BASE_URL}")
     print("==================================================")
@@ -22,7 +26,7 @@ def run_prod_verification():
     try:
         reg_res = requests.post(f"{BASE_URL}/v1/agent/register", json={
             "client_name": client_name,
-            "country_code": "US",
+            "country_code": "ES",
             "agent_role": "Production Tester"
         }).json()
         
@@ -37,6 +41,22 @@ def run_prod_verification():
     except Exception as e:
         print(f"❌ Connection Error: {e}")
         return
+
+    # 1.5 REAL TOPUP VIA API (Test Card)
+    print("\n[1.5] Top-up Wallet using '/v1/wallet/topup' (Stripe Test Card)...")
+    try:
+        topup_res = requests.post(f"{BASE_URL}/v1/wallet/topup", json={
+            "agent_id": agent_id,
+            "amount": 1000.0,
+            "card_token": "pm_card_visa" # Magic token for Stripe Test Mode
+        }).json()
+        
+        if topup_res.get("status") == "SUCCESS":
+            print(f"   💰 Top-up Successful! Balance: ${topup_res.get('new_balance')}")
+        else:
+            print(f"   ⚠️ Top-up Status: {topup_res}")
+    except Exception as e:
+        print(f"   ❌ Top-up Failed: {e}")
 
     # 2. CONFIGURE EMAIL (Critical for notification)
     print("\n[2] Configuring Owner Email...")
