@@ -1435,14 +1435,16 @@ class UniversalEngine:
             # Opcional: Guardar el payment_intent.id en la DB para evitar duplicados lógicos futuros
             self.db.table("wallets").update({"balance": new_bal}).eq("agent_id", agent_id).execute()
             
-            # Registrar el log de la transacción usando el ID de Stripe como referencia
+            # Registrar el log de la transacción 
+            # FIX: Generar UUID válido para la DB, guardar Stripe ID en reason/metadata
+            log_uuid = str(uuid.uuid4())
             self.db.table("transaction_logs").insert({
-                "id": intent.id, # Usamos el ID de Stripe como ID de transacción para trazabilidad perfecta
+                "id": log_uuid, 
                 "agent_id": agent_id,
                 "vendor": "Stripe Topup",
                 "amount": amount,
                 "status": "APPROVED",
-                "reason": f"Recarga Automática (Idempotency Key: {idempotency_key})"
+                "reason": f"Recarga Automática (Stripe ID: {intent.id}) (Idempotency Key: {idempotency_key})"
             }).execute()
 
             logger.success(f"✅ DINERO INGRESADO: ${amount} (Nuevo saldo: ${new_bal})")
