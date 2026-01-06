@@ -2862,6 +2862,15 @@ class UniversalEngine:
         import pytz
         
         try:
+            # 0. REGLAS DE HIERRO (Nivel Plataforma) - Nadie se salte esto
+            GLOBAL_FORBIDDEN = ["casino", "poker", "onlyfans", "pornhub", "weapons", "drugs", "bovada", "betfair"]
+            
+            vendor_clean = self._normalize_domain(vendor)
+            for forbidden in GLOBAL_FORBIDDEN:
+                if forbidden in vendor_clean:
+                    logger.critical(f"🛑 BLOQUEO GLOBAL: Intento de compra en {vendor}")
+                    return False, "Violación de Términos de la Plataforma (Categoría Prohibida)"
+
             # 1. Obtener políticas desde Supabase
             policy_res = self.db.table("wallets").select("corporate_policies, agent_role").eq("agent_id", agent_id).single().execute()
             if not policy_res.data:
