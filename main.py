@@ -231,7 +231,62 @@ app.add_middleware(SecurityHeadersMiddleware) # <--- 2do Muro (Pure ASGI)
 security = HTTPBearer()
 engine = UniversalEngine()
 identity_mgr = IdentityManager(engine.db)
-legal_wrapper = LegalWrapper()
+legal_wrapper = LegalWrapper(db_client=engine.db)
+
+# --- ENDPOINT DE VERIFICACIÓN PÚBLICA (JWKS) ---
+@app.get("/.well-known/jwks.json")
+async def jwks_endpoint():
+    """
+    ESTÁNDAR MUNDIAL: Permite a AWS, Google o Stripe verificar
+    que los pasaportes emitidos por AgentPay son auténticos.
+    """
+    return legal_wrapper.get_public_jwks()
+
+# --- ENDPOINT DE REVOCACIÓN (KILL SWITCH) ---
+@app.post("/admin/security/revoke")
+async def revoke_identity(req: dict, authorization: str = Header(None)):
+    """
+    Botón de Pánico: Revoca la identidad legal de un agente inmediatamente.
+    Requiere clave maestra de administración.
+    """
+    # Verificación de seguridad simple (Mejorar en prod con os.getenv)
+    admin_secret = os.getenv('ADMIN_SECRET_KEY', 'admin-secret')
+    if authorization != f"Bearer {admin_secret}":
+         return JSONResponse(status_code=403, content={"error": "Unauthorized"})
+
+    agent_id = req.get("agent_id")
+    reason = req.get("reason", "Security Violation")
+
+    try:
+        engine.db.table("revoked_credentials").insert({
+            "agent_id": agent_id,
+            "revoked_at": datetime.utcnow().isoformat(),
+            "reason": reason
+        }).execute()
+        
+        # También baneamos la wallet por si acaso
+        engine.db.table("wallets").update({"status": "BANNED"}).eq("agent_id", agent_id).execute()
+        
+        # logger is not strictly defined here as global, reusing engine logger would be better or import loguru
+        # Assuming logger is available or skipping log for now to avoid NameError if not imported 
+        # (It seems usually imported in this project)
+        print(f"🚨 AGENT IDENTITY REVOKED: {agent_id} - Reason: {reason}")
+        return {"status": "REVOKED", "agent_id": agent_id}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/v1/legal/passport")
+async def get_passport(req: dict, agent_id: str = Depends(verify_api_key)):
+    # Nota: Asegúrate de pasar el nombre real o recuperarlo de la DB
+    # Recuperamos el owner_name de la wallet usando el agent_id autenticado
+    try:
+        wallet = engine.db.table("wallets").select("owner_name").eq("agent_id", agent_id).single().execute()
+        owner_name = wallet.data.get("owner_name", "Unknown Beneficiary") if wallet.data else "Unknown"
+        
+        return legal_wrapper.issue_kyc_passport(agent_id, owner_name)
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e)) # Retorna error si está revocado
+
 
 if not os.path.exists("invoices"):
     os.makedirs("invoices")

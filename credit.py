@@ -142,30 +142,60 @@ class CreditBureau:
 
     def evaluate_loan(self, agent_id, amount, reason):
         """
-        Evalúa una solicitud de crédito específica.
-        Checkea si el monto solicitado está dentro del límite del agente.
+        Evalúa y REGISTRA INMUTABLEMENTE la decisión.
         """
         eligibility = self.check_credit_eligibility(agent_id)
         
-        if not eligibility.get("eligible"):
-            return {
-                "status": "DENIED",
-                "reason": eligibility.get("reason", "Score too low"),
-                "max_allowed": 0
-            }
-            
+        # Lógica de decisión
+        status = "DENIED"
         limit = eligibility.get("credit_limit", 0)
-        
-        if amount > limit:
+        rejection_reason = eligibility.get("reason", "Score too low")
+
+        if eligibility.get("eligible"):
+            if amount <= limit:
+                status = "APPROVED"
+            else:
+                rejection_reason = f"Amount ${amount} exceeds limit ${limit}"
+
+        decision_data = {
+            "status": status,
+            "amount_requested": amount,
+            "credit_score_snapshot": eligibility.get("score"), # Guardamos el score exacto del momento
+            "tier_snapshot": eligibility.get("tier"),
+            "interest_rate": eligibility.get("interest_rate"),
+            "limit_snapshot": limit,
+            "reason_requested": reason,
+            "rejection_reason": rejection_reason if status == "DENIED" else None
+        }
+
+        # --- AUDIT TRAIL (LA CAJA NEGRA) ---
+        try:
+            # Hash de integridad (Simulado, en prod usaríamos firma de servidor HSM)
+            integrity_hash = "SHA256-PROOF-" + str(abs(hash(json.dumps(decision_data, sort_keys=True))))
+            
+            self.db.table("audit_trail").insert({
+                "event_type": "CREDIT_DECISION",
+                "agent_id": agent_id,
+                "snapshot_data": json.dumps(decision_data),
+                "created_at": datetime.datetime.utcnow().isoformat(),
+                "integrity_hash": integrity_hash 
+            }).execute()
+        except Exception as e:
+            logger.error(f"FALLO DE AUDITORÍA: No se pudo escribir en la caja negra: {e}")
+            # En banca, si falla el log, se deniega la operación por seguridad.
+            return {"status": "ERROR", "message": "Audit System Failure (Bank Grade Security)"}
+
+        # Retorno al cliente
+        if status == "APPROVED":
+             return {
+                "status": "APPROVED",
+                "amount": amount,
+                "interest_rate": eligibility.get("interest_rate"),
+                "message": f"Loan approved based on {eligibility.get('tier')} status."
+            }
+        else:
              return {
                 "status": "DENIED",
-                "reason": f"Amount ${amount} exceeds limit ${limit}",
+                "reason": rejection_reason,
                 "max_allowed": limit
             }
-            
-        return {
-            "status": "APPROVED",
-            "amount": amount,
-            "interest_rate": eligibility.get("interest_rate"),
-            "message": f"Loan approved based on {eligibility.get('tier')} status."
-        }
