@@ -141,8 +141,47 @@ async def handle_brevo_email(request: Request):
             except Exception as e:
                 logger.error(f"Error procesando adjunto: {e}")
 
-    # 3. ESCENARIO: SIN ADJUNTO (Solo texto "Gracias por su compra")
-    # Si no hay PDF, marcamos para Hunter
-    # TODO: Analizar body del email para links (fuera del scope actual)
+    # 3. ESCENARIO: SIN ADJUNTO (Posible Link de Descarga)
+    if not attachments:
+        logger.info("   🔍 Sin adjuntos. Buscando enlaces en el cuerpo...")
+        body_text = data.get('text', '') or data.get('html', '')
+        
+        # Heurística simple (En prod: Usar ai_guard.match_receipt_link(body_text))
+        # Buscamos patrones comunes de enlaces de facturas
+        import re
+        # Regex básico para encontrar URLs
+        urls = re.findall(r'(https?://[^\s<>"]+|www\.[^\s<>"]+)', body_text)
+        
+        potential_invoice_links = []
+        keywords = ['invoice', 'factura', 'receipt', 'download', 'descargar', 'billing']
+        
+        for url in urls:
+            # Check si la URL o el texto cercano (difícil en raw regex) parece relevante
+            # Aquí simplificamos revisando si la url tiene palabras clave o es un PDF
+            if any(k in url.lower() for k in keywords) or url.lower().endswith('.pdf'):
+                potential_invoice_links.append(url)
+        
+        if potential_invoice_links:
+            # Enviamos el primer link candidato al Hunter Agent para que intente descargarlo
+            # O lo guardamos en la transacción para revisión
+            logger.info(f"   🔗 Enlace detectado: {potential_invoice_links[0]}")
+            
+            # Buscamos la transacción reciente
+            candidates = engine.db.table("transaction_logs")\
+                .select("id")\
+                .eq("agent_id", agent_id)\
+                .eq("invoice_status", "PENDING_HUNT")\
+                .order("created_at", desc=True)\
+                .limit(1)\
+                .execute()
+                
+            if candidates.data:
+                tx_id = candidates.data[0]['id']
+                # Marcamos que hemos encontrado un link, podríamos activar un "Link Crawler Agent"
+                engine.db.table("transaction_logs").update({
+                    "invoice_status": "FOUND_LINK",
+                    "invoice_url": potential_invoice_links[0] # Guardamos el link raw por ahora
+                }).eq("id", tx_id).execute()
+                return {"status": "success", "type": "link_found", "url": potential_invoice_links[0]}
     
     return {"status": "processed"}

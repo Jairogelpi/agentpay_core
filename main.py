@@ -429,15 +429,8 @@ def authenticate_and_set_context(authorization: str):
     return agent_id
 
 # --- 3. HEALTH CHECK (UPTIME MONITORING) ---
-@app.get("/health")
+@app.get("/v1/health")
 async def health_check():
-    """
-    Endpoint CRÍTICO para Better Stack Uptime.
-    Si esto devuelve 200 OK -> El sistema está VIVO.
-    """
-    health_status = {"status": "ok", "components": {}}
-    
-    # Check 1: Redis
     try:
         if engine.redis_enabled:
             engine.redis.ping()
