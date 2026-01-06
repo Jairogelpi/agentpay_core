@@ -21,10 +21,10 @@ from security_utils import check_domain_age
 from notifications import send_approval_email
 from webhooks import send_webhook
 from credit import CreditBureau
-from legal import LegalWrapper
-from identity import IdentityManager
-from lawyer import AutoLawyer
-from forensic_auditor import ForensicAuditor
+# from legal import LegalWrapper  <-- Moved to lazy property
+# from identity import IdentityManager <-- Moved to lazy property
+# from lawyer import AutoLawyer <-- Moved to lazy property
+# from forensic_auditor import ForensicAuditor <-- Moved to lazy property
 import redis
 from integrations import send_slack_approval
 import boto3
@@ -59,11 +59,15 @@ class UniversalEngine:
         # Inicializamos el cliente con las opciones blindadas
         self.db: Client = create_client(url, key, options=options)
         self.credit_bureau = CreditBureau(self.db)
-        self.legal_wrapper = LegalWrapper()
+
+        
+        # LAZY LOADING VARIABLES
+        self._legal_wrapper = None
+        self._identity_mgr = None
+        self._lawyer = None
+        self._forensic_auditor = None
+        
         self.stream_key = "payment_events"  # Added for Event-Driven Architecture
-        self.identity_mgr = IdentityManager(self.db)
-        self.lawyer = AutoLawyer()
-        self.forensic_auditor = ForensicAuditor()
         
         # --- INICIO BLOQUE KMS (FIRMA DIGITAL) ---
         try:
@@ -98,6 +102,38 @@ class UniversalEngine:
              logger.warning(f"⚠️ Redis no disponible. Usando memoria RAM (Inseguro para prod). Error: {e}")
              self.redis_enabled = False
              self.transaction_velocity = {} 
+
+
+
+    # --- PATRÓN SINGLETON PEREZOSO (LAZY PROPERTY) ---
+    
+    @property
+    def legal_wrapper(self):
+        if self._legal_wrapper is None:
+            from legal import LegalWrapper 
+            self._legal_wrapper = LegalWrapper()
+        return self._legal_wrapper
+
+    @property
+    def identity_mgr(self):
+        if self._identity_mgr is None:
+            from identity import IdentityManager
+            self._identity_mgr = IdentityManager(self.db)
+        return self._identity_mgr
+
+    @property
+    def lawyer(self):
+        if self._lawyer is None:
+            from lawyer import AutoLawyer
+            self._lawyer = AutoLawyer()
+        return self._lawyer
+
+    @property
+    def forensic_auditor(self):
+        if self._forensic_auditor is None:
+            from forensic_auditor import ForensicAuditor
+            self._forensic_auditor = ForensicAuditor()
+        return self._forensic_auditor
 
     async def _save_transaction_memory(self, tx_id, text_content):
         """Genera y guarda el embedding para aprendizaje futuro (RAG)."""
