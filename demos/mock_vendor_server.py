@@ -76,12 +76,7 @@ HTML_ORDERS = """
             <th>Amount</th>
             <th>Action</th>
         </tr>
-        <tr>
-            <td>#ORD-123456</td>
-            <td>Dell PowerEdge Server</td>
-            <td>$1,200.00</td>
-            <td><a href="/download/invoice">⬇️ Download Invoice PDF</a></td>
-        </tr>
+        <!-- ROWS_HERE -->
     </table>
 </body>
 </html>
@@ -93,8 +88,20 @@ async def checkout_page():
 
 @app.post("/buy", response_class=HTMLResponse)
 async def buy_item(name: str = Form(...), email: str = Form(...), address: str = Form(...)):
-    print(f"\n[MERCHANT] 💰 New Order Placed!")
+    print(f"\n[MERCHANT] 💰 New Order Placed by {name}!")
     print(f"[MERCHANT] 📧 Sending Invoice to: {email}")
+    
+    # SAVE ORDER TO MEMORY
+    import random
+    order_id = f"ORD-{random.randint(10000,99999)}"
+    new_order = {
+        "id": order_id,
+        "item": "Dell PowerEdge Server",
+        "amount": "$1,200.00",
+        "date": "2026-01-06",
+        "email": email
+    }
+    orders.append(new_order)
     
     # Simular lógica del backend del vendedor
     if "inbound.agentpay.io" in email:
@@ -106,7 +113,20 @@ async def buy_item(name: str = Form(...), email: str = Form(...), address: str =
 
 @app.get("/orders", response_class=HTMLResponse)
 async def orders_page():
-    return HTML_ORDERS
+    # Build dynamic table
+    rows = ""
+    for o in orders:
+        rows += f"""
+        <tr>
+            <td>{o['id']}</td>
+            <td>{o['item']}</td>
+            <td>{o['amount']}</td>
+            <td><a href="/download/invoice">⬇️ Download Invoice PDF</a></td>
+        </tr>
+        """
+    
+    dynamic_html = HTML_ORDERS.replace("<!-- ROWS_HERE -->", rows)
+    return HTMLResponse(content=dynamic_html)
 
 @app.get("/download/invoice")
 async def download_invoice():
