@@ -690,7 +690,7 @@ class UniversalEngine:
         mcc_category = audit.get('mcc_category', 'services')
         clean_vendor = self._normalize_domain(vendor)
         
-        card = self._issue_virtual_card(agent_id, amount, clean_vendor, mcc_category)
+        card = self._issue_virtual_card(agent_id, amount, clean_vendor, mcc_category, idempotency_key=f"card_for_tx_{tx_id}")
         
         if not card:
              logger.error("❌ Stripe Issuing Failed. Refunding.")
@@ -1012,7 +1012,7 @@ class UniversalEngine:
         # --- CAPA 3: EJECUCIÓN (TARJETA VIRTUAL REAL) ---
         logger.info(f"💳 [ISSUING] Generando Tarjeta Virtual ({mcc_category}) para {request.vendor}...")
         
-        card = self._issue_virtual_card(request.agent_id, request.amount, clean_vendor, mcc_category=mcc_category)
+        card = self._issue_virtual_card(request.agent_id, request.amount, clean_vendor, mcc_category=mcc_category, idempotency_key=f"card_for_tx_{tx_id}")
         
         if not card:
             # CRITICAL ROLLBACK (Si Stripe falla, devolvemos el dinero)
@@ -1100,12 +1100,16 @@ class UniversalEngine:
             logger.critical(f"❌ [STRIPE ERROR] {str(e)}")
             return None
 
-    def _issue_virtual_card(self, agent_id, amount, vendor, mcc_category='services'):
+    def _issue_virtual_card(self, agent_id, amount, vendor, mcc_category='services', idempotency_key=None): # Añadido parámetro
         """
         MODO BANCO CENTRAL: Emite la tarjeta desde la PLATAFORMA.
         CORRECCIÓN FINAL: Incluye DOB, TOS y TELÉFONO (Requisito 3DS Europa).
         """
         try:
+            # Si no nos pasan key, creamos una basada en el intento (Fallback simple)
+            if not idempotency_key:
+                 idempotency_key = f"card_issue_{agent_id}_{int(time.time())}"
+            
             # 1. CATEGORÍA SEGURA
             allowed_categories = ['miscellaneous']
             
@@ -1169,7 +1173,8 @@ class UniversalEngine:
                 spending_controls={
                     "spending_limits": [{"amount": int(amount * 100), "interval": "all_time"}],
                     "allowed_categories": allowed_categories
-                }
+                },
+                idempotency_key=idempotency_key # <--- EVITA EMITIR MULTIPLES TARJETAS POR ERROR
             )
             
             # LOG SEGURO (Masked)
@@ -1386,42 +1391,62 @@ class UniversalEngine:
             logger.error(f"Error creating topup link for {agent_id}: {e}")
             return f"Error: {str(e)}"
 
-    def automatic_topup(self, agent_id, amount):
+    def automatic_topup(self, agent_id, amount, idempotency_key=None):
         """
-        RECARGA AUTOMÁTICA: Cobra $50 (o lo que sea) usando tarjeta de prueba
-        y los envía a la cuenta del agente sin intervención humana.
+        RECARGA AUTOMÁTICA BLINDADA:
+        Usa idempotency_key para asegurar que si falla la DB, 
+        podamos reintentar sin cobrarle doble al usuario.
         """
         try:
-            # 1. Buscar la cuenta destino
+            # 1. Definir una clave de idempotencia robusta si no viene dada
+            if not idempotency_key:
+                # Usamos hash para asegurar consistencia si se llama multiples veces con los mismos parametros en el mismo segundo
+                raw_str = f"{agent_id}-{amount}-{time.strftime('%Y%m%d%H%M')}" 
+                idempotency_key = f"topup_{hashlib.sha256(raw_str.encode()).hexdigest()}"
+
+            # 2. Buscar la cuenta destino
             wallet = self.db.table("wallets").select("stripe_account_id, balance").eq("agent_id", agent_id).execute()
             if not wallet.data: raise Exception("Agente no encontrado")
             
             connected_account_id = wallet.data[0]['stripe_account_id']
             current_balance = float(wallet.data[0]['balance'])
 
-            logger.info(f"🤖 Iniciando recarga automática de ${amount} para {agent_id}...")
+            logger.info(f"🤖 Iniciando recarga automática de ${amount} para {agent_id} (Key: {idempotency_key})...")
 
-            # 2. EJECUTAR EL COBRO DIRECTO (Confirm=True)
+            # 3. EJECUTAR EL COBRO CON IDEMPOTENCIA
+            # Si esta línea se ejecuta y el servidor muere justo después,
+            # al reintentar con la misma key, Stripe devolverá el mismo objeto 'intent' sin cobrar de nuevo.
             intent = stripe.PaymentIntent.create(
-                amount=int(amount * 100), # Convertir a centavos
+                amount=int(amount * 100),
                 currency='usd',
-                payment_method="pm_card_visa", # <--- TARJETA QUE SIEMPRE FUNCIONA
-                confirm=True, # <--- COBRA YA, NO ESPERES
+                payment_method="pm_card_visa",
+                confirm=True,
                 description=f"Auto-Topup for {agent_id}",
                 automatic_payment_methods={'enabled': True, 'allow_redirects': 'never'},
-                transfer_data={
-                    'destination': connected_account_id, # Enviar el dinero al agente
-                }
+                transfer_data={'destination': connected_account_id},
+                idempotency_key=idempotency_key  # <--- CRÍTICO: ESTO SALVA TU DINERO
             )
             
-            # 3. ACTUALIZAR SALDO EN TU BASE DE DATOS
-            # Como es automático, no necesitamos esperar al Webhook
+            # 4. ACTUALIZAR SALDO EN TU BASE DE DATOS
+            # Usamos una transacción RPC para ser atómicos en la DB también si es posible,
+            # o un update simple. Lo importante es que si esto falla, podemos volver a llamar a la función.
             new_bal = current_balance + amount
+            
+            # Opcional: Guardar el payment_intent.id en la DB para evitar duplicados lógicos futuros
             self.db.table("wallets").update({"balance": new_bal}).eq("agent_id", agent_id).execute()
+            
+            # Registrar el log de la transacción usando el ID de Stripe como referencia
+            self.db.table("transaction_logs").insert({
+                "id": intent.id, # Usamos el ID de Stripe como ID de transacción para trazabilidad perfecta
+                "agent_id": agent_id,
+                "vendor": "Stripe Topup",
+                "amount": amount,
+                "status": "APPROVED",
+                "reason": f"Recarga Automática (Idempotency Key: {idempotency_key})"
+            }).execute()
 
             logger.success(f"✅ DINERO INGRESADO: ${amount} (Nuevo saldo: ${new_bal})")
             return {"status": "SUCCESS", "new_balance": new_bal, "tx_id": intent.id}
-
 
         except stripe.error.StripeError as e:
             # Si falla por "capabilities", intentamos activarlas forzosamente
@@ -1432,11 +1457,13 @@ class UniversalEngine:
                     return {"status": "RETRY_NEEDED", "message": "Cuenta reparada. Intenta de nuevo en 5 segundos."}
                 except Exception as repair_err:
                     logger.error(f"Error repairing account capabilities: {repair_err}")
-            logger.error(f"Stripe Error during automatic topup: {e}")
+            logger.error(f"Stripe Error: {e}")
             return {"status": "ERROR", "message": str(e)}
         except Exception as e:
-            logger.error(f"General Error during automatic topup: {e}")
-            return {"status": "ERROR", "message": str(e)}
+            # Errores de DB o código: AQUÍ ES DONDE LA IDEMPOTENCIA NOS SALVA
+            logger.critical(f"⚠️ FALLO CRÍTICO TRAS COBRO (Posible desincronización): {e}")
+            # En un sistema real, aquí lanzaríamos una alerta para reintentar esta función exacta
+            return {"status": "ERROR", "message": f"Error de sistema (Cobro puede haber ocurrido): {str(e)}"}
 
     # --- ASYNC AUDIT HELPERS ---
     def _reverse_transaction(self, agent_id, amount):
