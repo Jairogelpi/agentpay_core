@@ -1493,12 +1493,13 @@ class UniversalEngine:
         magic_link = f"{self.admin_url}/admin/approve?token={token}"
         
         try:
-            response = self.db.table("wallets").select("owner_email, slack_webhook_url").eq("agent_id", request.agent_id).execute()
+            response = self.db.table("wallets").select("owner_email").eq("agent_id", request.agent_id).execute()
             wallet_data = response.data[0] if response.data else {}
             
-            # 1. Slack (Real-time Control)
-            if wallet_data.get('slack_webhook_url'):
-                sent = send_slack_approval(wallet_data.get('slack_webhook_url'), request.agent_id, request.amount, clean_vendor, magic_link, reason=reason_prefix)
+            # 1. Slack (Real-time Control) - Usa variable de entorno
+            slack_url = os.getenv('SLACK_URL')
+            if slack_url:
+                sent = send_slack_approval(slack_url, request.agent_id, request.amount, clean_vendor, magic_link, reason=reason_prefix)
                 if sent: logger.info(f"   🔔 Slack Notification sent to {request.agent_id}")
             
             # 2. Email (Legacy Fallback)
@@ -1810,10 +1811,10 @@ class UniversalEngine:
                 amount = float(tx_data['amount'])
                 vendor = tx_data.get('vendor', 'UNKNOWN')
                 
-                # 0. Recuperar configuración de contacto del agente (Slack y Email)
-                wallet_res = self.db.table("wallets").select("slack_webhook_url, owner_email").eq("agent_id", agent_id).single().execute()
+                # 0. Recuperar configuración de contacto del agente
+                wallet_res = self.db.table("wallets").select("owner_email").eq("agent_id", agent_id).single().execute()
                 contact_info = wallet_res.data if wallet_res.data else {}
-                slack_url = contact_info.get('slack_webhook_url')
+                slack_url = os.getenv('SLACK_URL') # Usa variable de entorno
                 owner_email = contact_info.get('owner_email')
                 
                 # 1. REVERSIÓN: Devolver el dinero (monto negativo suma al saldo)
@@ -2088,9 +2089,10 @@ class UniversalEngine:
             
             # === PASO 3: ALERTAS (Opcional - no debe bloquear) ===
             try:
-                wallet_res = self.db.table("wallets").select("slack_webhook_url, owner_email").eq("agent_id", request.agent_id).single().execute()
+                wallet_res = self.db.table("wallets").select("owner_email").eq("agent_id", request.agent_id).single().execute()
                 contact_info = wallet_res.data if wallet_res.data else {}
                 owner_email = contact_info.get('owner_email')
+                slack_url = os.getenv('SLACK_URL') # Variable de entorno
                 
                 # Alerta Email al cliente (con protección extra)
                 if owner_email:

@@ -2,11 +2,12 @@
 -- Ejecutar en Supabase SQL Editor
 
 -- ============================================
--- 1. ELIMINAR SECRETO HARDCODEADO
+-- 1. ELIMINAR COLUMNA CON SECRETO
 -- ============================================
--- El DEFAULT con webhook real es una fuga de seguridad
+-- La columna slack_webhook_url tenía un webhook hardcodeado
+-- Ahora usamos variable de entorno SLACK_URL
 ALTER TABLE public.wallets 
-ALTER COLUMN slack_webhook_url SET DEFAULT NULL;
+DROP COLUMN IF EXISTS slack_webhook_url;
 
 -- ============================================
 -- 2. STORED PROCEDURES REQUERIDOS
