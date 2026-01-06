@@ -733,9 +733,7 @@ class UniversalEngine:
             # ------------------------------------------------------------------------
 
         # E. MEMORY SAVING (RAG)
-        # ... (rest of function)                "id": tx_id, "agent_id": agent_id, "vendor": vendor, "amount": amount,
-                "status": "REJECTED", "reason": audit.get('reasoning'), "created_at": datetime.now().isoformat()
-            }).execute()
+
             return
 
         # C. ISSUING (If Approved)
