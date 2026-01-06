@@ -1362,16 +1362,17 @@ async def get_agent_security_history(agent_id: str):
 async def export_accounting_data(agent_id: str = Depends(verify_api_key)):
     """
     Genera un reporte mensual CSV para QuickBooks/Xero.
-    GDPR: Registra la descarga en audit_sessions.
+    GDPR: Registra la descarga en unified_audit_logs.
     """
     try:
-        # 1. GDPR Trail
-        engine.db.table("audit_sessions").insert({
-            "agent_id": agent_id,
-            "action": "CSV_EXPORT",
-            "resource_id": f"MONTH_{datetime.now().strftime('%Y_%m')}",
-            "ip_address": "DO_NOT_LOG_IP" # Privacy by design
-        }).execute()
+        # 1. GDPR Trail (UnifiedAuditor)
+        from forensic_auditor import UnifiedAuditor
+        auditor = UnifiedAuditor(engine.db)
+        auditor.log_session(
+            agent_id=agent_id, 
+            action="CSV_EXPORT", 
+            resource_id=f"MONTH_{datetime.now().strftime('%Y_%m')}"
+        )
 
         # 2. Get Data
         txs = engine.db.table("transaction_logs").select("*").eq("agent_id", agent_id).execute().data

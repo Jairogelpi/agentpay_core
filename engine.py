@@ -2850,11 +2850,9 @@ class UniversalEngine:
 
     def _log_audit_action(self, agent_id, action, detail):
         try:
-             self.db.table("audit_sessions").insert({
-                 "agent_id": agent_id,
-                 "action": action,
-                 "resource_id": detail
-             }).execute()
+            from forensic_auditor import UnifiedAuditor
+            auditor = UnifiedAuditor(self.db)
+            auditor.log_session(agent_id, action, resource_id=detail)
         except: pass
 
     async def _evaluate_implementation_continued(self):

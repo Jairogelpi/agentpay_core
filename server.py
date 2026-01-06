@@ -69,15 +69,11 @@ def _check_rate_limit(agent_id: str) -> bool:
         return True
 
 def _log_mcp_call(agent_id: str, tool_name: str, params: dict, status: str = "OK"):
-    """Audit log to Supabase."""
+    """Audit log using UnifiedAuditor (centralized)."""
     try:
-        engine.db.table("mcp_audit_log").insert({
-            "agent_id": agent_id,
-            "tool_name": tool_name,
-            "parameters": json.dumps(params)[:2000],
-            "result_status": status,
-            "timestamp": datetime.utcnow().isoformat()
-        }).execute()
+        from forensic_auditor import UnifiedAuditor
+        auditor = UnifiedAuditor(engine.db)
+        auditor.log_mcp_tool(agent_id, tool_name, params, status)
     except Exception as e:
         logger.warning(f"Audit log failed: {e}")
 

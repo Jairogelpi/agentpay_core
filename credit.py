@@ -168,18 +168,22 @@ class CreditBureau:
             "rejection_reason": rejection_reason if status == "DENIED" else None
         }
 
-        # --- AUDIT TRAIL (LA CAJA NEGRA) ---
+        # --- AUDIT TRAIL (UNIFIED AUDITOR) ---
         try:
-            # Hash de integridad (Simulado, en prod usaríamos firma de servidor HSM)
+            from forensic_auditor import UnifiedAuditor
+            import json
+            
             integrity_hash = "SHA256-PROOF-" + str(abs(hash(json.dumps(decision_data, sort_keys=True))))
             
-            self.db.table("audit_trail").insert({
-                "event_type": "CREDIT_DECISION",
-                "agent_id": agent_id,
-                "snapshot_data": json.dumps(decision_data),
-                "created_at": datetime.datetime.utcnow().isoformat(),
-                "integrity_hash": integrity_hash 
-            }).execute()
+            auditor = UnifiedAuditor(self.db)
+            auditor.log_event(
+                agent_id=agent_id,
+                source="CREDIT",
+                event_type="LOAN_DECISION",
+                severity="INFO" if status == "APPROVED" else "WARN",
+                details=decision_data,
+                resource_id=f"loan_{agent_id}_{datetime.datetime.utcnow().timestamp()}"
+            )
         except Exception as e:
             logger.error(f"FALLO DE AUDITORÍA: No se pudo escribir en la caja negra: {e}")
             # En banca, si falla el log, se deniega la operación por seguridad.
