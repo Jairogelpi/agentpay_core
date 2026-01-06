@@ -556,17 +556,16 @@ async def stripe_webhook(request: Request):
 async def wallet_topup(req: dict):
     """
     Inicia una sesión de recarga de saldo (Stripe Checkout).
-    O ejecuta recarga directa si se pasa 'card_token'.
+    Retorna la URL de pago.
     """
     agent_id = req.get("agent_id")
     amount = req.get("amount", 10.0)
-    card_token = req.get("card_token") # "pm_card_visa" for testing
     
     if not agent_id:
         raise HTTPException(status_code=400, detail="Missing agent_id")
         
     try:
-        res = engine.create_topup_session(agent_id, float(amount), card_token)
+        res = engine.create_topup_session(agent_id, float(amount))
         return res
     except Exception as e:
         logger.error(f"Topup Error: {e}")

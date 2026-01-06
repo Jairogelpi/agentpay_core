@@ -471,11 +471,7 @@ def send_notification(type: str, to: str, data_json: str) -> str:
     else: return json.dumps({"error": "Unknown notification type"})
     return json.dumps({"status": "SENT"})
 
-@mcp.tool()
-def trigger_webhook_test(url: str, event: str, data: str) -> str:
-    """[DEV] Fires a test webhook used for integration testing."""
-    send_webhook(url, event, json.loads(data))
-    return json.dumps({"status": "TRIGGERED"})
+
 
 @mcp.tool()
 def send_slack_alert(webhook_url: str, message: str) -> str:
