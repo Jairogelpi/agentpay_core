@@ -667,6 +667,33 @@ class UniversalEngine:
         if self.redis_enabled and self.redis.sismember("security:global_blacklist", clean_vendor):
              return TransactionResult(authorized=False, status="REJECTED", reason="Bloqueado por Mente Colmena (Global Blacklist)")
 
+        # ============================================
+        # 3. MICROPAYMENT STRATEGY (Casino Chips Model)
+        # ============================================
+        # Para evitar pérdidas por comisiones de tarjeta en pagos pequeños,
+        # los micropagos SOLO se procesan si hay saldo en el wallet.
+        # NO se emiten tarjetas virtuales Stripe para montos < MICROPAYMENT_THRESHOLD
+        MICROPAYMENT_THRESHOLD = 5.00  # Bajo este monto, solo wallet prepagado
+        
+        if request.amount < MICROPAYMENT_THRESHOLD:
+            # Verificar saldo wallet ANTES de procesar
+            try:
+                wallet_res = self.db.table("wallets").select("balance").eq("agent_id", request.agent_id).single().execute()
+                wallet_balance = float(wallet_res.data.get("balance", 0)) if wallet_res.data else 0
+                
+                if wallet_balance < request.amount:
+                    return TransactionResult(
+                        authorized=False, 
+                        status="REQUIRES_TOPUP",
+                        reason=f"💳 Micropago (${request.amount:.2f}): Saldo insuficiente (${wallet_balance:.2f}). Los pagos menores a ${MICROPAYMENT_THRESHOLD} requieren saldo pre-cargado para evitar comisiones de tarjeta."
+                    )
+                    
+                # Micropago autorizado desde wallet (sin tarjeta, sin comisión Stripe)
+                logger.info(f"🪙 [MICROPAGO] ${request.amount:.2f} procesado desde wallet (sin tarjeta)")
+            except Exception as e:
+                logger.error(f"Error verificando wallet: {e}")
+                return TransactionResult(authorized=False, status="ERROR", reason="Error verificando saldo")
+
         # 4. FUNDS FREEZE (REDIS LUA SCRIPT - Atomic & Optimal)
         fee = round(request.amount * 0.015, 2)
         total_deducted = request.amount + fee
