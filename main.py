@@ -147,22 +147,10 @@ async def startup_event():
     if os.getenv("ENVIRONMENT", "development") == "production":
         logger.info("🔧 Production Mode: Initializing Sentry & OTEL...")
     
-    # START BACKGROUND WORKER (Event-Driven Consumer)
-    # This runs the worker loop in a separate thread so it doesn't block the API
-    import threading
-    import worker
-    
-    def run_worker():
-        try:
-            logger.info("👷 Starting Embedded Worker Thread...")
-            worker.process_stream()
-        except Exception as e:
-            logger.error(f"🔥 Embedded Worker Failed: {e}")
-
-    # Daemon thread ensures it dies when the main process dies
-    worker_thread = threading.Thread(target=run_worker, daemon=True)
-    worker_thread.start()
-    logger.success("✅ Embedded Worker Thread Started")
+    # NOTE: Worker is now a SEPARATE PROCESS (see Procfile)
+    # This allows independent scaling of API and payment processing
+    # DO NOT start worker thread here - it causes race conditions with multiple Gunicorn workers
+    logger.info("📋 API ready. Worker runs as separate process (worker.py)")
 
 # --- SECURITY HEADERS MIDDLEWARE ---
 # --- SECURITY HEADERS MIDDLEWARE (PURE ASGI) ---
