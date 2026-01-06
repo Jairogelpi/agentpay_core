@@ -3153,7 +3153,9 @@ class UniversalEngine:
             # 1. Obtener políticas desde Supabase
             policy_res = self.db.table("wallets").select("corporate_policies, agent_role").eq("agent_id", agent_id).single().execute()
             if not policy_res.data:
-                return True, "⚠️ Sin políticas definidas. Permitido por defecto."
+                # FAIL-CLOSED: Sin políticas = No podemos verificar = Bloqueamos
+                logger.warning(f"🔒 [POLICY] Agent {agent_id} sin políticas definidas. Aplicando Fail-Closed.")
+                return False, "⛔ Sin políticas corporativas definidas. Contacte al administrador para configurar el agente."
             
             policies = policy_res.data.get('corporate_policies') or {}
             agent_role = policy_res.data.get('agent_role', 'General')
@@ -3243,7 +3245,8 @@ class UniversalEngine:
             
         except Exception as e:
             logger.error(f"⚠️ Error checking corporate compliance: {e}")
-            return True, f"⚠️ Error de políticas (Permitido por defecto): {e}"
+            # --- FAIL-CLOSED: Si hay error, bloqueamos ---
+            return False, f"⛔ Error Crítico de Sistema: No se pudieron verificar las políticas de seguridad ({str(e)}). Transacción bloqueada."
 
     def _detect_vendor_category(self, vendor):
         """Simple vendor category detection based on domain."""

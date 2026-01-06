@@ -308,7 +308,13 @@ async def verify_invoice_match(vendor: str, amount: float, file_url: str):
     con el gasto registrado. Detecta fraudes en la conciliación.
     """
     if not AI_ENABLED:
-        return {"match": True, "confidence": 0, "reason": "AI Offline - Auto Accepted"}
+        logger.warning("🔒 [AI GUARD] Servicio de IA no disponible. Aplicando protocolo Fail-Closed.")
+        return {
+            "is_match": False, 
+            "confidence": 0, 
+            "reason": "AI Service Unavailable - Manual verification required",
+            "flagged": True
+        }
 
     system_prompt = """
     You are a Forensic Accountant AI. 
@@ -354,7 +360,13 @@ async def verify_invoice_match(vendor: str, amount: float, file_url: str):
         return json.loads(response.choices[0].message.content)
     except Exception as e:
         logger.error(f"❌ Invoice Verification Failed: {e}")
-        return {"is_match": True, "confidence": 0, "reason": "AI Error - Defaulting to Match"}
+        # FAIL-CLOSED: Rechazamos si la IA falla
+        return {
+            "is_match": False, 
+            "confidence": 0, 
+            "reason": f"AI Error: {str(e)} - Manual verification required",
+            "flagged": True
+        }
 
 
 # ==========================================
