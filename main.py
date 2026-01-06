@@ -617,6 +617,29 @@ async def brevo_inbound_webhook(request: Request):
                     "body_text": body
                 }).execute()
                 logger.success(f"✅ Ingested email for {real_agent_id}")
+
+                # [NUEVO] AUTO-MATCHING REAL
+                # Solo procesar si parece una factura y tenemos el ID del agente
+                if real_agent_id and any(x in subject.lower() for x in ["receipt", "invoice", "factura", "pedido"]):
+                    
+                    logger.info(f"📧 Procesando posible factura para {real_agent_id}...")
+                    
+                    # Llamada a la IA con los datos REALES
+                    match = await match_receipt_to_transaction(body, real_agent_id, engine.db)
+                    
+                    if match.get("match_found"):
+                        tx_id = match.get("transaction_id")
+                        
+                        # Actualizamos la DB real
+                        engine.db.table("transaction_logs").update({
+                            "receipt_status": "VERIFIED",
+                            "receipt_url": "email_content_indexed" # Opcional: guardar el body en otra tabla
+                        }).eq("id", tx_id).execute()
+                        
+                        logger.success(f"✅ FACTURA ENCONTRADA AUTOMÁTICAMENTE: TX {tx_id}")
+                    else:
+                        logger.info("ℹ️ Email analizado, pero no coincide con ninguna transacción pendiente.")
+
             except Exception as db_err:
                 logger.error(f"⚠️ Error guardando email: {db_err}")
         

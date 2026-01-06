@@ -298,3 +298,64 @@ async def audit_transaction(vendor, amount, description, agent_id, agent_role, h
     except Exception as e:
         logger.error(f"Oracle Error: {e}")
         return {"decision": "FLAGGED", "reasoning": "AI Error", "risk_score": 50, "intent_hash": "ERR"}
+
+# ==========================================
+# CAPA 5: DOCUMENT INTELLIGENCE (NUEVO)
+# ==========================================
+async def match_receipt_to_transaction(pdf_text: str, agent_id: str, db_client) -> dict:
+    """
+    Analiza el texto de una factura y busca su transacción correspondiente en la DB.
+    """
+    if not AI_ENABLED:
+        return {"match_found": False, "reason": "AI Offline"}
+
+    try:
+        # 1. Extraer datos clave del PDF usando LLM
+        prompt = f"""
+        EXTRACT FROM INVOICE TEXT:
+        1. Vendor Name
+        2. Total Amount
+        3. Date (YYYY-MM-DD)
+        
+        TEXT:
+        {pdf_text[:3000]}
+        
+        RETURN JSON: {{ "vendor": "...", "amount": 10.50, "date": "..." }}
+        """
+        
+        res = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
+        invoice_data = json.loads(res.choices[0].message.content)
+        
+        inv_vendor = invoice_data.get('vendor', '').lower()
+        inv_amount = float(invoice_data.get('amount', 0))
+        
+        # 2. Buscar candidatos en DB (Últimos 7 días)
+        # Esto es heurístico. En prod, usarías una query más compleja de rango.
+        candidates = db_client.table("transaction_logs")\
+            .select("id, vendor, amount, created_at")\
+            .eq("agent_id", agent_id)\
+            .order("created_at", desc=True)\
+            .limit(20)\
+            .execute()
+            
+        # 3. Match Logic (Python side for flexibility)
+        best_match = None
+        for tx in candidates.data:
+            tx_amount = float(tx['amount'])
+            # Tolerancia de fecha y nombre
+            if abs(tx_amount - inv_amount) < 1.0: # $1 toleracia (fees, impuestos)
+                best_match = tx['id']
+                break
+                
+        if best_match:
+            return {"match_found": True, "transaction_id": best_match, "confidence": 0.9}
+        else:
+            return {"match_found": False, "reason": "No matching transaction amount found."}
+
+    except Exception as e:
+        logger.error(f"Receipt Match Error: {e}")
+        return {"match_found": False, "error": str(e)}

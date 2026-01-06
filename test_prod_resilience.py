@@ -5,7 +5,7 @@ import uuid
 
 # CONFIGURATION
 # Default to local if not set, but respect the ENV variable
-BASE_URL = os.getenv("AGENTPAY_URL", "http://localhost:8000")
+BASE_URL = os.getenv("AGENTPAY_URL", "https://www.agentpay.it.com")
 
 def register_test_agent():
     print(f"\n🆕 [1/5] Registering new test agent at {BASE_URL}...")
