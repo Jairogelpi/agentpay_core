@@ -1130,6 +1130,13 @@ class UniversalEngine:
             # 1. CATEGORÍA SEGURA
             allowed_categories = ['miscellaneous']
             
+            # 1.5. RECUPERAR IP LEGAL DEL AGENTE
+            try:
+                wallet_res = self.db.table("wallets").select("compliance_metadata").eq("agent_id", agent_id).single().execute()
+                registered_ip = wallet_res.data.get("compliance_metadata", {}).get("registered_ip", "127.0.0.1")
+            except:
+                registered_ip = "127.0.0.1"
+            
             # 2. DATOS DEL TITULAR (CARDHOLDER)
             holder_email = f"{agent_id[:12]}@agentpay.ai"
             phone_dummy = "+34612345678" # <--- REQUISITO NUEVO: Teléfono para 3D Secure
@@ -1153,7 +1160,7 @@ class UniversalEngine:
                             "card_issuing": {
                                 "user_terms_acceptance": {
                                     "date": int(time.time()),
-                                    "ip": "8.8.8.8"
+                                    "ip": registered_ip
                                 }
                             }
                         }
@@ -1173,7 +1180,7 @@ class UniversalEngine:
                         "card_issuing": {
                             "user_terms_acceptance": {
                                 "date": int(time.time()),   
-                                "ip": "8.8.8.8"
+                                "ip": registered_ip
                             }
                         }
                     },

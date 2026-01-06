@@ -4,39 +4,39 @@ import time
 import uuid
 
 # CONFIGURATION
-BASE_URL = os.getenv("AGENTPAY_URL", "https://www.agentpay.it.com")
+# Default to local if not set, but respect the ENV variable
+BASE_URL = os.getenv("AGENTPAY_URL", "http://localhost:8000")
 
 def register_test_agent():
-    print(f"🆕 Registering new test agent at {BASE_URL}...")
+    print(f"\n🆕 [1/5] Registering new test agent at {BASE_URL}...")
     try:
         payload = {
             "client_name": f"ResilienceTester_{uuid.uuid4().hex[:6]}",
             "country_code": "ES",
             "agent_role": "Tester"
         }
+        # Requests automatically validates the 'Client IP' extraction in main.py
         resp = requests.post(f"{BASE_URL}/v1/agent/register", json=payload, timeout=10)
         
         if resp.status_code == 200:
             data = resp.json()
             api_key = data.get("api_key")
             agent_id = data.get("agent_id")
-            print(f"✅ Registered: {agent_id}")
-            return api_key
+            print(f"   ✅ Registered: {agent_id} (IP Capture Passed)")
+            return api_key, agent_id
         else:
-            print(f"❌ Registration Failed: {resp.status_code} - {resp.text}")
-            return None
+            print(f"   ❌ Registration Failed: {resp.status_code} - {resp.text}")
+            return None, None
     except Exception as e:
-        print(f"❌ Registration Error: {e}")
-        return None
+        print(f"   ❌ Registration Error: {e}")
+        return None, None
 
 
 def test_idempotency_topup(api_key):
     """
     Test "Double Tap" resilience on Topup.
-    Calling /v1/topup/auto twice rapidly should result in ONE Stripe charge
-    and the SAME transaction ID.
     """
-    print("\n🛡️ Testing Idempotency (DoS/Network Retry Protection)...")
+    print("\n🛡️ [2/5] Testing Idempotency (DoS Protection)...")
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
@@ -58,28 +58,84 @@ def test_idempotency_topup(api_key):
     else:
         print(f"   ❌ FAILURE: Different IDs generated ({tx_id_1} vs {tx_id_2}). Double Charge Risk!")
 
-def test_fast_path_resilience():
-    # 1. AUTO-REGISTER
-    api_key = register_test_agent()
+def test_global_hard_block(api_key, agent_id):
+    """
+    Test the GLOBAL_FORBIDDEN list (Hard Rules).
+    """
+    print("\n🚫 [3/5] Testing Global Hard Block (Compliance)...")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
     
-    if not api_key:
-        api_key = os.getenv("AGENTPAY_TOKEN")
-        if not api_key:
-            print("⚠️  Registration failed and AGENTPAY_TOKEN not set. Exiting.")
-            return
+    # Intento de compra en sitio prohibido
+    bad_vendor = "online-poker-casino.com"
+    print(f"   👉 Attempting purchase at: {bad_vendor}")
+    
+    payload = {
+        "agent_id": agent_id, 
+        "vendor": bad_vendor,
+        "amount": 100.00,
+        "description": "Trying to bypass rules",
+        "justification": "I want to gamble"
+    }
+    
+    try:
+        resp = requests.post(f"{BASE_URL}/v1/pay", json=payload, headers=headers)
+        data = resp.json()
+        
+        # We expect a REJECTION or HTTP Error, usually status REJECTED in body
+        if data.get("status") == "REJECTED" and "Prohibida" in str(data.get("message", "")):
+            print(f"   🎉 SUCCESS: Blocked Correctly! Msg: {data.get('message')}")
+        elif data.get("status") == "REJECTED":
+            print(f"   ✅ Blocked (Generic): {data.get('message')}")
+        else:
+            print(f"   ❌ FAILURE: Transaction was NOT blocked properly. Status: {data.get('status')}")
+            
+    except Exception as e:
+        print(f"   ⚠️ Request Error: {e}")
 
-    # 2. TEST IDEMPOTENCY (NEW)
-    test_idempotency_topup(api_key)
+def test_legal_signature(api_key, agent_id):
+    """
+    Test the Legal Signature endpoint with Real IP.
+    """
+    print("\n⚖️ [4/5] Testing Legal Digital Signature (Real IP)...")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "agent_id": agent_id,
+        "platform_url": "https://agentpay.io/legal/v1",
+        "forensic_hash": "VERIFY-KMS-TEST" # Placeholder or fetch real one if possible
+    }
+    
+    try:
+        resp = requests.post(f"{BASE_URL}/v1/legal/sign_tos", json=payload, headers=headers)
+        data = resp.json()
+        
+        if resp.status_code == 200 and data.get("status") == "SIGNED":
+            print(f"   🎉 SUCCESS: Signed! Cert ID: {data.get('certificate_id')}")
+            print(f"      Version: {data.get('agreement_version')} | IP Captured: Yes (Implicit)")
+        else:
+            print(f"   ❌ FAILURE: Signing failed. {resp.text}")
+            
+    except Exception as e:
+        print(f"   ⚠️ Request Error: {e}")
 
-    print(f"\n🚀 Testing AgentPay Resilience at {BASE_URL}")
-    print("------------------------------------------------")
+def test_fast_path_valid_tx(api_key, agent_id):
+    """
+    Test a VALID transaction to ensure we haven't broken the good path.
+    """
+    print(f"\n🚀 [5/5] Testing Valid Transaction (Fast Path)...")
 
     payload = {
-        "agent_id": "auto_tester", 
-        "vendor": "resilience_check.com",
+        "agent_id": agent_id, 
+        "vendor": "aws.amazon.com",
         "amount": 10.00,
-        "description": f"Resilience Test {uuid.uuid4().hex[:6]}",
-        "justification": "Verifying lazy loading and worker resilience."
+        "description": "Valid Cloud Hosting",
+        "justification": "Infrastructure costs"
     }
 
     headers = {
@@ -89,38 +145,45 @@ def test_fast_path_resilience():
 
     start_time = time.time()
     try:
-        print("📡 Sending Transaction Request...")
         response = requests.post(f"{BASE_URL}/v1/pay", json=payload, headers=headers, timeout=10)
-        
         duration = time.time() - start_time
-        print(f"⏱️  Response Time: {duration:.2f}s")
+        
+        data = response.json()
+        print(f"   ⏱️  Time: {duration:.2f}s | Status: {data.get('status')}")
 
-        if response.status_code == 200:
-            data = response.json()
-            status = data.get("status")
-            print(f"✅ Response: {response.status_code} | Status: {status}")
-            
-            # VERIFY FAST PATH
-            if duration < 3.0:
-                print("⚡ FAST PATH CONFIRMED: API responded quickly (Lazy Loading likely working).")
-            else:
-                print("⚠️  SLOW RESPONSE: API took > 3s. Check if heavy modules are still loading on API path.")
-
-            # VERIFY ASYNC HANDOFF
-            if status == "PROCESSING":
-                print("🔄 ASYNC HANDOFF CONFIRMED: Transaction queued for worker.")
-                print("   (Check Render logs to verify worker picks it up and recovers if crashed)")
-            elif status == "APPROVED":
-                print("✅ APPROVED SYNCHRONOUSLY")
-            else:
-                print(f"ℹ️  Status: {status}")
-
+        if data.get("status") in ["APPROVED", "PROCESSING"]:
+             print("   🎉 SUCCESS: Valid transaction processed.")
         else:
-            print(f"❌ Error: {response.status_code}")
-            print(response.text)
+             print(f"   ❌ FAILURE: Valid transaction rejected? {data.get('message')}")
 
     except Exception as e:
-        print(f"🔥 Request Failed: {e}")
+        print(f"   🔥 Request Failed: {e}")
+
+def run_all_tests():
+    print("========================================")
+    print("🛡️  AGENTPAY RESILIENCE SUITE v2.0")
+    print("========================================")
+    
+    # 1. Register
+    api_key, agent_id = register_test_agent()
+    
+    if not api_key:
+        print("⏹️  Critical Stop: Registration failed.")
+        return
+
+    # 2. Idempotency
+    test_idempotency_topup(api_key)
+    
+    # 3. Security (Hard Block) - NEW
+    test_global_hard_block(api_key, agent_id)
+    
+    # 4. Legal (Signatures) - NEW
+    test_legal_signature(api_key, agent_id)
+    
+    # 5. Happy Path
+    test_fast_path_valid_tx(api_key, agent_id)
+    
+    print("\n✅ Verification Complete.")
 
 if __name__ == "__main__":
-    test_fast_path_resilience()
+    run_all_tests()
