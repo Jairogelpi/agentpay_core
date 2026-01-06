@@ -1105,6 +1105,37 @@ async def generate_credit_note(request: CreditNoteRequest, agent_id: str = Depen
         logger.error(f"Error generando Credit Note: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/v1/webhooks/inbound_email")
+async def inbound_email(req: dict):
+    """
+    Webhook para recibir emails parseados (Brevo/SendGrid).
+    Normaliza el payload y lo guarda en la DB.
+    """
+    # Adapta este parser según el formato real de tu proveedor (Brevo)
+    # Brevo suele enviar items como lista.
+    items = req.get("items", [req]) # Fallback si no es lista
+    
+    results = []
+    for item in items:
+        # Extracción segura de datos de Brevo
+        sender = item.get("Sender", {}).get("Email", "unknown") if isinstance(item.get("Sender"), dict) else str(item.get("Sender"))
+        recipient = item.get("Recipient", {}).get("Email", "unknown") if isinstance(item.get("Recipient"), dict) else str(item.get("Recipient"))
+        subject = item.get("Subject", "No Subject")
+        
+        # Preferimos texto plano, si no hay, raw text body
+        body = item.get("RawTextBody") or item.get("RawHtmlBody") or ""
+        
+        payload = {
+            "sender": sender,
+            "recipient": recipient,
+            "subject": subject,
+            "body": body
+        }
+        res = identity_mgr.handle_inbound_email(payload)
+        results.append(res)
+        
+    return {"status": "PROCESSED", "count": len(results)}
+
 @app.post("/v1/accounting/upload_invoice")
 async def upload_invoice(req: dict):
     """

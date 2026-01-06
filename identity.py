@@ -330,3 +330,51 @@ class IdentityManager:
                 return res.data[0].get('session_blob') if res.data else None
             except: return None
         return None
+
+    def handle_inbound_email(self, payload):
+        """
+        [WEBHOOK] Procesa email entrante desde Brevo/SendGrid.
+        El formato de entrada es normalizado (JSON).
+        """
+        # Extraer campos clave
+        sender = payload.get("sender", "unknown")
+        recipient = payload.get("recipient", "unknown")
+        subject = payload.get("subject", "No Subject")
+        body = payload.get("body", "")
+        
+        # Intentar extraer el ID del agente desde el recipiente (agent-XYZ@...)
+        agent_id = None
+        try:
+            # agent-123456@agentpay.it.com -> 123456
+            if "agent-" in recipient:
+                 local_part = recipient.split("@")[0] # agent-123456 
+                 # En nuestro sistema real, quizás hay un mapping en DB
+                 # Por simplicidad en MVP, asumimos que podemos buscar por "cert_{clean_id}" si fuera necesario
+                 # Pero guardamos el 'agent_id' directamente si podemos inferirlo o buscarlo.
+        except: pass
+
+        # Guardar en inbound_emails (Supabase)
+        try:
+            if self.db:
+                # Primero buscamos si existe una identidad con ese email para linkearlo al agent_id real
+                db_res = self.db.table("identities").select("agent_id").eq("email", recipient).execute()
+                if db_res.data:
+                    agent_id = db_res.data[0]['agent_id']
+
+                self.db.table("inbound_emails").insert({
+                    "agent_id": agent_id,
+                    "sender": sender,
+                    "recipient": recipient,
+                    "subject": subject,
+                    "body_text": body,
+                    "received_at": "now()"
+                }).execute()
+                
+                logger.info(f"📧 [INBOUND] Email guardado para {recipient}: {subject}")
+                return {"status": "SAVED", "agent_id": agent_id}
+            else:
+                 logger.warning("⚠️ DB not connected for inbound email")
+                 return {"status": "ERROR_DB"}
+        except Exception as e:
+            logger.error(f"❌ Error saving inbound email: {e}")
+            return {"status": "ERROR", "message": str(e)}

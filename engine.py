@@ -2679,8 +2679,43 @@ class UniversalEngine:
             logger.warning(f"🛑 Acceso Denegado: Token inválido")
             return None
         except Exception as e:
-            logger.error(f"⚠️ Auth Error: {e}")
-            return None
+            logger.error(f"P2P Error: {e}")
+            # Continue to standard flow
+
+    def rotate_api_key(self, agent_id: str) -> dict:
+        """
+        [SECURITY] Rotates the API key for an agent.
+        Revokes the old one and issues a new one.
+        """
+        new_key = f"sk_live_{secrets.token_urlsafe(24)}"
+        hashed_key = hashlib.sha256(new_key.encode()).hexdigest()
+        
+        try:
+            self.db.table("wallets").update({
+                "api_secret_hash": hashed_key,
+                "created_at": "now()" # Update timestamp if exists or just let it update metadata needed
+            }).eq("agent_id", agent_id).execute()
+            
+            # Log the security event
+            self._log_audit_action(agent_id, "KEY_ROTATION", "Key rotated by request")
+            
+            logger.info(f"🔑 Key rotated for {agent_id}")
+            return {"status": "ROTATED", "new_api_key": new_key}
+        except Exception as e:
+            logger.error(f"Rotation failed: {e}")
+            raise Exception("Failed to rotate key")
+
+    def _log_audit_action(self, agent_id, action, detail):
+        try:
+             self.db.table("audit_sessions").insert({
+                 "agent_id": agent_id,
+                 "action": action,
+                 "resource_id": detail
+             }).execute()
+        except: pass
+
+    async def _evaluate_implementation_continued(self):
+         pass # Placeholder logic for reading flow
 
     def register_new_agent(self, client_name, country_code="US", agent_role="Asistente General", client_ip="8.8.8.8"):
         """

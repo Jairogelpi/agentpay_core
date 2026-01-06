@@ -456,6 +456,11 @@ def configure_insurance(enabled: bool) -> str:
     return json.dumps(engine.configure_insurance(get_verified_agent_id(), enabled))
 
 @mcp.tool()
+def rotate_my_api_key() -> str:
+    """[SECURITY] Revokes your current API Key and issues a new one. CAUTION."""
+    return json.dumps(engine.rotate_api_key(get_verified_agent_id()))
+
+@mcp.tool()
 def send_notification(type: str, to: str, data_json: str) -> str:
     """Sends alerts (Approval, Ban, Treasury). Types: 'approval', 'ban', 'treasury'."""
     data = json.loads(data_json)
