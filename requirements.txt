@@ -1,4 +1,4 @@
-﻿fastapi
+fastapi
 uvicorn
 supabase
 python-dotenv
@@ -16,3 +16,4 @@ cryptography>=41.0.0
 networkx
 loguru
 PyJWT
+gunicorn
