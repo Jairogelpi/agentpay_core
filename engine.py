@@ -39,6 +39,9 @@ load_dotenv()
 # Configuración inicial de Stripe
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
+# ACP Client Import
+from acp_client import ACPClient
+
 class UniversalEngine:
     def __init__(self):
         url = os.environ.get("SUPABASE_URL")
@@ -68,7 +71,10 @@ class UniversalEngine:
         self._lawyer = None
         self._forensic_auditor = None
         self._arbiter = None # Lazy loaded
+        self._arbiter = None # Lazy loaded
         self._ledger = None # Lazy loaded
+        self._acp = None # Lazy loaded
+
         
         self.stream_key = "payment_events"  # Added for Event-Driven Architecture
         
@@ -151,6 +157,42 @@ class UniversalEngine:
             from ledger import LedgerManager
             self._ledger = LedgerManager(self.db)
         return self._ledger
+
+    @property
+    def acp(self):
+        if self._acp is None:
+            self._acp = ACPClient(self.identity_mgr)
+        return self._acp
+
+
+    async def _resolve_vendor_protocol(self, vendor_url):
+        """
+        [ACP] Discovery con Caché Inteligente (Redis).
+        """
+        if not vendor_url: return None
+        
+        domain = self._normalize_domain(vendor_url)
+        cache_key = f"acp:config:{domain}"
+        
+        # 1. Consultar Caché (Velocidad)
+        if self.redis_enabled:
+            cached = self.redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        
+        # 2. Discovery Real (Red)
+        try:
+            config = self.acp.discover(vendor_url)
+            if config:
+                # Cache standard 24h
+                if self.redis_enabled:
+                    self.redis.setex(cache_key, 86400, json.dumps(config))
+                return config
+        except Exception as e:
+            logger.warning(f"ACP Discovery failed for {vendor_url}: {e}")
+            pass
+            
+        return None
 
     async def _save_transaction_memory(self, tx_id, text_content):
         """Genera y guarda el embedding para aprendizaje futuro (RAG)."""
@@ -669,8 +711,110 @@ class UniversalEngine:
              return TransactionResult(authorized=False, status="REJECTED", reason="Bloqueado por Mente Colmena (Global Blacklist)")
 
         # ============================================
-        # 3. MICROPAYMENT STRATEGY (Casino Chips Model)
+        # 3. ACP PROTOCOL CHECK (HYBRID ENGINE)
         # ============================================
+        try:
+            acp_config = await self._resolve_vendor_protocol(request.vendor_url)
+            
+            if acp_config:
+                logger.info(f"🚀 [HYBRID] ACP Protocol Detected (RFC 2025-12). Starting Flow...")
+                
+                # A. NEGOTIATION (Checkout API)
+                # 1. Create Session
+                # Construct line items from request
+                line_items = [{
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": request.description},
+                        "unit_amount": int(request.amount * 100) # Cents
+                    },
+                    "quantity": 1
+                }]
+
+                # Base URL for Checkout API (Vendor base)
+                # Config usually has it or we derive from vendor_url
+                vendor_base_url = f"{urlparse(request.vendor_url).scheme}://{urlparse(request.vendor_url).netloc}"
+                
+                intent_state = self.acp.create_checkout_session(vendor_base_url, request.agent_id, line_items)
+                session_id = intent_state.get('id') or intent_state.get('checkout_session_id')
+                logger.info(f"   📜 Checkout Session: {session_id}")
+                
+                # 2. Deterministic Audit (Trust Authoritative State)
+                # We validate the State returned by the merchant against our policy
+                audit_res = await audit_transaction(
+                    request.vendor, 
+                    request.amount, 
+                    request.description, 
+                    request.agent_id, 
+                    "Generic_Agent", 
+                    structured_data=intent_state
+                )
+                
+                if audit_res['decision'] != "APPROVED":
+                    return TransactionResult(authorized=False, status="REJECTED", reason=f"[ACP Audit] {audit_res.get('reasoning')}")
+
+                # B. TOKENIZATION (Delegate Payment API)
+                # 1. Issue Virtual Card (Internal) to get numbers
+                # We need a PAN to tokenize. We generate a one-time card internally.
+                card = self._issue_virtual_card(request.agent_id, request.amount, request.vendor, "services")
+                
+                if not card:
+                     raise Exception("Failed to issue internal backing card for ACP Tokenization")
+
+                # 2. Call Vault to Tokenize
+                # Vault URL usually in config or well-known. Fallback to vendor base if using direct integration.
+                vault_url = acp_config.get('vault_url', vendor_base_url) 
+                merchant_id = acp_config.get('merchant_id', 'unknown_merchant')
+                
+                payment_token = self.acp.tokenize_payment(
+                    vault_url, 
+                    session_id, 
+                    request.amount, 
+                    merchant_id, 
+                    card, 
+                    request.agent_id
+                )
+                logger.info(f"   🔐 Payment Tokenized: {payment_token[:10]}...")
+
+                # C. EXECUTION (Complete Session)
+                payment_res = self.acp.complete_session(
+                    vendor_base_url,
+                    session_id,
+                    request.agent_id,
+                    payment_token
+                )
+                
+                if payment_res.get('status') == 'complete' or payment_res.get('payment_status') == 'paid':
+                    # Log Transaction
+                    self.db.table("transaction_logs").insert({
+                        "id": str(uuid.uuid4()),
+                        "agent_id": request.agent_id,
+                        "vendor": request.vendor,
+                        "amount": request.amount,
+                        "status": "APPROVED",
+                        "payment_rail": "ACP_RFC_2025",
+                        "acp_intent_object": intent_state,
+                        "created_at": "now()"
+                    }).execute()
+                    
+                    return TransactionResult(
+                        authorized=True,
+                        status="APPROVED",
+                        payment_protocol="ACP_NATIVE",
+                        acp_receipt_data=payment_res,
+                        acp_intent_object=intent_state,
+                        reason="ACP Checkout Successful (RFC 2025 Compliance)"
+                    )
+
+        except Exception as e:
+            logger.error(f"⚠️ ACP Flow Failed (Fallback to Legacy Card): {e}")
+            # Fallback continues below...
+
+
+        # ============================================
+        # 4. MICROPAYMENT STRATEGY (Casino Chips Model)
+        # ============================================
+
         # Para evitar pérdidas por comisiones de tarjeta en pagos pequeños,
         # los micropagos SOLO se procesan si hay saldo en el wallet.
         # NO se emiten tarjetas virtuales Stripe para montos < MICROPAYMENT_THRESHOLD
@@ -695,8 +839,11 @@ class UniversalEngine:
                 logger.error(f"Error verificando wallet: {e}")
                 return TransactionResult(authorized=False, status="ERROR", reason="Error verificando saldo")
 
-        # 4. FUNDS FREEZE (REDIS LUA SCRIPT - Atomic & Optimal)
+                return TransactionResult(authorized=False, status="ERROR", reason="Error verificando saldo")
+
+        # 5. FUNDS FREEZE (REDIS LUA SCRIPT - Atomic & Optimal)
         fee = round(request.amount * 0.015, 2)
+
         total_deducted = request.amount + fee
         new_balance = 0.0
 
@@ -745,8 +892,11 @@ class UniversalEngine:
              # Fallback logic for non-Redis environments (Testing)
              pass 
 
-        # 5. EVENT QUEUEING (Redis Stream)
+             pass 
+
+        # 6. EVENT QUEUEING (Redis Stream)
         tx_id = str(uuid.uuid4())
+
         event_payload = {
             "tx_id": str(tx_id),
             "agent_id": str(request.agent_id),
@@ -781,9 +931,12 @@ class UniversalEngine:
 
             await self._process_async_transaction(request, tx_id, fee, new_balance)
 
-        # 6. RETURN PROCESSING (202 Accepted equivalent)
+            await self._process_async_transaction(request, tx_id, fee, new_balance)
+
+        # 7. RETURN PROCESSING (202 Accepted equivalent)
         return TransactionResult(
             authorized=True,
+
             status="PROCESSING",
             transaction_id=tx_id,
             new_remaining_balance=new_balance,

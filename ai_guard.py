@@ -165,15 +165,52 @@ async def search_memory(db_client, description, vendor):
 # ==========================================
 # CAPA 4: THE ORACLE (MODIFICADA - HIBRIDA)
 # ==========================================
-async def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", osint_report=None, corporate_policies=None, db_client=None, screenshot_base64=None, domain_status=None, trusted_context=None):
+async def audit_transaction(vendor, amount, description, agent_id, agent_role, history=[], justification=None, sensitivity="HIGH", osint_report=None, corporate_policies=None, db_client=None, screenshot_base64=None, domain_status=None, trusted_context=None, structured_data=None):
     """
     Versión HÍBRIDA TIERED: Intenta aprobar rápido con Groq, si no, escala a OpenAI.
+    Si recibe `structured_data` (ACP Intent), aplica lógica determinista (Nivel 0).
     """
     if not AI_ENABLED:
         return {"decision": "FLAGGED", "reasoning": "AI Offline", "risk_score": 50}
 
     # ---------------------------------------------------------
-    # PASO 0: NIVEL 1 - INFERENCIA RÁPIDA (GROQ) [NUEVO]
+    # PASO 0: NIVEL 0 - DETERMINISTA (ACP PROTOCOL) [NUEVO]
+    # ---------------------------------------------------------
+    if structured_data:
+        # El Intent Object viene firmado criptográficamente por el vendedor.
+        # No necesitamos "adivinar" con IA si es un fraude. Son datos duros.
+        logger.info(f"🛡️ [AI GUARD] Auditando datos estructurados ACP: {structured_data.get('intent_id')}")
+        
+        items = structured_data.get('items', [])
+        total_intent_amount = float(structured_data.get('total_amount', 0))
+        
+        # 1. Validar coherencia de monto
+        if abs(total_intent_amount - amount) > 0.05: # Margen pequeño por redondeo
+             return {"decision": "REJECTED", "reasoning": "Amount mismatch between Mandate vs Intent", "risk_score": 100}
+
+        # 2. Validar Categorías Prohibidas (Hardfast Rule)
+        forbidden_categories = ["gambling", "adult", "weapons"]
+        detected_forbidden = [i['name'] for i in items if i.get('category') in forbidden_categories]
+        
+        if detected_forbidden:
+             return {"decision": "REJECTED", "reasoning": f"ACP Detected Forbidden Categories: {detected_forbidden}", "risk_score": 100}
+
+        # 3. Aprobación Determinista
+        # Si el monto es bajo y la categoría es segura (SaaS/Infra), APROBAR.
+        safe_categories = ["compute_infrastructure", "saas_subscription", "developer_tools"]
+        if all(i.get('category') in safe_categories for i in items) and amount < 500:
+             return {
+                "decision": "APPROVED",
+                "reasoning": "ACP Signed Intent verified. Safe Category.",
+                "risk_score": 0,
+                "intent_hash": hashlib.sha256(f"{agent_id}:ACP:{amount}".encode()).hexdigest()
+             }
+
+        # Si no es trivialmente seguro, dejamos que la IA lo revise abajo (tier 1/2) pero con los datos limpios.
+        description = f"[ACP VERIFIED DATA] Items: {json.dumps(items)}"
+
+    # ---------------------------------------------------------
+    # PASO 0.5: NIVEL 1 - INFERENCIA RÁPIDA (GROQ)
     # ---------------------------------------------------------
     # Solo intentamos el "Fast Path" si no es un caso crítico (paranoia alta)
     if sensitivity != "CRITICAL":

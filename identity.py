@@ -343,6 +343,71 @@ class IdentityManager:
             except: return None
         return None
 
+    # --- CRYPTOGRAPHIC SIGNING (ACP PROTOCOL) ---
+    def sign_payload(self, agent_id: str, data_to_sign: str) -> str:
+        """
+        Signs a string using AWS KMS (ECC/RSA Asymmetric Key).
+        Used for HTTP Message Signatures and ACP Mandates.
+        """
+        if not self.kms or not self.signing_key_id:
+            logger.warning("⚠️ KMS Sign Key missing. Returning Mock Signature (UNSAFE FOR PROD).")
+            return f"mock_sig_{abs(hash(data_to_sign))}"
+
+        try:
+            # We sign the raw bytes of the utf-8 string
+            response = self.kms.sign(
+                KeyId=self.signing_key_id,
+                Message=data_to_sign.encode('utf-8'),
+                MessageType='RAW',
+                SigningAlgorithm='ECDSA_SHA_256' # Standard for ACP
+            )
+            
+            # Return base64 encoded signature
+            return base64.b64encode(response['Signature']).decode('utf-8')
+            
+        except Exception as e:
+            logger.error(f"❌ KMS Signing Failed: {e}")
+            raise e
+
+    def get_mandate_hash(self, agent_id: str) -> str:
+        """
+        Returns a stable hash of the agent's identity for the protocol.
+        In a real DID system, this would be the DID Document Hash.
+        """
+        # For our MVP, we hash the agent_id with a salt
+        salt = os.getenv("MANDATE_SALT", "agentpay-v1-static-salt")
+        payload = f"{agent_id}:{salt}"
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    def generate_payment_token(self, agent_id: str, amount: float, merchant_id: str, currency: str = "USD") -> dict:
+        """
+        [DELEGATED PAYMENT SPEC]
+        Generates a SharedPaymentToken (Scoped Access Token) for the merchant.
+        The merchant uses this token to capture funds via Stripe/Processor.
+        """
+        now = int(time.time())
+        token_payload = {
+            "iss": "agentpay.ai",           # Issuer
+            "sub": f"did:agentpay:{agent_id}", # Subject (Buyer)
+            "aud": merchant_id,             # Audience (Merchant)
+            "amount": amount,               # Scoped Amount
+            "currency": currency,
+            "exp": now + 300,               # 5 Minute Expiry
+            "iat": now,
+            "jti": str(uuid.uuid4())        # Unique Token ID
+        }
+        
+        # Serialize and Sign
+        payload_str = json.dumps(token_payload)
+        signature = self.sign_payload(agent_id, payload_str)
+        
+        return {
+            "token_format": "agentpay_v1_cwt",
+            "payload": token_payload,
+            "signature": signature,
+            "public_key_ref": f"did:agentpay:{agent_id}#primary"
+        }
+
     def handle_inbound_email(self, payload):
         """
         [WEBHOOK] Procesa email entrante desde Brevo/SendGrid.

@@ -497,5 +497,28 @@ def send_agent_alert(target_agent_id: str, message: str) -> str:
     """[COMMS] Sends an alert notification to an agent."""
     return json.dumps(engine.send_alert(target_agent_id, message))
 
+# ==========================================
+# 6. AGENTIC COMMERCE (SHOPPER TOOLS)
+# ==========================================
+
+@mcp.tool()
+async def interact_with_merchant_mcp(merchant_url: str, query: str) -> str:
+    """
+    [SHOPPER] Connects to a Merchant's MCP server (Context Intelligence).
+    Use this to ask "Is the H100 in stock?" or "What are the specs?".
+    """
+    from mcp_client import MCPClient
+    client = MCPClient(get_verified_agent_id())
+    # Note: query is just a string, in real MCP we might pass filters
+    response = await client.connect_and_query(merchant_url, query)
+    return json.dumps({"merchant_response": response or "No context available."})
+
+@mcp.tool()
+def inspect_acp_capabilities(vendor_url: str) -> str:
+    """[SHOPPER] Checks if a URL supports Agentic Commerce Protocol."""
+    # We use the engine's acp client
+    return json.dumps(engine.acp.discover(vendor_url) or {"supported": False})
+
+
 if __name__ == "__main__":
     mcp.run()

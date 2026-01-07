@@ -26,10 +26,15 @@ class CardDetails(BaseModel):
 
 class TransactionResult(BaseModel):
     authorized: bool
-    status: Literal["APPROVED", "REJECTED", "PENDING_APPROVAL", "CIRCUIT_OPEN", "PROCESSING"]
+    status: Literal["APPROVED", "REJECTED", "PENDING_APPROVAL", "CIRCUIT_OPEN", "PROCESSING", "REQUIRES_TOPUP", "ALREADY_PAID"]
     transaction_id: Optional[str] = None
     new_remaining_balance: Optional[float] = None
     reason: Optional[str] = None
     approval_link: Optional[str] = None # El Magic Link
     card_details: Optional[CardDetails] = None # Detalles de la tarjeta virtual emitida
     forensic_bundle_url: Optional[str] = None  # Link al certificado de auditoría
+    
+    # --- ACP PROTOCOL FIELDS ---
+    payment_protocol: Literal["LEGACY_CARD", "ACP_NATIVE"] = "LEGACY_CARD"
+    acp_receipt_data: Optional[dict] = None # Receipt firmado por el vendor
+    acp_intent_object: Optional[dict] = None # El objeto de intención negociado
