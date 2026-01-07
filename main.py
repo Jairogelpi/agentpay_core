@@ -285,6 +285,40 @@ async def get_passport(req: dict, agent_id: str = Depends(verify_api_key)):
         raise HTTPException(status_code=403, detail=str(e)) # Retorna error si está revocado
 
 
+# --- STRATEGY 3: W3C REPUTATION PASSPORT (EXPORTABLE) ---
+@app.get("/v1/passport/{agent_id}")
+async def get_reputation_passport(agent_id: str):
+    """
+    [PUBLIC] Returns a W3C Verifiable Credential certifying the agent's reputation.
+    Used by merchants (e.g. AWS, NVIDIA) to trust an autonomous agent.
+    """
+    # 1. Fetch Reputation Data (Credit Bureau)
+    # Note: Public endpoint, creates transparency.
+    # engine.credit_bureau access via engine instance
+    rep_data = engine.credit_bureau.get_public_reputation(agent_id)
+    
+    # 2. Fetch Legal/KYC Level
+    # Implicitly checked via wallet existence, typically we'd look up KYC tier
+    # Simulating Tier 2 for verified agents
+    kyc_level = "Tier 2 (Verified Logic)" if rep_data.get("tier") in ["GOLD", "PLATINUM"] else "Tier 1 (Basic)"
+    
+    credential_subject = {
+        "trustScore": rep_data.get("reputation_score"),
+        "reputationTier": rep_data.get("tier"),
+        "kycLevel": kyc_level,
+        "accreditedInvestor": rep_data.get("reputation_score", 0) > 750
+    }
+    
+    # 3. Issue Signed VC
+    try:
+        vc = identity_mgr.issue_w3c_credential(agent_id, credential_subject)
+        return vc
+    except Exception as e:
+        logger.error(f"Passport Issuance Error: {e}")
+        raise HTTPException(status_code=500, detail="Could not issue passport.")
+
+
+
 if not os.path.exists("invoices"):
     os.makedirs("invoices")
 app.mount("/v1/invoices", StaticFiles(directory="invoices"), name="invoices")

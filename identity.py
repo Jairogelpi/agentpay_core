@@ -401,12 +401,53 @@ class IdentityManager:
         payload_str = json.dumps(token_payload)
         signature = self.sign_payload(agent_id, payload_str)
         
-        return {
-            "token_format": "agentpay_v1_cwt",
-            "payload": token_payload,
-            "signature": signature,
             "public_key_ref": f"did:agentpay:{agent_id}#primary"
         }
+
+    # --- STRATEGY 3: W3C VERIFIABLE CREDENTIALS ---
+
+    def issue_w3c_credential(self, agent_id: str, credential_subject: dict, issuer_name: str = "AgentPay Authority") -> dict:
+        """
+        Emits a W3C Verifiable Credential (VC) certifying the agent's reputation.
+        Unlocks access to high-trust merchant tiers (e.g. AWS, NVIDIA Cloud).
+        """
+        now = datetime.utcnow().isoformat() + "Z"
+        expiry = (datetime.utcnow() + timedelta(days=90)).isoformat() + "Z"
+        
+        vc = {
+            "@context": [
+                "https://www.w3.org/2018/credentials/v1",
+                "https://agentpay.ai/credentials/reputation/v1"
+            ],
+            "type": ["VerifiableCredential", "AgentReputationCredential"],
+            "issuer": {
+                "id": f"did:web:agentpay.ai",
+                "name": issuer_name
+            },
+            "issuanceDate": now,
+            "expirationDate": expiry,
+            "credentialSubject": {
+                "id": f"did:agentpay:{agent_id}",
+                **credential_subject # Trusts Score, Volume, KYC Level
+            },
+            "proof": {
+                "type": "EcdsaSecp256k1Signature2019", # or similar standard
+                "created": now,
+                "proofPurpose": "assertionMethod",
+                "verificationMethod": "did:web:agentpay.ai#key-1"
+            }
+        }
+        
+        # Sign the Canonical JSON of the VC (excluding proof value itself normally, 
+        # but for simplicity we sign the whole object structure minus signature)
+        # Using our KMS signer
+        payload_str = json.dumps(vc, sort_keys=True)
+        signature = self.sign_payload(agent_id, payload_str)
+        
+        vc["proof"]["jws"] = signature # Append signature to proof
+        
+        return vc
+
 
     def handle_inbound_email(self, payload):
         """

@@ -126,12 +126,22 @@ def get_verified_agent_id() -> str:
 # ==========================================
 
 @mcp.tool()
-def pay_vendor(vendor: str, amount: float, description: str, justification: str = None) -> str:
-    """Executes a standard B2B payment. Returns status and receipt."""
+def pay_securely(vendor: str, amount: float, description: str, justification: str = None) -> str:
+    """
+    [CRITICAL] executes a secure B2B payment. 
+    Use this tool for ALL payments. Requires justification for AI Auditor.
+    """
     agent_id = get_verified_agent_id()
     req = TransactionRequest(agent_id=agent_id, vendor=vendor, amount=amount, description=description, justification=justification)
     result = engine.evaluate(req)
     return json.dumps({"success": result.authorized, "status": result.status, "tx_id": result.transaction_id, "reason": result.reason, "receipt": result.forensic_bundle_url})
+
+@mcp.tool()
+def check_balance() -> str:
+    """[CFO] Checks the current wallet balance and burn rate."""
+    status = engine.get_agent_status(get_verified_agent_id())
+    return json.dumps({"balance": status.get('wallet', {}).get('balance', 0.0), "currency": "USD"})
+
 
 @mcp.tool()
 def process_procurement(vendor: str, amount: float, items: list[str], description: str) -> str:
@@ -405,6 +415,24 @@ def verify_passport(passport_json: str) -> str:
 def issue_kyc_passport(owner_name: str) -> str:
     """[KYC] Issues a verifiable Identity Passport for the agent."""
     return json.dumps(legal_wrapper.issue_kyc_passport(get_verified_agent_id(), owner_name))
+
+@mcp.tool()
+def get_my_passport() -> str:
+    """
+    [IDENTITY] Retrieves my own W3C Verifiable Credential (Passport).
+    Use this when a vendor asks for 'Proof of Reputation' or 'Trust Score'.
+    """
+    agent_id = get_verified_agent_id()
+    # 1. Get Score
+    rep_data = engine.credit_bureau.get_public_reputation(agent_id)
+    # 2. Issue VC
+    credential_subject = {
+        "trustScore": rep_data.get("reputation_score"),
+        "reputationTier": rep_data.get("tier"),
+        "kycLevel": "Tier 2 (AI Verified)",
+    }
+    return json.dumps(identity_mgr.issue_w3c_credential(agent_id, credential_subject))
+
 
 @mcp.tool()
 def issue_liability_certificate(email: str, platform_url: str) -> str:
