@@ -520,5 +520,30 @@ def inspect_acp_capabilities(vendor_url: str) -> str:
     return json.dumps(engine.acp.discover(vendor_url) or {"supported": False})
 
 
+def check_production_env():
+    """
+    [PRE-FLIGHT] Verifies critical environment variables for ACP.
+    """
+    required_vars = [
+        "KMS_SIGNING_KEY_ID", 
+        "AWS_REGION", 
+        "STRIPE_SECRET_KEY", 
+        "SUPABASE_URL", 
+        "SUPABASE_KEY"
+    ]
+    
+    missing = [v for v in required_vars if not os.getenv(v)]
+    
+    if missing:
+        logger.error(f"❌ [CRITICAL] Missing Env Vars: {', '.join(missing)}")
+        logger.error("   ACP Signing and Payment flows WILL FAIL.")
+    else:
+        logger.info("✅ Environment Configured (KMS + Stripe + Supabase)")
+
+    # Check Redis Explicitly
+    if not os.getenv("REDIS_URL"):
+         logger.warning("⚠️ REDIS_URL not set. Discovery caching disabled (Slow + Rate Limit Risk).")
+
 if __name__ == "__main__":
+    check_production_env()
     mcp.run()
