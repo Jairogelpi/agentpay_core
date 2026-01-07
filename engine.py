@@ -74,6 +74,8 @@ class UniversalEngine:
         self._arbiter = None # Lazy loaded
         self._ledger = None # Lazy loaded
         self._acp = None # Lazy loaded
+        self._mcp = None # Lazy loaded
+
 
         
         self.stream_key = "payment_events"  # Added for Event-Driven Architecture
@@ -164,8 +166,15 @@ class UniversalEngine:
             self._acp = ACPClient(self.identity_mgr)
         return self._acp
 
+    @property
+    def mcp(self):
+        if self._mcp is None:
+            from mcp_client import MCPClient
+            self._mcp = MCPClient(str(self.acp))
+        return self._mcp
 
     async def _resolve_vendor_protocol(self, vendor_url):
+
         """
         [ACP] Discovery con Caché Inteligente (Redis).
         """
@@ -718,16 +727,20 @@ class UniversalEngine:
             
             if acp_config:
                 logger.info(f"🚀 [HYBRID] ACP Protocol Detected (RFC 2025-12). Starting Flow...")
+
+                # 0. CONTEXT CHECK (MCP)
+                # Check stock/availability to fail fast
+                try:
+                    mcp_context = await self.mcp.connect_and_query(request.vendor_url, f"Is {request.description} in stock?")
+                    if mcp_context and "out of stock" in mcp_context.lower():
+                        return TransactionResult(authorized=False, status="REJECTED", reason="ACP [MCP] Context: Item Out of Stock")
+                except: pass # Optional optimization
                 
                 # A. NEGOTIATION (Checkout API)
                 # 1. Create Session
-                # Construct line items from request
-                line_items = [{
-                    "price_data": {
-                        "currency": "usd",
-                        "product_data": {"name": request.description},
-                        "unit_amount": int(request.amount * 100) # Cents
-                    },
+                # Items for spec (internal dicts)
+                items = [{
+                    "sku": "generic-sku", # In real app, resolved from description
                     "quantity": 1
                 }]
 
@@ -735,12 +748,28 @@ class UniversalEngine:
                 # Config usually has it or we derive from vendor_url
                 vendor_base_url = f"{urlparse(request.vendor_url).scheme}://{urlparse(request.vendor_url).netloc}"
                 
-                intent_state = self.acp.create_checkout_session(vendor_base_url, request.agent_id, line_items)
+                intent_state = self.acp.create_checkout_session(vendor_base_url, request.agent_id, items)
                 session_id = intent_state.get('id') or intent_state.get('checkout_session_id')
                 logger.info(f"   📜 Checkout Session: {session_id}")
                 
+                # 1.5 FULFILLMENT SELECTION (RFC Requirement)
+                # If merchant offers shipping/options, we MUST select one
+                fulfillment_opts = intent_state.get('fulfillment_options', [])
+                if fulfillment_opts:
+                    # Smart Agent: Pick cheapest
+                    cheapest = min(fulfillment_opts, key=lambda x: x.get('amount', 999999))
+                    logger.info(f"   🚚 Selecting Fulfillment: {cheapest.get('id')}")
+                    
+                    intent_state = self.acp.update_session(
+                        vendor_base_url, 
+                        session_id, 
+                        request.agent_id, 
+                        {"fulfillment_option_id": cheapest.get('id')}
+                    )
+
                 # 2. Deterministic Audit (Trust Authoritative State)
                 # We validate the State returned by the merchant against our policy
+
                 audit_res = await audit_transaction(
                     request.vendor, 
                     request.amount, 

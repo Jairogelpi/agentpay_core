@@ -35,13 +35,23 @@ async def test_acp_integration():
     # Step B: Mock Checkout Session (A - Negotiation)
     engine._acp.create_checkout_session.return_value = {
         "id": "cs_test_123",
-        "amount_total": 1000, # Cents
+        "amount_total": 1000, 
         "currency": "usd",
+        "payment_status": "unpaid",
+        "items": [{"id": "srv", "qty": 1}],
+        "fulfillment_options": [{"id": "standard_shipping", "amount": 0}] # TRIGGER UPDATE
+    }
+
+    # Mock Update Session (step 1.5)
+    engine._acp.update_session.return_value = {
+        "id": "cs_test_123",
+        "amount_total": 1000,
         "payment_status": "unpaid",
         "items": [...]
     }
 
     # Step C: Mock Tokenization (B - Delegate Payment)
+
     engine._acp.tokenize_payment.return_value = "vt_test_token_999"
     
     # Step D: Mock Completion (C - Execution)
@@ -83,9 +93,11 @@ async def test_acp_integration():
     # Verify flow calls
     engine._acp.discover.assert_called_once()
     engine._acp.create_checkout_session.assert_called_once()
+    engine._acp.update_session.assert_called_once() # Must be called due to fulfillment opt
     # verify tokenization called with session id linkage
     engine._acp.tokenize_payment.assert_called_once()
     engine._acp.complete_session.assert_called_once()
+
 
 
     

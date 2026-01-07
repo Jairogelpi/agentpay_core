@@ -2,10 +2,13 @@ import os
 import json
 import time
 import base64
+import base64
 import requests
 import uuid
 from urllib.parse import urlparse
+from datetime import datetime, timedelta
 from loguru import logger
+
 
 class ACPClient:
     """
@@ -50,18 +53,25 @@ class ACPClient:
         """
         url = f"{api_base}/checkout_sessions"
         
+        # Spec 2025-12-11: 'items' list of {id, quantity}, and 'buyer' object.
+        # items input assumed to be internal format: [{"sku":..., "quantity":...}]
+        spec_items = [{"id": i["sku"], "quantity": i["quantity"]} for i in items]
+        
         payload = {
             "mode": "payment",
-            "line_items": items, # [{"price_data":..., "quantity":...}] OR [{"sku":..., "quantity":...}] depends on feed
-            "success_url": "https://agentpay.ai/success", # Formalism
-            "cancel_url": "https://agentpay.ai/cancel",
-            "customer_email": f"agent_{agent_id}@agentpay.ai"
+            "items": spec_items, 
+            "buyer": {
+                "email": f"agent_{agent_id}@agentpay.ai",
+                "first_name": "Agent",
+                "last_name": agent_id[:8]
+            }
         }
         
         headers = self._build_headers(agent_id, "POST", url, payload, api_version=self.CHECKOUT_API_VERSION)
         
         resp = self._request("POST", url, payload, headers)
         return resp.json() # Returns 'Authoritative Cart State'
+
 
     def update_session(self, api_base: str, session_id: str, agent_id: str, updates: dict) -> dict:
         """
@@ -104,9 +114,7 @@ class ACPClient:
         POST /agentic_commerce/delegate_payment
         Exchanges Virtual PAN for a scoped 'SharedPaymentToken'.
         """
-        # User note: "POST /agentic_commerce/delegate_payment" usually on vault/processor
-        # If vault_url not provided, assume vendor's relative path (common in direct integrations)
-        url = f"{vault_url}/agentic_commerce/delegate_payment"
+        url = f"{vault_url.rstrip('/')}/agentic_commerce/delegate_payment"
         
         payload = {
             "payment_method": {
@@ -115,14 +123,18 @@ class ACPClient:
                 "exp_month": card_details['exp_month'],
                 "exp_year": card_details['exp_year'],
                 "cvc": card_details['cvc'],
-                "display_card_funding_type": "credit"
+                "display_card_funding_type": "credit",
+                "card_number_type": "fpan", # REQUIRED
+                "virtual": True,            # REQUIRED
+                "metadata": {"source": "agentpay_core"} # REQUIRED
             },
             "allowance": {
                 "reason": "one_time",
-                "max_amount": int(total_amount * 100), # Cents usually
+                "max_amount": int(total_amount * 100), # Cents
                 "currency": "usd",
                 "merchant_id": merchant_id,
-                "checkout_session_id": session_id # CRITICAL LINKAGE
+                "checkout_session_id": session_id,
+                "expires_at": (datetime.utcnow() + timedelta(minutes=15)).isoformat() + "Z" # REQUIRED
             },
             "risk_signals": [{
                 "type": "agent_trust_score",
@@ -138,6 +150,7 @@ class ACPClient:
         
         # Expecting payment_data.token or similar
         return data.get("payment_data", {}).get("token") or data.get("token")
+
 
     # =========================================================
     # INTERNALS
