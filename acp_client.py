@@ -58,7 +58,7 @@ class ACPClient:
         spec_items = [{"id": i["sku"], "quantity": i["quantity"]} for i in items]
         
         payload = {
-            "mode": "payment",
+            # REMOVED "mode": "payment" per strict RFC
             "items": spec_items, 
             "buyer": {
                 "email": f"agent_{agent_id}@agentpay.ai",
@@ -140,7 +140,11 @@ class ACPClient:
                 "type": "agent_trust_score",
                 "score": 99,
                 "source": "agentpay_ai_guard"
-            }]
+            }],
+            "metadata": { # REQUIRED Top-Level Metadata
+                "transaction_source": "agentpay_core_v1",
+                "agent_id": agent_id
+            }
         }
         
         headers = self._build_headers(agent_id, "POST", url, payload, api_version=self.DELEGATE_API_VERSION)
